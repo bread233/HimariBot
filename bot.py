@@ -1,0 +1,77 @@
+import os
+import sys
+import nonebot
+from datetime import datetime
+from nonebot.adapters.onebot.v11 import Adapter as ONEBOT_V11Adapter
+
+from nonebot.adapters.ntchat import Adapter as NTCHATAdapter
+from nonebot.log import logger, default_format
+
+# win 环境下 asyncio.loop 配置
+import asyncio
+
+if (
+    sys.version_info[0] == 3
+    and 10 > sys.version_info[1] >= 8
+    and sys.platform.startswith("win")
+):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+elif (
+    sys.version_info[0] == 3
+    and sys.version_info[1] >= 10
+    and sys.platform.startswith("win")
+):
+    asyncio.set_event_loop(asyncio.ProactorEventLoop())
+
+# Log file path
+bot_log_path = os.path.abspath(os.path.join(sys.path[0], "log"))
+if not os.path.exists(bot_log_path):
+    os.makedirs(bot_log_path)
+
+# Custom logger
+log_info_name = f'{datetime.now().strftime("%Y%m%d-%H%M%S")}-INFO.log'
+log_error_name = f'{datetime.now().strftime("%Y%m%d-%H%M%S")}-ERROR.log'
+log_info_path = os.path.join(bot_log_path, log_info_name)
+log_error_path = os.path.join(bot_log_path, log_error_name)
+
+logger.add(
+    log_info_path,
+    rotation="00:00",
+    diagnose=False,
+    level="INFO",
+    format=default_format,
+    encoding="utf-8",
+)
+logger.add(
+    log_error_path,
+    rotation="00:00",
+    diagnose=False,
+    level="ERROR",
+    format=default_format,
+    encoding="utf-8",
+)
+
+# Add extra debug log file
+# log_debug_name = f'{datetime.today().strftime("%Y%m%d-%H%M%S")}-DEBUG.log'
+# log_debug_path = os.path.join(bot_log_path, log_debug_name)
+# logger.add(log_debug_path, rotation='00:00', diagnose=False, level='DEBUG', format=default_format, encoding='utf-8')
+
+# You can pass some keyword args config to init function
+
+nonebot.init()
+
+driver = nonebot.get_driver()
+driver.register_adapter(ONEBOT_V11Adapter)
+driver.register_adapter(NTCHATAdapter)
+
+nonebot.load_builtin_plugins("echo")
+
+# 先加载gochttp
+nonebot.load_plugins("nonebot-plugin-gocqhttp")
+# 加载插件
+nonebot.load_plugins("src/plugins")
+
+# nonebot.load_from_toml("pyproject.toml")
+
+if __name__ == "__main__":
+    nonebot.run()

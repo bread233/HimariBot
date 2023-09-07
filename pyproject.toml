@@ -1,0 +1,82 @@
+[project]
+name = "HimariBot-test-A01"
+version = "0.1.0"
+description = "HimariBot-test-A01"
+readme = "README.md"
+requires-python = ">=3.8, <4.0"
+
+[tool.nonebot]
+adapters = [
+    { name = "OneBot V11", module_name = "nonebot.adapters.onebot.v11" },
+    { name = "Ntchat", module_name = "nonebot.adapters.ntchat" }
+]
+plugins = ["nonebot_plugin_gocqhttp"]
+plugin_dirs = ["src/plugins"]
+builtin_plugins = ["echo"]
+
+[tool.poetry]
+name = "himaribot-test-a01"
+version = "010"
+description = ""
+authors = ["bread233 <zhangzhenyu353@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+apscheduler = "3.10.1"
+meme-generator = "0.0.7"
+aiohttp = "^3.8.5"
+lxml = "^4.9.3"
+tinydb = "4.7.0"
+pyncm = "1.6.9.1"
+aiofile = "3.8.7"
+qrcode = "7.3.1"
+ujson = "^5.8.0"
+aiofiles = "23.1.0"
+nonebot-plugin-hammer-core = "^0.3.2"
+nonebot-plugin-alconna = "^0.22.2"
+nonebot-plugin-cesaa = "^0.2.1"
+jieba = "^0.42.1"
+emoji = "^2.8.0"
+aiocache = "^0.12.2"
+backports-zoneinfo = "0.2.1"
+colorama = "0.4.6"
+gitdb = "4.0.10"
+gitpython = "3.1.31"
+idna = "3.4"
+loguru = "0.6.0"
+msgspec = "0.15.0"
+multidict = "6.0.4"
+pillow = "9.5.0"
+pydantic = {version = "1.10.7", extras = ["dotenv"]}
+pygtrie = "2.5.0"
+python-dotenv = "1.0.0"
+pytz-deprecation-shim = "0.1.0.post0"
+pytz = "2023.3"
+setuptools = "67.7.2"
+six = "1.16.0"
+smmap = "5.0.0"
+tomli = "2.0.1"
+typing-extensions = "4.5.0"
+tzdata = "2023.3"
+tzlocal = "4.3"
+websockets = "11.0.3"
+win32-setctime = "1.1.0"
+yarl = "1.9.2"
+nonebot-adapter-qqguild = "^0.2.5"
+nonebot-adapter-telegram = "^0.1.0b14"
+nonebot-adapter-kaiheila = "^0.2.12"
+nonebot-adapter-feishu = "^2.0.1"
+poetry = "^1.6.1"
+nonebot-plugin-sendmsg-by-bots = "^0.0.5"
+arknights-toolkit = "^0.5.12"
+pypinyin = "^0.49.0"
+bs4 = "^0.0.1"
+psutil = "^5.9.5"
+chevron = "^0.14.0"
+py-cpuinfo = "^9.0.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
