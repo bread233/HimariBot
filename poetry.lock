@@ -2266,6 +2266,27 @@ nepattern = ">=0.5.13,<0.6.0"
 nonebot2 = ">=2.0.0rc4"
 
 [[package]]
+name = "nonebot-plugin-all4one"
+version = "0.1.0a3"
+description = ""
+optional = false
+python-versions = ">=3.8,<4.0"
+files = [
+    {file = "nonebot-plugin-all4one-0.1.0a3.tar.gz", hash = "sha256:436a05acdd8d9539bbdfcd26c160cadb528396790db259afb9cb8c7e47dba1f8"},
+    {file = "nonebot_plugin_all4one-0.1.0a3-py3-none-any.whl", hash = "sha256:69342d1a51b22188c1d9b28dabf3eebcf2db0adecb4b75027802acc1ebd8bdf0"},
+]
+
+[package.dependencies]
+nonebot-adapter-onebot = ">=2.2.2"
+nonebot-plugin-datastore = ">=0.6.0"
+nonebot2 = ">=2.0.0,<3.0.0"
+
+[package.extras]
+console = ["nonebot-adapter-console (>=0.3.2)"]
+qqguild = ["nonebot-adapter-qqguild (>=0.2.2)"]
+telegram = ["nonebot-adapter-telegram (>=0.1.0b13)"]
+
+[[package]]
 name = "nonebot-plugin-cesaa"
 version = "0.2.1"
 description = "为 chatrecorder 添加 send-anything-anywhere 的 PlatformTarget 支持"
@@ -4139,4 +4160,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "5ea7b1b5c44116dc09f5039c4acaeefca836a39e439c48575b0315ae258a3919"
+content-hash = "a7b14f38d716da8a8993929932536355604a492dd2140f1d84babf8e15b2391c"
