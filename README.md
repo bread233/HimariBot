@@ -1,4 +1,4 @@
-# HimariBot-test-A01
+# HimariBot
 
 ## How to start
 
