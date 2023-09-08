@@ -83,6 +83,9 @@ bilireq = "^0.2.10"
 playwright = "^1.37.0"
 nonebot-plugin-htmlrender = ">=0.0.4"
 nonebot-plugin-picmenu = "^0.2"
+cn2an = "^0.5.22"
+cachetools = "^5.3.1"
+dateparser = "^1.1.8"
 
 
 [build-system]
