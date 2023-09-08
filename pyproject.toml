@@ -81,7 +81,7 @@ nonebot-plugin-gocqhttp = "^0.6.12"
 nonebot-plugin-guild-patch = "^0.2.3"
 bilireq = "^0.2.10"
 playwright = "^1.37.0"
-nonebot-plugin-htmlrender = "^0.2.2"
+nonebot-plugin-htmlrender = ">=0.0.4"
 
 
 [build-system]
