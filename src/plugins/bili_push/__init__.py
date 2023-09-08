@@ -2749,6 +2749,9 @@ def get_draw(data, only_info: bool = False):
                 code = 2
 
     except Exception as e:
+        import traceback
+
+        logger.error(str(traceback.print_exc()))
         logger.error(f"获取消息出错，请讲此消息反馈给开发者。动态id：{dynamicid}")
         message_title = ""
         message_body = ""
@@ -2914,7 +2917,7 @@ async def bili_push_command(bot: Bot, messageevent: MessageEvent):
                     while num > 0:
                         num -= 1
                         if cache_push_style.startswith("[绘图]"):
-                            #换成64发送
+                            # 换成64发送
                             cache_msg = path_to_64img(returnpath)
                             msg += cache_msg
                             cache_push_style = cache_push_style.removeprefix("[绘图]")
@@ -3135,11 +3138,11 @@ async def bili_push_command(bot: Bot, messageevent: MessageEvent):
         msg = MessageSegment.text(message)
         await get_new.finish(msg)
     elif code == 2:
-        #换64发送
+        # 换64发送
         msg = path_to_64img(returnpath)
         await get_new.finish(msg)
     elif code == 3:
-        #换64发送
+        # 换64发送
         msg1 = path_to_64img(returnpath)
         msg2 = MessageSegment.text(message)
         msg = msg1 + msg2
@@ -3691,10 +3694,8 @@ async def run_bili_push():
                                         while num > 0:
                                             num -= 1
                                             if cache_push_style.startswith("[绘图]"):
-                                                #换成64发送
-                                                cache_msg = path_to_64img(
-                                                    returnpath
-                                                )
+                                                # 换成64发送
+                                                cache_msg = path_to_64img(returnpath)
                                                 msg += cache_msg
                                                 cache_push_style = (
                                                     cache_push_style.removeprefix(
