@@ -64,17 +64,13 @@ driver = nonebot.get_driver()
 driver.register_adapter(ONEBOT_V11Adapter)
 driver.register_adapter(NTCHATAdapter)
 
+# 测试用
 nonebot.load_builtin_plugins("echo")
-
-# 先加载gochttp
-nonebot.load_plugins("nonebot-plugin-gocqhttp")
 
 # 加载插件
 nonebot.load_plugins("src/plugins")
 
-nonebot.load_plugins("nonebot-plugin-bili-push")
-
-nonebot.load_from_toml("pyproject.toml")
+# nonebot.load_from_toml("pyproject.toml")
 
 if __name__ == "__main__":
     nonebot.run()

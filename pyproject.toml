@@ -78,6 +78,9 @@ py-cpuinfo = "^9.0.0"
 nonebot-adapter-ntchat = "^0.3.5"
 nonebot-plugin-all4one = "^0.1.0a3"
 nonebot-plugin-gocqhttp = "^0.6.12"
+nonebot-plugin-guild-patch = "^0.2.3"
+bilireq = "^0.2.10"
+playwright = "^1.37.0"
 
 
 [build-system]
