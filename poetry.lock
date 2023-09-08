@@ -1162,6 +1162,20 @@ files = [
 ]
 
 [[package]]
+name = "fuzzywuzzy"
+version = "0.18.0"
+description = "Fuzzy string matching in python"
+optional = false
+python-versions = "*"
+files = [
+    {file = "fuzzywuzzy-0.18.0-py2.py3-none-any.whl", hash = "sha256:928244b28db720d1e0ee7587acf660ea49d7e4c632569cad4f1cd7e68a5f0993"},
+    {file = "fuzzywuzzy-0.18.0.tar.gz", hash = "sha256:45016e92264780e58972dca1b3d939ac864b78437422beecebb3095f8efd00e8"},
+]
+
+[package.extras]
+speedup = ["python-levenshtein (>=0.12)"]
+
+[[package]]
 name = "gitdb"
 version = "4.0.10"
 description = "Git Object Database"
@@ -2540,6 +2554,23 @@ files = [
 [package.dependencies]
 nonebot2 = ">=2.0.0,<3.0.0"
 typing-extensions = ">=4.0.0"
+
+[[package]]
+name = "nonebot-plugin-picmenu"
+version = "0.2"
+description = "A Plugin for Nonebot2 to generate picture menu of Plugins"
+optional = false
+python-versions = "*"
+files = [
+    {file = "nonebot_plugin_PicMenu-0.2.tar.gz", hash = "sha256:9cc5a126ccc0d2cee42759131a7616946af1747c57742ae9d11e1ce09e63ed3e"},
+]
+
+[package.dependencies]
+fuzzywuzzy = "*"
+nonebot-adapter-onebot = "*"
+nonebot2 = "*"
+pillow = "*"
+pydantic = "*"
 
 [[package]]
 name = "nonebot-plugin-send-anything-anywhere"
@@ -4457,4 +4488,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "786eaf3d78417e4d10360213b9a14b20fb9831ab2b82b5768d4467ba2d7a6368"
+content-hash = "370d4c87cfce1bb538a3c2d029f7757847af05b4ad0f137549a1873a7aa728cb"
