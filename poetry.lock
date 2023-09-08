@@ -2343,6 +2343,28 @@ toml = ["rtoml (>=0.9.0)"]
 yaml = ["pyyaml (>=6.0)"]
 
 [[package]]
+name = "nonebot-plugin-gocqhttp"
+version = "0.6.12"
+description = "A plugin to run go-cqhttp directly in NoneBot2, without additional download and installation."
+optional = false
+python-versions = ">=3.8,<4.0"
+files = [
+    {file = "nonebot_plugin_gocqhttp-0.6.12-py3-none-any.whl", hash = "sha256:5d6cde0df6c5f7fd5193c0c00e1dc24e9564462bff052cf460e860ba0410a3c5"},
+    {file = "nonebot_plugin_gocqhttp-0.6.12.tar.gz", hash = "sha256:f7b3435010d4300ef1764a2e2185b1d7e1141af4d545d3439f46e3517fccbaa3"},
+]
+
+[package.dependencies]
+chevron = ">=0.14.0,<0.15.0"
+httpx = ">=0.20.0"
+nonebot-adapter-onebot = ">=2.0.0,<3.0.0"
+nonebot2 = {version = ">=2.0.0,<3.0.0", extras = ["fastapi"]}
+psutil = ">=5.9.0,<6.0.0"
+py-cpuinfo = ">=8,<10"
+
+[package.extras]
+proxy = ["proxy.py (>=2.4.3,<3.0.0)"]
+
+[[package]]
 name = "nonebot-plugin-hammer-core"
 version = "0.3.2"
 description = "core dependency of nonebot-plugin-hammer-xxx"
@@ -4160,4 +4182,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "a7b14f38d716da8a8993929932536355604a492dd2140f1d84babf8e15b2391c"
+content-hash = "69e9ba20b90562e40b527fa566505ccca7ff65f61f725db9c9e1735bc82c7018"
