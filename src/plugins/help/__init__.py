@@ -24,9 +24,9 @@ __usage__ = f"""欢迎使用Himari Help Menu
 
 # New way of self registering (use PluginMetadata)
 __plugin_meta__ = nonebot.plugin.PluginMetadata(
-    name="Nonebot2 Help Menu",
-    description="Nonebot2轻量级帮助插件",
-    usage=f"""欢迎使用Nonebot2 Help Menu
+    name="HimariBot Help Menu",
+    description="HimariBot轻量级帮助插件",
+    usage=f"""欢迎使用HimariBot Help Menu
 本插件提供公共帮助菜单能力
 此Bot配置的命令前缀：{" ".join(list(nonebot.get_driver().config.command_start))}
 
