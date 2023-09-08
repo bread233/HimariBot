@@ -11,7 +11,7 @@ adapters = [
     { name = "Ntchat", module_name = "nonebot.adapters.ntchat" }
 ]
 plugins = ["nonebot_plugin_gocqhttp"]
-plugins = [”nonebot-plugin-bili-push“]
+plugins = ["nonebot-plugin-bili-push"]
 plugin_dirs = ["src/plugins"]
 builtin_plugins = ["echo"]
 
