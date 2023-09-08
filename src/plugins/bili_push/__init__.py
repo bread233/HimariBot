@@ -19,6 +19,7 @@ from io import BytesIO
 import json
 import sqlite3
 import random
+from src.utils import path_to_64img
 
 from src.service.apscheduler import scheduler
 
@@ -2913,7 +2914,8 @@ async def bili_push_command(bot: Bot, messageevent: MessageEvent):
                     while num > 0:
                         num -= 1
                         if cache_push_style.startswith("[绘图]"):
-                            cache_msg = MessageSegment.image(r"file:///" + returnpath)
+                            #换成64发送
+                            cache_msg = path_to_64img(returnpath)
                             msg += cache_msg
                             cache_push_style = cache_push_style.removeprefix("[绘图]")
                         elif cache_push_style.startswith("[标题]"):
@@ -3133,10 +3135,12 @@ async def bili_push_command(bot: Bot, messageevent: MessageEvent):
         msg = MessageSegment.text(message)
         await get_new.finish(msg)
     elif code == 2:
-        msg = MessageSegment.image(r"file:///" + returnpath)
+        #换64发送
+        msg = path_to_64img(returnpath)
         await get_new.finish(msg)
     elif code == 3:
-        msg1 = MessageSegment.image(r"file:///" + returnpath)
+        #换64发送
+        msg1 = path_to_64img(returnpath)
         msg2 = MessageSegment.text(message)
         msg = msg1 + msg2
         await get_new.finish(msg)
@@ -3687,8 +3691,9 @@ async def run_bili_push():
                                         while num > 0:
                                             num -= 1
                                             if cache_push_style.startswith("[绘图]"):
-                                                cache_msg = MessageSegment.image(
-                                                    r"file:///" + returnpath
+                                                #换成64发送
+                                                cache_msg = path_to_64img(
+                                                    returnpath
                                                 )
                                                 msg += cache_msg
                                                 cache_push_style = (
