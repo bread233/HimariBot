@@ -8,7 +8,7 @@ from .message import message_sign
 import random
 import time
 
-command = on_command('/抽签', priority=6)
+command = on_command('抽签', priority=6)
 @command.handle()
 async def lq_():
     await command.send(
