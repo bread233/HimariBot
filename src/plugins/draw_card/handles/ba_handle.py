@@ -67,17 +67,19 @@ class BaHandle(BaseHandle[BaChar]):
         bar = BuildImage(bar_w, bar_h, color="#6495ED")
         bg.paste(img, (sep_w, sep_h), alpha=True)
         bg.paste(bar, (sep_w, img_h - bar_h + sep_h), alpha=True)
-        if (card.star == 1):
+        if card.star == 1:
             star_path = str(self.img_path / "star-1.png")
             star_w = 15
-        elif (card.star == 2):
+        elif card.star == 2:
             star_path = str(self.img_path / "star-2.png")
             star_w = 30
         else:
             star_path = str(self.img_path / "star-3.png")
             star_w = 45
         star = BuildImage(star_w, star_h, background=star_path)
-        bg.paste(star, (img_w // 2 - 15 * (card.star - 1) // 2, img_h - star_h), alpha=True)
+        bg.paste(
+            star, (img_w // 2 - 15 * (card.star - 1) // 2, img_h - star_h), alpha=True
+        )
         text = card.name[:5] + "..." if len(card.name) > 6 else card.name
         font = load_font(fontsize=14)
         text_w, text_h = font.getsize(text)
@@ -99,11 +101,11 @@ class BaHandle(BaseHandle[BaChar]):
             )
             for key, value in self.load_data().items()
         ]
-    
+
     def title2star(self, title: int):
-        if title == 'Star-3.png':
+        if title == "Star-3.png":
             return 3
-        elif title == 'Star-2.png':
+        elif title == "Star-2.png":
             return 2
         else:
             return 1
@@ -119,7 +121,11 @@ class BaHandle(BaseHandle[BaChar]):
             for char in result:
                 try:
                     name = char["Name"]
-                    avatar = "https://github.com/lonqie/SchaleDB/raw/main/images/student/icon/"+char["CollectionTexture"]+".png"
+                    avatar = (
+                        "https://github.com/lonqie/SchaleDB/raw/main/images/student/icon/"
+                        + char["CollectionTexture"]
+                        + ".webp"
+                    )
                     star = char["StarGrade"]
                 except IndexError:
                     continue
@@ -145,5 +151,5 @@ class BaHandle(BaseHandle[BaChar]):
         )
         await self.download_img(
             "https://patchwiki.biligame.com/images/bluearchive/thumb/8/8a/577yv79x1rwxk8efdccpblo0lozl158.png/46px-Star-3.png",
-            "star-3"
+            "star-3",
         )
