@@ -123,7 +123,7 @@ class BaHandle(BaseHandle[BaChar]):
                     name = char["Name"]
                     avatar = (
                         "https://github.com/lonqie/SchaleDB/raw/main/images/student/icon/"
-                        + char["CollectionTexture"]
+                        + str(char["Id"])
                         + ".webp"
                     )
                     star = char["StarGrade"]
