@@ -32,8 +32,6 @@ __usage__ = """每天60秒读懂世界
 /60s|读懂世界+状态：查看60s日历状态
 /60s|读懂世界+禁用：禁用60s日历推送"""
 
-require("nonebot_plugin_apscheduler")
-
 
 subscribe = Path(__file__).parent / "subscribe.json"
 
