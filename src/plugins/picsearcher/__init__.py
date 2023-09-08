@@ -17,6 +17,7 @@ from nonebot.plugin import on_command, on_message
 from nonebot.rule import Rule, to_me
 from nonebot.typing import T_State
 from nonebot.utils import DataclassEncoder
+from nonebot.log import logger
 
 from .animedb import get_des as get_des_anime
 from .ascii2d import get_des as get_des_asc
@@ -126,8 +127,9 @@ async def get_setu(
         else:
             await setu.reject("这不是图,重来!")
     except (IndexError, ClientError):
-        await bot.send(event, traceback.format_exc())
-        await setu.finish("参数错误")
+        # await bot.send(event, traceback.format_exc())
+        logger.error(traceback.format_exc())
+        await setu.finish("搜图失败,参数错误,可以尝试用其他4中方法")
 
 
 pic_map: Dict[str, str] = {}  # 保存这个群的上一张色图 {"123456":"http://xxx"}
@@ -191,7 +193,8 @@ async def handle_previous(bot: Bot, event: GroupMessageEvent):
                 ],
             )
     except (IndexError, ClientError):
-        await bot.send(event, traceback.format_exc())
-        await previous.finish("参数错误")
+        # await bot.send(event, traceback.format_exc())
+        logger.error(traceback.format_exc())
+        await previous.finish("搜图失败,参数错误,可以尝试用其他4中方法")
     except KeyError:
         await previous.finish("没有图啊QAQ")

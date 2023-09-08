@@ -751,6 +751,22 @@ files = [
 colorama = {version = "*", markers = "platform_system == \"Windows\""}
 
 [[package]]
+name = "cloudscraper"
+version = "1.2.71"
+description = "A Python module to bypass Cloudflare's anti-bot page."
+optional = false
+python-versions = "*"
+files = [
+    {file = "cloudscraper-1.2.71-py2.py3-none-any.whl", hash = "sha256:76f50ca529ed2279e220837befdec892626f9511708e200d48d5bb76ded679b0"},
+    {file = "cloudscraper-1.2.71.tar.gz", hash = "sha256:429c6e8aa6916d5bad5c8a5eac50f3ea53c9ac22616f6cb21b18dcc71517d0d3"},
+]
+
+[package.dependencies]
+pyparsing = ">=2.4.7"
+requests = ">=2.9.2"
+requests-toolbelt = ">=0.9.1"
+
+[[package]]
 name = "cn2an"
 version = "0.5.22"
 description = "Convert Chinese numerals and Arabic numerals."
@@ -1037,6 +1053,20 @@ files = [
 test = ["pytest (>=6)"]
 
 [[package]]
+name = "expiringdict"
+version = "1.2.2"
+description = "Dictionary with auto-expiring values for caching purposes"
+optional = false
+python-versions = "*"
+files = [
+    {file = "expiringdict-1.2.2-py3-none-any.whl", hash = "sha256:09a5d20bc361163e6432a874edd3179676e935eb81b925eccef48d409a8a45e8"},
+    {file = "expiringdict-1.2.2.tar.gz", hash = "sha256:300fb92a7e98f15b05cf9a856c1415b3bc4f2e132be07daa326da6414c23ee09"},
+]
+
+[package.extras]
+tests = ["coverage", "coveralls", "dill", "mock", "nose"]
+
+[[package]]
 name = "fastapi"
 version = "0.103.1"
 description = "FastAPI framework, high performance, easy to learn, fast to code, ready for production"
@@ -1055,6 +1085,20 @@ typing-extensions = ">=4.5.0"
 
 [package.extras]
 all = ["email-validator (>=2.0.0)", "httpx (>=0.23.0)", "itsdangerous (>=1.1.0)", "jinja2 (>=2.11.2)", "orjson (>=3.2.1)", "pydantic-extra-types (>=2.0.0)", "pydantic-settings (>=2.0.0)", "python-multipart (>=0.0.5)", "pyyaml (>=5.3.1)", "ujson (>=4.0.1,!=4.0.2,!=4.1.0,!=4.2.0,!=4.3.0,!=5.0.0,!=5.1.0)", "uvicorn[standard] (>=0.12.0)"]
+
+[[package]]
+name = "feedparser"
+version = "6.0.10"
+description = "Universal feed parser, handles RSS 0.9x, RSS 1.0, RSS 2.0, CDF, Atom 0.3, and Atom 1.0 feeds"
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "feedparser-6.0.10-py3-none-any.whl", hash = "sha256:79c257d526d13b944e965f6095700587f27388e50ea16fd245babe4dfae7024f"},
+    {file = "feedparser-6.0.10.tar.gz", hash = "sha256:27da485f4637ce7163cdeab13a80312b93b7d0c1b775bef4a47629a3110bca51"},
+]
+
+[package.dependencies]
+sgmllib3k = "*"
 
 [[package]]
 name = "filelock"
@@ -2773,6 +2817,19 @@ files = [
 ]
 
 [[package]]
+name = "pbot"
+version = "1.4.0"
+description = "An simple site crawler with proxy support"
+optional = false
+python-versions = "*"
+files = [
+    {file = "pbot-1.4.0.tar.gz", hash = "sha256:84c182f459a81a4e0967c4e9034a5fda694d875daa98c063ac6443e72e838daf"},
+]
+
+[package.dependencies]
+lxml = "*"
+
+[[package]]
 name = "pexpect"
 version = "4.8.0"
 description = "Pexpect allows easy control of interactive console applications."
@@ -2883,6 +2940,26 @@ files = [
 [package.extras]
 docs = ["furo", "olefile", "sphinx (>=2.4)", "sphinx-copybutton", "sphinx-inline-tabs", "sphinx-removed-in", "sphinxext-opengraph"]
 tests = ["check-manifest", "coverage", "defusedxml", "markdown2", "olefile", "packaging", "pyroma", "pytest", "pytest-cov", "pytest-timeout"]
+
+[[package]]
+name = "pixivpy3"
+version = "3.7.2"
+description = "Pixiv API for Python (with 6.x AppAPI supported)"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "PixivPy3-3.7.2-py3-none-any.whl", hash = "sha256:a41123790a380544e64892f1168d9b0f0d188d1b980784e66f9e0df431d7fad0"},
+    {file = "PixivPy3-3.7.2.tar.gz", hash = "sha256:2091d247bbb4f0b53a22520e63180c0385f5f30625b5dd57c09e5b89e165594a"},
+]
+
+[package.dependencies]
+cloudscraper = ">=1.2.58"
+requests = ">=2.27.1"
+requests-toolbelt = ">=0.9.1"
+typing-extensions = ">=4.1.1"
+
+[package.extras]
+dev = ["black[jupyter] (>=22.1.0)", "flake8 (>=4.0.1)", "flake8-black (>=0.3.0)", "isort (>=5.10.1)", "mypy (>=0.931)", "pre-commit (>=2.18.1)", "setuptools (>=60.9.3)", "types-requests (>=2.27.10)"]
 
 [[package]]
 name = "pkginfo"
@@ -3875,6 +3952,16 @@ testing = ["build[virtualenv]", "filelock (>=3.4.0)", "flake8 (<5)", "flake8-202
 testing-integration = ["build[virtualenv]", "filelock (>=3.4.0)", "jaraco.envs (>=2.2)", "jaraco.path (>=3.2.0)", "pytest", "pytest-enabler", "pytest-xdist", "tomli", "virtualenv (>=13.0.0)", "wheel"]
 
 [[package]]
+name = "sgmllib3k"
+version = "1.0.0"
+description = "Py3k port of sgmllib."
+optional = false
+python-versions = "*"
+files = [
+    {file = "sgmllib3k-1.0.0.tar.gz", hash = "sha256:7868fb1c8bfa764c1ac563d3cf369c381d1325d36124933a726f29fcdaa812e9"},
+]
+
+[[package]]
 name = "shellingham"
 version = "1.5.3"
 description = "Tool to Detect Surrounding Shell"
@@ -4711,4 +4798,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "6ce8e1e349d2be76def455f44b9418894cf864fb8a2a69315ce99f69db03e82f"
+content-hash = "a0c007b7a2b04a856b6671732d16a60c244a9f6420426444dc88f966772f16f8"
