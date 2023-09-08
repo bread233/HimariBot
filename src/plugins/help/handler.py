@@ -27,7 +27,7 @@ async def handle_first_receive(event: Event, matcher: Matcher, args: Message = C
     if args:
         matcher.set_arg("content", args)
     else:
-        result = f'''欢迎使用Nonebot2 Help Menu
+        result = f'''欢迎使用HimariBot Help Menu
 支持使用的前缀：{" ".join(list(nonebot.get_driver().config.command_start))}
 {default_start}help  # 获取本插件帮助
 {default_start}help list  # 展示已加载插件列表
