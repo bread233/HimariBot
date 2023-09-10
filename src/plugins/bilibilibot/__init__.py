@@ -471,8 +471,11 @@ helpCommand = on_command("bilihelp", permission=ALL_PERMISSION, aliases={"B站�
 async def sendHelpMsg(event: MessageEvent):
     await create_user(event)
     helpMsg = ""
-    with open(f"{PACKAGEPATH}/file/source/help.json", "r", encoding="utf-8") as f:
-        helpMsg = json.load(f)
+    try:
+        with open(f"{PACKAGEPATH}/file/source/help.json", "r", encoding="utf-8") as f:
+            helpMsg = json.load(f)
+    except:
+        helpMsg = "命令列表:\n\n获取帮助\n> /bilihelp\n> /帮助\n\n关注主播\n> /关注主播 uid\n> 从B站app转发直播间(群不适用)\n\n取关主播\n> /切割主播 uid \n> /取关主播 uid\n\n关注up主\n> /关注up\n> 从B站app转发个人空间(群不适用)\n\n取关up主\n> /取关up主 uid\n\n关注番剧\n> /关注番剧 ep_id或season_id或media_id\n(番剧相关页面,url中以ep,ss,md开头的字符串)\n> 从B站app转发播放页面(推荐)(群不适用)\n\n\n取关番剧\n> /取关番剧 seasonid\n(seasonid: 与epid不同，请通过/查询关注 命令查看番剧的seasonid)\n\n查询关注\n> /查询关注\n> /查询成分\n\nAbout\n> 项目主页: https://github.com/TDK1969/nonebot_plugin_bilibilibot\n> 邮箱: tdk1969@foxmail.com\n> 出现问题请在github开issue或联系邮箱"
     await helpCommand.finish(helpMsg)
 
 
