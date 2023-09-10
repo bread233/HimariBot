@@ -4,6 +4,7 @@ from aiohttp import ClientSession
 from nonebot import on_regex, logger
 from nonebot.adapters import Event
 from nonebot.rule import Rule
+from nonebot.adapters.onebot.v11.bot import Bot
 from .analysis_bilibili import config, b23_extract, bili_keyword, search_bili_by_title
 
 headers = {
@@ -105,14 +106,28 @@ async def get_msg(event: Event, text: str, search: bool = False) -> List[str]:
 
 
 @analysis_bili.handle()
-async def handle_analysis(event: Event) -> None:
+async def handle_analysis(bot: Bot, event: Event) -> None:
+    uid = event.get_user_id
+    seif_uid = bot.self_id
+    uid = str(uid).split("user_id=")
+    uid = uid[1].split(",")
+    uid = uid[0]
+    if int(str(uid)) == int(str(seif_uid)):
+        return
     text = str(event.message).strip()
     msg = await get_msg(event, text)
     await send_msg(msg)
 
 
 @search_bili.handle()
-async def handle_search(event: Event) -> None:
+async def handle_search(bot: Bot, event: Event) -> None:
+    uid = event.get_user_id
+    seif_uid = bot.self_id
+    uid = str(uid).split("user_id=")
+    uid = uid[1].split(",")
+    uid = uid[0]
+    if int(str(uid)) == int(str(seif_uid)):
+        return
     text = str(event.message)[3:].strip()
     msg = await get_msg(event, text, search=True)
     await send_msg(msg)

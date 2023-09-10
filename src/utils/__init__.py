@@ -4,6 +4,7 @@ from io import BytesIO
 import base64
 import requests
 from nonebot.adapters.onebot.v11 import MessageSegment
+from sql import *
 
 
 def pic2b64(pic: Image) -> str:

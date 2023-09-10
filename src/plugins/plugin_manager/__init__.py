@@ -6,6 +6,7 @@ from nonebot.message import run_preprocessor
 from nonebot.exception import IgnoredException
 from nonebot.plugin import PluginMetadata, on_shell_command, get_loaded_plugins
 from nonebot.adapters.onebot.v11 import Bot, Event, MessageEvent, GroupMessageEvent
+from nonebot.log import logger
 
 from .handle import Handle
 from .parser import npm_parser
@@ -70,7 +71,11 @@ async def _(bot: Bot, event: MessageEvent, args: Namespace = ShellCommandArgs())
     args.is_superuser = str(event.user_id) in bot.config.superusers
 
     if hasattr(args, "handle"):
-        message = getattr(Handle, args.handle)(args)
+        try:
+            message = getattr(Handle, args.handle)(args)
+        except:
+            logger.error("npm后面一定要跟参数啊")
+            await bot.finish(event, "npm后面给参数啊 例如ls,chmod,block,unblock")
         if message is not None:
             message = message.split("\n")
             if len(message) > 15:
