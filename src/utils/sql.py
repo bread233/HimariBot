@@ -79,6 +79,7 @@ SQL:{sql}"""
         sql.append(keys)
         sql.append(values)
         sql = "\n".join(sql)
+        sql = sql.replace("'None'", "null").replace("None", "null")
         try:
             c.execute(sql)
             self.conn.commit()
@@ -88,6 +89,7 @@ SQL:{sql}"""
             )
         except Exception as e:
             logger.error(f"插入数据出错: {e}")
+            logger.error(f"SQL:{sql}")
 
     # 删除数据
     # 需要传入字典形式参数
@@ -111,6 +113,7 @@ SQL:{sql}"""
                 return
             except Exception as e:
                 logger.error(f"删除数据出错: {e}")
+                logger.error(f"SQL:{sql}")
                 return
         sql = []
         where = []
@@ -120,6 +123,7 @@ SQL:{sql}"""
         where = " AND ".join(where)
         sql.append(where)
         sql = "\n".join(sql) + ";"
+        sql = sql.replace("'None'", "null").replace("None", "null")
         try:
             c.execute(sql)
             self.conn.commit()
@@ -129,6 +133,7 @@ SQL:{sql}"""
             )
         except Exception as e:
             logger.error(f"删除数据出错: {e}")
+            logger.error(f"SQL:{sql}")
 
     # 修改数据
     # 需要传入字典形式参数
@@ -163,6 +168,7 @@ SQL:{sql}"""
         where = " AND ".join(where)
         sql.append(where)
         sql = "\n".join(sql) + ";"
+        sql = sql.replace("'None'", "null").replace("None", "null")
         try:
             c.execute(sql)
             self.conn.commit()
@@ -172,6 +178,7 @@ SQL:{sql}"""
             )
         except Exception as e:
             logger.error(f"修改数据出错: {e}")
+            logger.error(f"SQL:{sql}")
 
     # 查询数据
     # 需要传入字典形式参数
@@ -207,6 +214,7 @@ result {result}"""
             where = " AND ".join(where)
             sql.append(where)
             sql = "\n".join(sql) + ";"
+            sql = sql.replace("'None'", "null").replace("None", "null")
             try:
                 result = c.execute(sql).fetchall()
                 logger.info(
@@ -217,6 +225,7 @@ result {result}"""
                 return result
             except Exception as e:
                 logger.error(f"查询数据出错: {e}")
+                logger.error(f"SQL:{sql}")
                 return None
         elif COLUMS_SELECT is not None and COLUMS_WHERE is None:
             sql = []
@@ -228,6 +237,7 @@ result {result}"""
             sql.append(select)
             sql.append(f" FROM {TBL};")
             sql = "\n".join(sql)
+            sql = sql.replace("'None'", "null").replace("None", "null")
             try:
                 result = c.execute(sql).fetchall()
                 logger.info(
@@ -238,6 +248,7 @@ result {result}"""
                 return result
             except Exception as e:
                 logger.error(f"查询数据出错: {e}")
+                logger.error(f"SQL:{sql}")
                 return None
         elif COLUMS_SELECT is not None and COLUMS_WHERE is not None:
             sql = []
@@ -254,6 +265,7 @@ result {result}"""
             where = " AND ".join(where)
             sql.append(where)
             sql = "\n".join(sql) + ";"
+            sql = sql.replace("'None'", "null").replace("None", "null")
             try:
                 result = c.execute(sql).fetchall()
                 logger.info(
@@ -264,6 +276,7 @@ result {result}"""
                 return result
             except Exception as e:
                 logger.error(f"查询数据出错: {e}")
+                logger.error(f"SQL:{sql}")
                 return None
         else:
             logger.error(f"查询数据出错异常,可能是给的数据有问题哦,请查看数据")
