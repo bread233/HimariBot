@@ -90,6 +90,8 @@ expiringdict = "^1.2.2"
 feedparser = "^6.0.10"
 pbot = "^1.4.0"
 pixivpy3 = "^3.7.2"
+sqlalchemy = "^2.0.0"
+pythonnet = "3.0.0"
 
 
 [build-system]
