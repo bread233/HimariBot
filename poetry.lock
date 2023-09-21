@@ -1595,6 +1595,25 @@ files = [
 ]
 
 [[package]]
+name = "imagetext-py"
+version = "2.1.3"
+description = "Python bindings for imagetext"
+optional = false
+python-versions = ">=3.9"
+files = [
+    {file = "imagetext_py-2.1.3-cp310-cp310-macosx_10_9_x86_64.macosx_11_0_arm64.macosx_10_9_universal2.whl", hash = "sha256:ce9d72186577b50f9667e6f54f0d0e4494520b253aeaa8c00550974e119595a1"},
+    {file = "imagetext_py-2.1.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:735aececd1a50744187c21b460a60ab2138f7a8733fdd587d8591182c28edb43"},
+    {file = "imagetext_py-2.1.3-cp310-none-win_amd64.whl", hash = "sha256:939e73290ae7fa9c31dcf0f3ecbd214a0605c129fb7a6243fe81fcfe4577b169"},
+    {file = "imagetext_py-2.1.3-cp311-cp311-macosx_10_9_x86_64.macosx_11_0_arm64.macosx_10_9_universal2.whl", hash = "sha256:92215b5283bc903e1d017f4e8a495bde817836ca2eaa33de12bb25e81380623b"},
+    {file = "imagetext_py-2.1.3-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:adc3e2d7b3d84df0c7fae2eecd2a620da2d8a0ec4e33c33ce5640ca376465339"},
+    {file = "imagetext_py-2.1.3-cp311-none-win_amd64.whl", hash = "sha256:1cc97a0e036a1b8cf207bf04fc16e98e068d0db8504e0a205f39fbcbce2431aa"},
+    {file = "imagetext_py-2.1.3-cp39-cp39-macosx_10_9_x86_64.macosx_11_0_arm64.macosx_10_9_universal2.whl", hash = "sha256:0bf725218192eb9f8453523af67bbac8a80d1e69397eab3cb659240f1bf2930b"},
+    {file = "imagetext_py-2.1.3-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:09913bcefecc0f95f25805464648acff7fa45b085c9887ccd1ca9cd618f51fbf"},
+    {file = "imagetext_py-2.1.3-cp39-none-win_amd64.whl", hash = "sha256:ade21e72645de7ab09d98a6408d8e963fe4954df7ec38ff11bb18a993e8a5492"},
+    {file = "imagetext_py-2.1.3-pp39-pypy39_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:542f3a9f053a18ebcc64847ddb070f6733dcac19884004da07b2888650190dee"},
+]
+
+[[package]]
 name = "importlib-metadata"
 version = "6.8.0"
 description = "Read metadata from Python packages"
@@ -4826,4 +4845,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "3dac7b3b8f07b60ca4a0a8cd7564fa10ac86dbb410e419db3cb5535477f28954"
+content-hash = "5f4cc75eacdf3fe7f0d7b99ae44640ae76775ffe9637c2e52bd99d3e9000775d"
