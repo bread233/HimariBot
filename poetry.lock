@@ -2485,6 +2485,25 @@ nonebot2 = ">=2.0.0-beta.1,<3.0.0"
 pydantic = ">=1.9.0,<2.0.0"
 
 [[package]]
+name = "nonebot-adapter-red"
+version = "0.6.0"
+description = "Red Protocol Adapter for Nonebot2"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "nonebot_adapter_red-0.6.0-py3-none-any.whl", hash = "sha256:a29ca5d7f2d011e0b8a926e1f73e1929db88dfd9b702d37b1e420b36de296a33"},
+    {file = "nonebot_adapter_red-0.6.0.tar.gz", hash = "sha256:0bf6f2404d29bfa2465a2cd6141407f16f9b7e01ab46444313681f13257e1ef6"},
+]
+
+[package.dependencies]
+nonebot2 = ">=2.0.1"
+packaging = ">=23.1"
+PyYAML = {version = "*", optional = true, markers = "extra == \"auto-detect\""}
+
+[package.extras]
+auto-detect = ["PyYAML"]
+
+[[package]]
 name = "nonebot-adapter-telegram"
 version = "0.1.0b14"
 description = "Telegram Adapter for NoneBot2"
@@ -4845,4 +4864,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "fd8fa4198512a9b6129afb65123b8478fa3246cf0c2290ec29fbd916da4a72e6"
+content-hash = "fa225037b30d9726ff7538e209ccacd618a6f5eaa29e556e62a9c83b0354c2b6"
