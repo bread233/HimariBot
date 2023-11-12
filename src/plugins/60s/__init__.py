@@ -95,7 +95,7 @@ async def get_calendar_url(cookie: str, token: str) -> str:
 
 async def get_calendar() -> bytes:
     async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
-        response = await client.get("https://api.03c3.cn/zb")
+        response = await client.get("https://api.03c3.cn/api/zb")
         if response.is_error:
             raise ValueError(f"60s日历获取失败，错误码：{response.status_code}")
         return response.content
