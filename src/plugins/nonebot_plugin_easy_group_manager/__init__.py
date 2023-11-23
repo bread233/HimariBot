@@ -17,7 +17,8 @@ except:
 # from typing import Optional
 from nonebot import get_driver
 from pydantic import BaseModel, Extra
-from typing import Union, Optional
+from typing import Union
+
 
 class Config(BaseModel, extra=Extra.ignore):
     tenid: str = 'xxxxxx'  # 腾讯云图片安全，开通地址： https://console.cloud.tencent.com/cms
@@ -268,7 +269,7 @@ async def _(bot: Bot, matcher: Matcher, event: GroupMessageEvent):
     """
     # msg = str(event.get_message())
     msg = MsgText(event.json())
-    s_title = msg.replace(' ', '').replace('申请头衔', '', 1)
+    s_title = msg.replace(' ', '').replace('头衔', '', 1)
     sb = At(event.json())
     gid = event.group_id
     uid = event.user_id

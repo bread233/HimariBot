@@ -14,6 +14,8 @@ async def download_url(url: str) -> bytes:
     async with httpx.AsyncClient() as client:
         for i in range(3):
             try:
+                if "https://ghproxy.com/" in url:
+                    url = url.replace("https://ghproxy.com/","")
                 resp = await client.get(url, timeout=20)
                 resp.raise_for_status()
                 return resp.content
