@@ -1,5 +1,5 @@
 [project]
-name = "HimariBot-test-A01"
+name = "himaribot-test-a01"
 version = "0.1.0"
 description = "HimariBot-test-A01"
 readme = "README.md"
@@ -100,6 +100,8 @@ nonebot-adapter-red = {extras = ["auto-detect"], version = "^0.6.0"}
 wget = "^3.2"
 wcwidth = "^0.2.12"
 union = "^0.1.10"
+nonebot-plugin-session = "<0.2.0"
+fleep = "^1.0.1"
 
 
 [build-system]

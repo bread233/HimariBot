@@ -1145,6 +1145,16 @@ files = [
 ]
 
 [[package]]
+name = "fleep"
+version = "1.0.1"
+description = "File format determination library"
+optional = false
+python-versions = ">=3.1"
+files = [
+    {file = "fleep-1.0.1.tar.gz", hash = "sha256:c8f62b258ee5364d7f6c1ed1f3f278e99020fc3f0a60a24ad1e10846e31d104c"},
+]
+
+[[package]]
 name = "fonttools"
 version = "4.42.1"
 description = "Tools to manipulate font files"
@@ -4915,4 +4925,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "d1aeebac7b03de2cd51fe1c4eca23d06bc8c141eb05463ce929f08960db20d2b"
+content-hash = "f3dcdc3b89421c961d62bdf4a9263e313d5f6464774e2b4d9fa49086f5aa8d7a"
