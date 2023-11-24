@@ -269,7 +269,7 @@ async def _(bot: Bot, matcher: Matcher, event: GroupMessageEvent):
     """
     # msg = str(event.get_message())
     msg = MsgText(event.json())
-    s_title = msg.replace(' ', '').replace('头衔', '', 1)
+    s_title = msg.replace(' ', '').replace('申请头衔', '', 1)
     sb = At(event.json())
     gid = event.group_id
     uid = event.user_id
