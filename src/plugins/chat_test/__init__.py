@@ -4,6 +4,7 @@ from nonebot import on_command
 from nonebot.plugin import PluginMetadata
 from nonebot.adapters.onebot.v11 import Message
 from nonebot.params import CommandArg
+from nonebot.rule import to_me
 
 Bot_NICKNAME = set(nonebot.get_driver().config.nickname)
 
@@ -23,11 +24,15 @@ __plugin_meta__ = PluginMetadata(
     },
 )
 
-chat_matcher = on_command("hmr", aliases=Bot_NICKNAME)
+chat_matcher = on_command("在?", aliases={'zai?','在吗?','在吗？','在？','zaima?'}, rule=to_me())
 
 @chat_matcher.handle()
 async def chat(args: Message = CommandArg()):
-    if "在" not in args.extract_plain_text():
-        await chat_matcher.finish(f"有什么事啊？")
-    else:
-        await chat_matcher.finish(f"error!出问题了！")
+    await chat_matcher.finish(f"error!出问题了！")
+
+chat_matcher1 = on_command("hmr", aliases=Bot_NICKNAME)
+
+@chat_matcher1.handle()
+async def chat1(args: Message = CommandArg()):
+    if next(x for x in {'在?','zai?','在吗?','在吗？','在？','zaima?'} if x in args.extract_plain_text()):
+        await chat_matcher1.finish(f"error!出问题了！")

@@ -14,6 +14,7 @@ from nonebot.permission import SUPERUSER
 from nonebot.internal.adapter import Event
 from websockets.exceptions import ConnectionClosed
 from nonebot import require, on_notice, on_message, on_fullmatch
+from nonebot.rule import to_me
 
 # require('nonebot_plugin_apscheduler')
 
@@ -23,7 +24,7 @@ from .client import GsClient, driver  # noqa:E402
 from .auto_install import start, install  # noqa:E402
 from .models import Message, MessageReceive  # noqa:E402
 
-get_message = on_message(priority=999)
+get_message = on_message(priority=999, rule=to_me())
 get_notice = on_notice(priority=999)
 install_core = on_fullmatch("gs一键安装", permission=SUPERUSER, block=True)
 start_core = on_fullmatch("启动core", permission=SUPERUSER, block=True)
