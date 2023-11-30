@@ -5,7 +5,7 @@ import sqlite3
 import os
 from nonebot.log import logger
 
-data_path = os.path.join(os.path.abspath(__file__), "../../../data/db")
+data_path = os.path.join(os.path.dirname(__file__), "../../../data/db")
 
 
 class DBManage:
