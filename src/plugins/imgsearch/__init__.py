@@ -1,7 +1,7 @@
 import traceback
 from nonebot import on_command
 from nonebot.adapters import Bot, Event
-from nonebot.adapters.onebot.v11 import MessageSegment
+from nonebot.adapters.onebot.v11 import MessageSegment,Bot,MessageSegment, GroupMessageEvent
 from nonebot.log import logger
 from nonebot.typing import T_State
 
@@ -30,6 +30,7 @@ async def search(bot: Bot, event: Event, state: T_State):
                 logger.info(f"imgsearch: search -> \"{image}\"")
 
                 logger.info(f"SauceNAO: searching...")
+                await bot.send(event, "SauceNAO: searching...")
                 res_sauce = await saucenao.search(image)
                 if res_sauce.status_code//100 == 2:
                     logger.info(f"SauceNAO: hit on {res_sauce.content['rate']}")
@@ -42,6 +43,7 @@ async def search(bot: Bot, event: Event, state: T_State):
                 elif res_sauce.status_code//100 == 3:
                     logger.info("SauceNAO: not found")
                     logger.info(f"Ascii2D: searching...")
+                    await bot.send(event, "SauceNAO: not found\nAscii2D: searching...")
                     res_ascii = await ascii2d.search(image)
                     if res_ascii.status_code//100 == 2:
                         message = MessageSegment.reply(event.message_id)+MessageSegment.text(
@@ -54,8 +56,29 @@ async def search(bot: Bot, event: Event, state: T_State):
                         message_2 = MessageSegment.reply(event.message_id)+MessageSegment.text("\n".join(f"{k}: {v}"for k, v in res_ascii.content[2].items())) +\
                             MessageSegment.image(res_ascii.content[3])
                         logger.info(f"Ascii2D: sending possible results...")
-                        await bot.send(event, message_1)
-                        await bot.send(event, message_2)
+                        nodes = []
+                        nodes.append({
+                             "type": "node",
+                             "data": {
+                                "name": "搜图",
+                                "uin": event.self_id,
+                                "content": MessageSegment.text("\n".join(f"{k}: {v}"for k, v in res_ascii.content[0].items())) + MessageSegment.image(res_ascii.content[1])
+                                }
+                        })
+                        nodes.append({
+                             "type": "node",
+                             "data": {
+                                "name": "搜图",
+                                "uin": event.self_id,
+                                "content": MessageSegment.text("\n".join(f"{k}: {v}"for k, v in res_ascii.content[2].items())) + MessageSegment.image(res_ascii.content[3])
+                                }
+                        })
+                        if isinstance(event, GroupMessageEvent):
+                            # 群组聊天中使用合并转发
+                            await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)
+                        else:
+                            await bot.send(event, message_1)
+                            await bot.send(event, message_2)
                     elif res_ascii.status_code//100 == 4:
                         logger.info(f"Ascii2D: {res_ascii.message}")
 
