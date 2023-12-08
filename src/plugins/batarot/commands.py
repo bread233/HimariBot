@@ -24,13 +24,19 @@ async def handle_tarot_spread(bot: Bot, event: MessageEvent):
     
     selected_cards = random.sample(list(cards_dict.keys()), spread_info["cards_num"])
     nodes = []  
-
+    gid = str(event.group_id)
+    uid = str(event.user_id)
+    try:
+        member_info = await bot.get_group_member_info(group_id=gid, user_id=uid)
+        user_name = member_info.get("nickname")
+    except:
+        user_name = uid
     nodes.append({
         "type": "node",
         "data": {
             "name": "塔罗占卜",
             "uin": event.self_id,
-            "content": f"老师，你抽到的牌阵是：{chosen_spread}\n"
+            "content": f"{user_name}老师，你抽到的牌阵是：{chosen_spread}\n"
         }
     })
 
