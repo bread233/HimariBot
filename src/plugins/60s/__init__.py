@@ -4,6 +4,7 @@ import aiohttp
 import json
 import re
 import nonebot
+import datetime
 from pathlib import Path
 
 import httpx
@@ -15,7 +16,10 @@ from nonebot.params import Arg, CommandArg
 from nonebot.typing import T_State
 
 from .config import Config
-
+from PIL import Image
+from io import BytesIO
+import base64
+import traceback
 
 try:
     import ujson as json
@@ -53,52 +57,84 @@ driver = get_driver()
 
 
 async def get_calendar_url(cookie: str, token: str) -> str:
-    async with aiohttp.ClientSession() as session:
-        headers = {
-            "Cookie": cookie,
-            "User-Agent": "Mozilla/5.0 (Linux; Android 10; YAL-AL00 Build/HUAWEIYAL-AL00) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/70.0.3538.64 HuaweiBrowser/10.0.1.335 Mobile Safari/537.36",
-        }
+    try:
+        async with aiohttp.ClientSession() as session:
+            headers = {
+                "Cookie": cookie,
+                "User-Agent": "Mozilla/5.0 (Linux; Android 10; YAL-AL00 Build/HUAWEIYAL-AL00) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/70.0.3538.64 HuaweiBrowser/10.0.1.335 Mobile Safari/537.36",
+            }
 
-        ID = "每日60s简报"  # 公众号的名字
-        search_url = f"https://mp.weixin.qq.com/cgi-bin/searchbiz?action=search_biz&begin=0&count=5&query={ID}&token={token}&lang=zh_CN&f=json&ajax=1"
-        # 发起搜索公众号请求
-        async with session.get(search_url, headers=headers) as response:
-            doc = await response.text()
-        jstext = json.loads(doc)
-        fakeid = jstext["list"][0]["fakeid"]
+            ID = "每日60s简报"  # 公众号的名字
+            search_url = f"https://mp.weixin.qq.com/cgi-bin/searchbiz?action=search_biz&begin=0&count=5&query={ID}&token={token}&lang=zh_CN&f=json&ajax=1"
+             # 发起搜索公众号请求
+            async with session.get(search_url, headers=headers) as response:
+                doc = await response.text()
+            jstext = json.loads(doc)
+            fakeid = jstext["list"][0]["fakeid"]
 
-        data = {
-            "token": token,
-            "lang": "zh_CN",
-            "f": "json",
-            "ajax": "1",
-            "action": "list_ex",
-            "begin": 0,
-            "count": "5",
-            "query": "",
-            "fakeid": fakeid,
-            "type": "9",
-        }
-        url = "https://mp.weixin.qq.com/cgi-bin/appmsg"
-        # 发起获取文章列表的请求
-        async with session.get(url, headers=headers, params=data) as response:
-            json_test = await response.text()
-        json_test = json.loads(json_test)
-        page = json_test["app_msg_list"]
-        page = page[0]["link"]
-        # 根据文章链接获取页面内容
-        async with session.get(page) as response:
-            html = await response.text()
-        cdn_url = re.findall(r"cdn_url:\s*'([^']*)'", html)
-        return cdn_url[0]
+            data = {
+                "token": token,
+                "lang": "zh_CN",
+                "f": "json",
+                "ajax": "1",
+                "action": "list_ex",
+                "begin": 0,
+                "count": "5",
+                "query": "",
+                "fakeid": fakeid,
+                "type": "9",
+                }
+            url = "https://mp.weixin.qq.com/cgi-bin/appmsg"
+            # 发起获取文章列表的请求
+            async with session.get(url, headers=headers, params=data) as response:
+                json_test = await response.text()
+            json_test = json.loads(json_test)
+            page = json_test["app_msg_list"]
+            page = page[0]["link"]
+            # 根据文章链接获取页面内容
+            async with session.get(page) as response:
+                html = await response.text()
+            cdn_url = re.findall(r"cdn_url:\s*'([^']*)'", html)
+            return cdn_url[0]
+    except :
+        return "获取新闻失败"
 
+def pic2b64(pic: Image) -> str:
+    buf = BytesIO()
+    pic.save(buf, format="PNG")
+    base64_str = base64.b64encode(buf.getvalue()).decode()
+    return "base64://" + base64_str
+
+async def getPicUrl():
+    async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
+        response = await client.get('http://118.31.18.68:8080/news/api/news-file/get')
+        if response.status_code != 200:
+            logger.debug('URL获取失败')
+            return()
+        else:
+            logger.debug('图片URL获取成功')
+        date_str = json.loads(response.text)['result']['date']
+        dt_now = datetime.datetime.now().strftime('%Y-%m-%d')
+        if datetime.datetime.strptime(date_str, "%Y-%m-%d") != datetime.datetime.strptime(dt_now, "%Y-%m-%d"):
+            raise ValueError(f"易即今日api今天没更新啊：{date_str}")
+        return (json.loads(response.text)['result']['data'][0])
 
 async def get_calendar() -> bytes:
-    async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
-        response = await client.get("https://api.03c3.cn/api/zb")
-        if response.is_error:
-            raise ValueError(f"60s日历获取失败，错误码：{response.status_code}")
-        return response.content
+    try:
+        url = await getPicUrl()
+        async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
+            response = await client.get(url)
+            if response.is_error:
+                raise ValueError(f"yiji获取失败，错误码：{response.status_code}")
+            image = Image.open(BytesIO(response.content))
+            return pic2b64(image)
+    except Exception as e:
+        logger.debug(traceback.format_exc())
+        async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
+            response = await client.get("https://api.03c3.cn/api/zb")
+            if response.is_error:
+                raise ValueError(f"60s日历获取失败，错误码：{response.status_code}")
+            return response.content
 
 
 @driver.on_startup
@@ -172,6 +208,7 @@ async def moyu(event: MessageEvent, matcher: Matcher, args: Message = CommandArg
             moyu_img = await get_calendar()
         except ValueError:
             moyu_img = await get_calendar_url(wechat_oa_cookie, wechat_oa_token)
+        #logger.debug(moyu_img)
         await matcher.finish(MessageSegment.image(moyu_img))
 
 

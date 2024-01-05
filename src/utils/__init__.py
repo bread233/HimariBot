@@ -3,7 +3,6 @@ from PIL import Image
 from io import BytesIO
 import base64
 import requests
-from nonebot.adapters.onebot.v11 import MessageSegment
 from .sql import *
 
 
@@ -30,5 +29,4 @@ def path_to_64img(path):
         r = requests.get(path)
         img = Image.open(BytesIO(r.read()))
     res = pic2b64(img)
-    res = MessageSegment.image(res)
     return res
