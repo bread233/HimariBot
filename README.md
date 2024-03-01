@@ -5,7 +5,7 @@
 1. generate project using `poetry install` .
 2. run your bot using `poetry run python bot.py` .
 
-## start with docker
+## Start with docker
 
 Ubuntu:
 
