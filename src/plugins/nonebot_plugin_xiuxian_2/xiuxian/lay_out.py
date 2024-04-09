@@ -14,10 +14,12 @@ from nonebot.adapters.onebot.v11.event import MessageEvent, GroupMessageEvent, M
 from nonebot.adapters.onebot.v11 import Bot, MessageSegment
 from .xiuxian_config import XiuConfig, JsonConfig
 from .utils import get_msg_pic
+
 from src.service.apscheduler import scheduler
 limit_all = scheduler
+
 limit_all_data: Dict[str, Any] = {}
-limit_num = 5
+limit_num = 99999
 
 @limit_all.scheduled_job('interval', hours=0, minutes=1)
 def limit_all():
@@ -53,11 +55,11 @@ def limit_all_run(user_id: str):
         return None
 
 _chat_flmt_notice = random.choice(
-    ["慢...慢一..点❤，还有{}秒，让我再歇会！",
-     "冷静一下，还有{}秒，让我再歇会！",
+    ["慢...慢一..点❤，还有{}秒，让我在歇会！",
+     "冷静一下，还有{}秒，让我在歇会！",
      "时间还没到，还有{}秒，歇会歇会~~"]
 )
-bu_ji_notice = random.choice(["别急！","急也没用!","让我先急!"])
+bu_ji_notice = random.choice(["别急！","急也没有!","让我先急!"])
 
 class CooldownIsolateLevel(IntEnum):
     """命令冷却的隔离级别"""
@@ -140,19 +142,19 @@ def Cooldown(
             )
         else:
             key = CooldownIsolateLevel.GLOBAL.name
-        if group_id not in conf_data["group"]:
-            if (
-                    event.sender.role == "admin" or
-                    event.sender.role == "owner" or
-                    event.get_user_id() in bot.config.superusers
-            ):
-                bot = await assign_bot_group(group_id=group_id)
-                await bot.send(event=event, message=MessageSegment.at(event.get_user_id()) + f"本群已关闭修仙模组,请联系管理员开启,开启命令为【启用修仙功能】!")
-                await matcher.finish()
-            else:
-                await matcher.finish()
-        else:
-            pass
+        #if group_id not in conf_data["group"]:
+        #    if (
+        #            event.sender.role == "admin" or
+        #            event.sender.role == "owner" or
+        #            event.get_user_id() in bot.config.superusers
+         #   ):
+         #       bot = await assign_bot_group(group_id=group_id)
+        #        await bot.send(event=event, message=MessageSegment.at(event.get_user_id()) + f"本群已关闭修仙模组,请联系管理员开启,开启命令为【启用修仙功能】!")
+        #        await matcher.finish()
+        #    else:
+        #        await matcher.finish()
+       # else:
+       #     pass
         if running[key] <= 0:
             if cd_time >= 1.5:
                 time = int(cd_time - (loop.time() - time_sy[key]))

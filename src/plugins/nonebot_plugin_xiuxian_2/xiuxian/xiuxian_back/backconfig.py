@@ -5,7 +5,7 @@ except ImportError:
 import os
 from pathlib import Path
 
-configkey = ["open", "auctions", "交友会定时参数"]
+configkey = ["open", "auctions", "拍卖会定时参数"]
 CONFIG = {
     "open": [],
     "auctions": {
@@ -105,7 +105,7 @@ CONFIG = {
             "id": 9911,
             "start_price": 5500000,
         },
-        "托天魔功": {
+        "吞天魔功": {
             "id": 9912,
             "start_price": 5500000,
         },
@@ -154,7 +154,7 @@ CONFIG = {
             "start_price": 10000,
         },
     },
-    "交友会定时参数": {  # 交友会生成的时间，每天的17-23点
+    "拍卖会定时参数": {  # 拍卖会生成的时间，每天的17-23点
         "hours": "17-23"
     }
 }

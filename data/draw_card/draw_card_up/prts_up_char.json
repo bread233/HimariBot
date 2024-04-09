@@ -1,0 +1,28 @@
+{
+    "char": {
+        "title": "鸣铳",
+        "pool_img": "https:\/\/ak.hycdn.cn\/announce\/images\/20230831\/88fd5ceb3e6e1e0b5d73294bb728b056.jpg",
+        "start_time": "2023-09-05T16:00:00",
+        "end_time": "2023-09-19T03:59:00",
+        "up_char": [
+            {
+                "name": "涤火杰西卡",
+                "star": 6,
+                "limited": false,
+                "zoom": 0.5
+            },
+            {
+                "name": "杏仁",
+                "star": 5,
+                "limited": false,
+                "zoom": 0.5
+            },
+            {
+                "name": "奥斯塔",
+                "star": 5,
+                "limited": false,
+                "zoom": 0.5
+            }
+        ]
+    }
+}

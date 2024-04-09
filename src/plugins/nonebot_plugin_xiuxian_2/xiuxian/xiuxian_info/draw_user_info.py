@@ -30,10 +30,11 @@ font_24 = font_origin(24)
 
 async def draw_user_info_img(user_id, DETAIL_MAP):
     based_w = 1100
-    based_h = 2250
+    based_h = 2450
     # 获取背景图
     try:
-        img = Image.open(BytesIO(await get_anime_pic())).convert("RGBA")
+        img_url = await get_anime_pic()
+        img = Image.open(BytesIO(await async_request(img_url))).convert("RGBA")
         # 居中裁剪背景
         img_w, img_h = img.size
         scale = based_w / img_w
@@ -75,6 +76,7 @@ async def draw_user_info_img(user_id, DETAIL_MAP):
         "灵根": DETAIL_MAP["灵根"],
         "突破状态": DETAIL_MAP["突破状态"],
         '主修功法': DETAIL_MAP['主修功法'],
+        '辅修功法': DETAIL_MAP['辅修功法'],
         '副修神通': DETAIL_MAP['副修神通'],
         "攻击力": DETAIL_MAP["攻击力"],
         "法器": DETAIL_MAP["法器"],
@@ -111,7 +113,7 @@ async def draw_user_info_img(user_id, DETAIL_MAP):
     w, h = await linewh(sectinfo, sectword)
     sectinfo_draw = ImageDraw.Draw(sectinfo)
     sectinfo_draw.text((w, h), sectword, first_color, font_40, 'lm')
-    img.paste(sectinfo, (100, 1442), sectinfo)
+    img.paste(sectinfo, (100, 1542), sectinfo) #100为距离图像左边界100像素，1542为距离图像上边界1542像素
 
     DETAIL_sectinfo = {
         '所在宗门': DETAIL_MAP['所在宗门'],
@@ -121,6 +123,8 @@ async def draw_user_info_img(user_id, DETAIL_MAP):
     for key, value in DETAIL_sectinfo.items():
         tasks3.append(_draw_sect_info_line(img, key, value, DETAIL_sectinfo))
     await asyncio.gather(*tasks3)
+    img.convert("RGB")
+    res = await convert_img(img)
     
     paihang = Image.open(
         TEXT_PATH / 'line2.png').resize((900, 100)).convert("RGBA")
@@ -128,7 +132,7 @@ async def draw_user_info_img(user_id, DETAIL_MAP):
     w, h = await linewh(paihang, paihangword)
     paihang_draw = ImageDraw.Draw(paihang)
     paihang_draw.text((w, h), paihangword, first_color, font_40, 'lm')
-    img.paste(paihang, (100, 1773), paihang)
+    img.paste(paihang, (100, 1873), paihang)
 
     DETAIL_paihang = {}
     DETAIL_paihang['注册位数'] = DETAIL_MAP['注册位数']
@@ -139,10 +143,8 @@ async def draw_user_info_img(user_id, DETAIL_MAP):
     for key, value in DETAIL_paihang.items():
         tasks4.append(_draw_ph_info_line(img, key, value, DETAIL_paihang))
     await asyncio.gather(*tasks4)
-    img.convert("RGB")
     res = await convert_img(img)
     return res
-
 
 async def _draw_line(img: Image.Image, key, value, DETAIL_MAP):
     line = Image.open(TEXT_PATH / 'line3.png').resize((450, 68))
@@ -171,8 +173,7 @@ async def _draw_sect_info_line(img: Image.Image, key, value, DETAIL_MAP):
     w, h = await linewh(line, word)
 
     line_draw.text((100, h), word, first_color, font_36, 'lm')
-    img.paste(line, (100, 1547 + list(DETAIL_MAP.keys()).index(key) * 103), line)
-
+    img.paste(line, (100, 1647 + list(DETAIL_MAP.keys()).index(key) * 103), line)
 
 async def _draw_ph_info_line(img: Image.Image, key, value, DETAIL_MAP):
 
@@ -182,7 +183,7 @@ async def _draw_ph_info_line(img: Image.Image, key, value, DETAIL_MAP):
     w, h = await linewh(line, word)
 
     line_draw.text((100, h), word, first_color, font_36, 'lm')
-    img.paste(line, (100, 1878 + list(DETAIL_MAP.keys()).index(key) * 103), line)
+    img.paste(line, (100, 1978 + list(DETAIL_MAP.keys()).index(key) * 103), line)
 
 async def img_author(img, bg):
     w, h = img.size
@@ -207,6 +208,10 @@ async def async_request(url, *args, is_text=False, **kwargs):
 
 async def get_anime_pic():
     r: str = await async_request(
-        "https://api.gmit.vip/Api/DmImg?format=json", is_text=True
+        "https://imgapi.cn/api.php?zd=mobile&fl=dongman&gs=json", is_text=True
     )
-    return await async_request(json.loads(r)["data"]["url"])
+    response_json = json.loads(r)
+    if response_json["code"] == "200":
+        return response_json["imgurl"]
+    else:
+        logger.info("API 返回错误码：" + response_json["code"])

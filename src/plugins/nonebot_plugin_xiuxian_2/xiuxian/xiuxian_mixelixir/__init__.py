@@ -1,4 +1,5 @@
 import random
+import asyncio
 import re
 from nonebot import on_command, on_fullmatch
 from nonebot.params import EventPlainText
@@ -6,23 +7,25 @@ from nonebot.adapters.onebot.v11 import (
     Bot,
     GROUP,
     GroupMessageEvent,
-    MessageSegment
+    MessageSegment,
+    ActionFailed
 )
 from ..lay_out import assign_bot, Cooldown
-from ..xiuxian2_handle import XiuxianDateManage
+from ..xiuxian2_handle import (
+    XiuxianDateManage, get_player_info, save_player_info, 
+    UserBuffDate, XIUXIAN_IMPART_BUFF
+)
 from ..utils import (
     check_user,
-    send_forward_msg, get_msg_pic,
+    send_forward_img, get_msg_pic,
     CommandObjectID
 )
 from ..item_json import Items
 from .mixelixirutil import get_mix_elixir_msg, tiaohe, check_mix, make_dict
-from ..read_buff import get_player_info, save_player_info
 from ..xiuxian_config import USERRANK, XiuConfig
-from ..xn_xiuxian_impart import XIUXIAN_IMPART_BUFF
 from datetime import datetime
 from .mix_elixir_config import MIXELIXIRCONFIG
-
+from ..xiuxian_back.back_util import get_user_elixir_back_msg, get_user_yaocai_back_msg
 sql_message = XiuxianDateManage()  # sql类
 xiuxian_impart = XIUXIAN_IMPART_BUFF()
 items = Items()
@@ -32,6 +35,8 @@ mix_elixir = on_fullmatch("炼丹", priority=17, permission=GROUP, block=True)
 mix_make = on_command("配方", priority=5, permission=GROUP, block=True)
 elixir_help = on_fullmatch("炼丹帮助", priority=7, permission=GROUP, block=True)
 mix_elixir_help = on_fullmatch("炼丹配方帮助", priority=7, permission=GROUP, block=True)
+elixir_back = on_command("丹药背包", priority=10, permission=GROUP, block=True)
+yaocai_back = on_command("药材背包", priority=10, permission=GROUP, block=True)
 yaocai_get = on_command("灵田收取", aliases={"灵田结算"}, priority=8, permission=GROUP, block=True)
 my_mix_elixir_info = on_fullmatch("我的炼丹信息", priority=6, permission=GROUP, block=True)
 mix_elixir_sqdj_up = on_fullmatch("升级收取等级", priority=6, permission=GROUP, block=True)
@@ -42,12 +47,14 @@ __elixir_help__ = f"""
 指令：
 1、炼丹:会检测背包内的药材,自动生成配方【一次最多匹配25种药材】
 2、配方:发送配方领取丹药【配方主药.....】
-2、炼丹帮助:获取本帮助信息
-3、炼丹配方帮助:获取炼丹配方帮助
-4、灵田收取、灵田结算:收取洞天福地里灵田的药材
-5、我的炼丹信息:查询自己的炼丹信息
-6、升级收取等级:每一个等级会增加灵田收取的数量
-7、升级丹药控火:每一个等级会增加炼丹的产出数量
+3、炼丹帮助:获取本帮助信息
+4、丹药背包:获取背包内丹药以及炼丹炉信息
+5、药材背包:获取背包内药材信息
+6、炼丹配方帮助:获取炼丹配方帮助
+7、灵田收取、灵田结算:收取洞天福地里灵田的药材
+8、我的炼丹信息:查询自己的炼丹信息
+9、升级收取等级:每一个等级会增加灵田收取的数量
+10、升级丹药控火:每一个等级会增加炼丹的产出数量
 """
 
 __mix_elixir_help__ = f"""
@@ -196,7 +203,14 @@ async def yaocai_get_(bot: Bot, event: GroupMessageEvent):
             # 加入传承
             impart_data = xiuxian_impart.get_user_message(user_id)
             impart_reap_per = impart_data.impart_reap_per if impart_data is not None else 0
-            num = mix_elixir_info['灵田数量'] + mix_elixir_info['收取等级'] + impart_reap_per
+            #功法灵田收取加成
+            main_reap = UserBuffDate(user_id).get_user_main_buff_data()
+                
+            if  main_reap != None: #功法灵田收取加成
+                reap_buff = main_reap['reap_buff']
+            else:
+                reap_buff = 0
+            num = mix_elixir_info['灵田数量'] + mix_elixir_info['收取等级'] + impart_reap_per + reap_buff
             msg = ''
             if not yaocai_id_list:
                 sql_message.send_back(user_info.user_id, 3001, '恒心草', '药材', num)  # 没有合适的，保底
@@ -260,7 +274,7 @@ async def my_mix_elixir_info_(bot: Bot, event: GroupMessageEvent):
             msg = f"编号：{i},{v['name']}，炼成次数：{v['num']}次"
             l_msg.append(msg)
             i += 1
-    await send_forward_msg(bot, event, '炼丹信息', bot.self_id, l_msg)
+    await send_forward_img(bot, event, '炼丹信息', bot.self_id, l_msg)
     await my_mix_elixir_info.finish()
 
 
@@ -273,7 +287,7 @@ async def elixir_help_(bot: Bot, event: GroupMessageEvent, session_id: int = Com
     else:
         msg = __elixir_help__
         if XiuConfig().img:
-            pic = await get_msg_pic(msg, scale=False)
+            pic = await get_msg_pic(msg)
             cache_help[session_id] = pic
             await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic))
         else:
@@ -375,9 +389,87 @@ async def mix_elixir_(bot: Bot, event: GroupMessageEvent):
             l_msg.append(msg)
         if len(l_msg) > 51:
             l_msg = l_msg[:50]
-        await send_forward_msg(bot, event, '配方', bot.self_id, l_msg)
+        await send_forward_img(bot, event, '配方', bot.self_id, l_msg)
         await mix_elixir.finish()
 
+
+@elixir_back.handle(parameterless=[Cooldown(at_sender=True)])
+async def elixir_back_(bot: Bot, event: GroupMessageEvent):
+    """丹药背包
+    ["user_id", "goods_id", "goods_name", "goods_type", "goods_num", "create_time", "update_time",
+    "remake", "day_num", "all_num", "action_time", "state"]
+    """
+    bot, send_group_id = await assign_bot(bot=bot, event=event)
+    isUser, user_info, msg = check_user(event)
+    if not isUser:
+        if XiuConfig().img:
+            pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
+            await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic))
+        else:
+            await bot.send_group_msg(group_id=int(send_group_id), message=msg)
+        await elixir_back.finish()
+    user_id = user_info.user_id
+    msg = get_user_elixir_back_msg(user_id)
+
+    if len(msg) >= 98: #背包更新
+        # 将第一条消息和第二条消息合并为一条消息
+        msg1 = [f"{user_info.user_name}的丹药背包"] + msg[:98]
+        msg2 = [f"{user_info.user_name}的丹药背包"] + msg[98:]
+        try:
+            await send_forward_img(bot, event, '背包', bot.self_id, msg1)
+            if msg2:
+                # 如果有第三条及以后的消息，需要等待一段时间再发送，避免触发限制
+                await asyncio.sleep(1)
+                await send_forward_img(bot, event, '背包', bot.self_id, msg2)
+        except ActionFailed:
+            await elixir_back.finish("查看背包失败!", reply_message=True)
+    else:
+        msg = [f"{user_info.user_name}的丹药背包"] + msg
+        try:
+            await send_forward_img(bot, event, '背包', bot.self_id, msg)
+        except ActionFailed:
+            await elixir_back.finish("查看背包失败!", reply_message=True)
+
+    await elixir_back.finish()
+
+@yaocai_back.handle(parameterless=[Cooldown(at_sender=True)])
+async def yaocai_back_(bot: Bot, event: GroupMessageEvent):
+    """药材背包
+    ["user_id", "goods_id", "goods_name", "goods_type", "goods_num", "create_time", "update_time",
+    "remake", "day_num", "all_num", "action_time", "state"]
+    """
+    bot, send_group_id = await assign_bot(bot=bot, event=event)
+    isUser, user_info, msg = check_user(event)
+    if not isUser:
+        if XiuConfig().img:
+            pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
+            await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic))
+        else:
+            await bot.send_group_msg(group_id=int(send_group_id), message=msg)
+        await yaocai_back.finish()
+    user_id = user_info.user_id
+    msg = get_user_yaocai_back_msg(user_id)
+
+    if len(msg) >= 98: #背包更新
+        # 将第一条消息和第二条消息合并为一条消息
+        msg1 = [f"{user_info.user_name}的药材背包"] + msg[:98]
+        msg2 = [f"{user_info.user_name}的药材背包"] + msg[98:]
+        try:
+            await send_forward_img(bot, event, '背包', bot.self_id, msg1)
+            if msg2:
+                # 如果有第三条及以后的消息，需要等待一段时间再发送，避免触发限制
+                await asyncio.sleep(1)
+                await send_forward_img(bot, event, '背包', bot.self_id, msg2)
+        except ActionFailed:
+            await yaocai_back.finish("查看背包失败!", reply_message=True)
+    else:
+        msg = [f"{user_info.user_name}的药材背包"] + msg
+        try:
+            await send_forward_img(bot, event, '背包', bot.self_id, msg)
+        except ActionFailed:
+            await yaocai_back.finish("查看背包失败!", reply_message=True)
+
+    await yaocai_back.finish()
 
 # 配方
 @mix_make.handle(parameterless=[Cooldown(at_sender=True)])
@@ -483,32 +575,49 @@ async def _mix_elixir(bot: Bot, event: GroupMessageEvent, mode: str = EventPlain
                 # 加入传承
                 impart_data = xiuxian_impart.get_user_message(user_id)
                 impart_mix_per = impart_data.impart_mix_per if impart_data is not None else 0
-                num = 1 + ldl_info['buff'] + mix_elixir_info['丹药控火'] + impart_mix_per
+                
+                #功法炼丹数加成
+                main_dan_data = UserBuffDate(user_id).get_user_main_buff_data()
+                
+                if  main_dan_data != None: #功法炼丹数量加成
+                    main_dan = main_dan_data['dan_buff']
+                else:
+                    main_dan = 0
+                #功法炼丹经验加成
+                main_dan_exp = UserBuffDate(user_id).get_user_main_buff_data()
+                
+                if  main_dan_exp != None: #功法炼丹经验加成
+                    main_exp = main_dan_exp['dan_exp']
+                else:
+                    main_exp = 0
+                
+                
+                num = 1 + ldl_info['buff'] + mix_elixir_info['丹药控火'] + impart_mix_per + main_dan#炼丹数量提升
                 msg = f"恭喜道友成功炼成丹药：{goods_info['name']}{num}枚"
                 # 背包sql
-                sql_message.send_back(user_id, id, goods_info['name'], "丹药", num)
-                sql_message.update_back_j(user_id, zhuyao_goods_id, zhuyao_num)
+                sql_message.send_back(user_id, id, goods_info['name'], "丹药", num) #将炼制的丹药加入背包
+                sql_message.update_back_j(user_id, zhuyao_goods_id, zhuyao_num) #将消耗的药材从背包中减去
                 sql_message.update_back_j(user_id, fuyao_goods_id, fuyao_num)
                 sql_message.update_back_j(user_id, yaoyin_goods_id, yaoyin_num)
                 try:
                     var = mix_elixir_info['炼丹记录'][id]
-                    now_num = mix_elixir_info['炼丹记录'][id]['num']
+                    now_num = mix_elixir_info['炼丹记录'][id]['num'] #now_num 已经炼制的丹药数量
                     if now_num >= goods_info['mix_all']:
                         msg += f"该丹药道友已炼制{now_num}次，无法获得炼丹经验了~"
                     elif now_num + num >= goods_info['mix_all']:
                         exp_num = goods_info['mix_all'] - now_num
-                        mix_elixir_info['炼丹经验'] += goods_info['mix_exp'] * exp_num
+                        mix_elixir_info['炼丹经验'] += (goods_info['mix_exp'] +  main_exp) * exp_num
                         msg += f"获得炼丹经验{goods_info['mix_exp'] * exp_num}点"
                     else:
-                        mix_elixir_info['炼丹经验'] += goods_info['mix_exp'] * num
-                        msg += f"获得炼丹经验{goods_info['mix_exp'] * num}点"
+                        mix_elixir_info['炼丹经验'] += (goods_info['mix_exp'] +  main_exp) * num
+                        msg += f"获得炼丹经验{(goods_info['mix_exp'] +  main_exp) * num}点"
                     mix_elixir_info['炼丹记录'][id]['num'] += num
                 except:
                     mix_elixir_info['炼丹记录'][id] = {}
                     mix_elixir_info['炼丹记录'][id]['name'] = goods_info['name']
                     mix_elixir_info['炼丹记录'][id]['num'] = num
-                    mix_elixir_info['炼丹经验'] += goods_info['mix_exp'] * num
-                    msg += f"获得炼丹经验{goods_info['mix_exp'] * num}点"
+                    mix_elixir_info['炼丹经验'] += (goods_info['mix_exp'] +  main_exp) * num
+                    msg += f"获得炼丹经验{(goods_info['mix_exp'] +  main_exp) * num}点"
                 save_player_info(user_id, mix_elixir_info, 'mix_elixir_info')
                 if XiuConfig().img:
                     pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)

@@ -11,29 +11,38 @@ SKILLPATHH = READPATH / "功法"
 WEAPONPATH = READPATH / "装备"
 ELIXIRPATH = READPATH / "丹药"
 XIULIANITEMPATH = READPATH / "修炼物品"
+BOSSDROPS = READPATH / "boss掉落物"
 
 
 class Items:
     def __init__(self) -> None:
         self.mainbuff_jsonpath = SKILLPATHH / "主功法.json"
+        self.subbuff_jsonpath = SKILLPATHH / "辅修功法.json" 
         self.secbuff_jsonpath = SKILLPATHH / "神通.json"
         self.weapon_jsonpath = WEAPONPATH / "法器.json"
         self.armor_jsonpath = WEAPONPATH / "防具.json"
         self.elixir_jsonpath = ELIXIRPATH / "丹药.json"
+        self.lb_jsonpath = ELIXIRPATH / "礼包.json"
         self.yaocai_jsonpath = ELIXIRPATH / "药材.json"
         self.mix_elixir_type_jsonpath = ELIXIRPATH / "炼丹丹药.json"
         self.ldl_jsonpath = ELIXIRPATH / "炼丹炉.json"
         self.jlq_jsonpath = XIULIANITEMPATH / "聚灵旗.json"
+        self.dlw_jsonpath = BOSSDROPS / "boss掉落物.json"
+        self.sw_jsonpath = ELIXIRPATH / "神物.json"
         self.items = {}
         self.set_item_data(self.get_armor_data(), "防具")
         self.set_item_data(self.get_weapon_data(), "法器")
         self.set_item_data(self.get_main_buff_data(), "功法")
+        self.set_item_data(self.get_sub_buff_data(), "辅修功法") 
         self.set_item_data(self.get_sec_buff_data(), "神通")
         self.set_item_data(self.get_elixir_data(), "丹药")
+        self.set_item_data(self.get_lb_data(), "礼包")
         self.set_item_data(self.get_yaocai_data(), "药材")
         self.set_item_data(self.get_mix_elixir_type_data(), "合成丹药")
         self.set_item_data(self.get_ldl_data(), "炼丹炉")
         self.set_item_data(self.get_jlq_data(), "聚灵旗")
+        self.set_item_data(self.get_dlw_data(), "掉落物")
+        self.set_item_data(self.get_sw_data(), "神物")
         self.savef(self.items)
 
     def readf(self, FILEPATH):
@@ -57,12 +66,18 @@ class Items:
 
     def get_main_buff_data(self):
         return self.readf(self.mainbuff_jsonpath)
+    
+    def get_sub_buff_data(self):#辅修功法5
+        return self.readf(self.subbuff_jsonpath)
 
     def get_sec_buff_data(self):
         return self.readf(self.secbuff_jsonpath)
 
     def get_elixir_data(self):
         return self.readf(self.elixir_jsonpath)
+    
+    def get_lb_data(self):
+        return self.readf(self.lb_jsonpath)
 
     def get_yaocai_data(self):
         return self.readf(self.yaocai_jsonpath)
@@ -75,13 +90,20 @@ class Items:
 
     def get_jlq_data(self):
         return self.readf(self.jlq_jsonpath)
+    
+    def get_dlw_data(self):
+        return self.readf(self.dlw_jsonpath)
+    
+    def get_sw_data(self):
+        return self.readf(self.sw_jsonpath)
 
     def get_data_by_item_id(self, item_id):
         return self.items[str(item_id)]
 
+
     def set_item_data(self, dict_data, item_type):
         for k, v in dict_data.items():
-            if item_type == '功法' or item_type == '神通':
+            if item_type == '功法' or item_type == '神通' or item_type == '辅修功法':#辅修功法7
                 v['rank'], v['level'] = v['level'], v['rank']
                 v['type'] = '技能'
             self.items[k] = v

@@ -4,6 +4,7 @@ except ImportError:
     import json
 import re
 from pathlib import Path
+from ..cd_manager import add_cd, check_cd, cd_msg
 import random
 import os
 from nonebot.rule import Rule
@@ -22,21 +23,23 @@ from nonebot.adapters.onebot.v11 import (
 from ..lay_out import assign_bot, put_bot, layout_bot_dict, Cooldown
 from nonebot.permission import SUPERUSER
 from nonebot.log import logger
-from ..xiuxian2_handle import XiuxianDateManage
-from ..xiuxian_config import USERRANK
-from .makeboss import createboss, createboss_root
+from ..xiuxian2_handle import (
+    XiuxianDateManage ,OtherSet, UserBuffDate,
+    XIUXIAN_IMPART_BUFF, leave_harm_time
+)
+from ..xiuxian_config import USERRANK, XiuConfig
+from .makeboss import createboss, createboss_root, createboss_jj
 from .bossconfig import get_config, savef
 from .old_boss_info import old_boss_info
 from ..player_fight import Boss_fight
 from ..item_json import Items
+items = Items()
 from ..utils import (
-    send_forward_msg_list, number_to,
-    check_user, send_forward_msg,
-    get_msg_pic, CommandObjectID
+    send_forward_img_list, number_to,
+    check_user, send_forward_img,
+    get_msg_pic, CommandObjectID,
+    pic_msg_format
 )
-from ..read_buff import UserBuffDate
-from ..xn_xiuxian_impart import XIUXIAN_IMPART_BUFF, leave_harm_time
-from ..xiuxian_config import XiuConfig
 from .. import DRIVER
 # boss定时任务
 from src.service.apscheduler import scheduler
@@ -44,6 +47,7 @@ from src.service.apscheduler import scheduler
 config = get_config()
 cache_help = {}
 del_boss_id = XiuConfig().del_boss_id
+gen_boss_id = XiuConfig().gen_boss_id
 group_boss = {}
 groups = config['open']
 battle_flag = {}
@@ -51,22 +55,11 @@ sql_message = XiuxianDateManage()  # sql类
 xiuxian_impart = XIUXIAN_IMPART_BUFF()
 
 
-def check_rule_bot_boss() -> Rule:  # 对传入的消息检测，是主qq传入的消息就响应，其他的不响应
-    async def _check_bot_(bot: Bot, event: GroupMessageEvent) -> bool:
-        if (event.sender.role == "admin" or
-                event.sender.role == "owner" or
-                event.get_user_id() in bot.config.superusers or
-                event.get_user_id() in del_boss_id):
-            return True
-        else:
-            return False
-
-    return Rule(_check_bot_)
-
-
 
 create = on_command("生成世界boss", aliases={"生成世界Boss", "生成世界BOSS"}, priority=5,
-                    permission=GROUP and SUPERUSER, block=True)
+                    permission=GROUP and (SUPERUSER), block=True)
+create_appoint = on_command("生成指定世界boss", aliases={"生成指定世界boss", "生成指定世界BOSS", "生成指定BOSS", "生成指定boss"}, priority=5,
+                            permission=GROUP and (SUPERUSER))
 boss_info = on_command("查询世界boss", aliases={"查询世界Boss", "查询世界BOSS"}, priority=6, permission=GROUP, block=True)
 set_group_boss = on_command("世界boss", aliases={"世界Boss", "世界BOSS"}, priority=13,
                             permission=GROUP and (SUPERUSER | GROUP_ADMIN | GROUP_OWNER), block=True)
@@ -74,7 +67,9 @@ battle = on_command("讨伐boss", aliases={"讨伐世界boss", "讨伐Boss", "�
                     permission=GROUP, block=True)
 boss_help = on_command("世界boss帮助", aliases={"世界Boss帮助", "世界BOSS帮助"}, priority=5, block=True)
 boss_delete = on_command("天罚boss", aliases={"天罚世界boss", "天罚Boss", "天罚BOSS", "天罚世界Boss", "天罚世界BOSS"}, priority=7,
-                         rule=check_rule_bot_boss(), block=True)
+                         permission=GROUP and (SUPERUSER | GROUP_ADMIN | GROUP_OWNER), block=True)
+boss_delete_all = on_command("天罚所有boss", aliases={"天罚所有世界boss", "天罚所有Boss", "天罚所有BOSS", "天罚所有世界Boss","天罚所有世界BOSS"}, priority=5,
+                             permission=GROUP and (SUPERUSER | GROUP_ADMIN | GROUP_OWNER), block=True)
 boss_integral_info = on_command("世界积分查看",aliases={"查看世界积分", "查询世界积分", "世界积分查询"} ,priority=10, permission=GROUP, block=True)
 boss_integral_use = on_command("世界积分兑换", priority=6, permission=GROUP, block=True)
 
@@ -88,8 +83,9 @@ __boss_help__ = f"""
 4、讨伐boss、讨伐世界boss:讨伐世界Boss,必须加Boss编号
 5、世界boss帮助、世界boss:获取世界Boss帮助信息
 6、天罚boss、天罚世界boss:删除世界Boss,必须加Boss编号,管理员权限
-7、世界积分查看:查看自己的世界积分,和世界积分兑换商品
-8、世界积分兑换+编号：兑换对应的商品
+7、天罚所有世界boss:删除所有世界Boss,,管理员权限
+8、世界积分查看:查看自己的世界积分,和世界积分兑换商品
+9、世界积分兑换+编号：兑换对应的商品
 """.strip()
 
 
@@ -260,9 +256,55 @@ async def boss_delete_(bot: Bot, event: GroupMessageEvent, args: Message = Comma
         await bot.send_group_msg(group_id=int(send_group_id), message=msg)
     await boss_delete.finish()
 
+@boss_delete_all.handle(parameterless=[Cooldown(at_sender=True)])
+async def boss_delete_all_(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
+    bot, send_group_id = await assign_bot(bot=bot, event=event)
+    msg = args.extract_plain_text().strip()
+    group_id = str(event.group_id)
+    boss_num = re.findall("\d+", msg)  # boss编号
+    isInGroup = isInGroups(event)
+    if not isInGroup:  # 不在配置表内
+        msg = f'本群尚未开启世界Boss,请联系管理员开启!'
+        if XiuConfig().img:
+            pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
+            await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic))
+        else:
+            await bot.send_group_msg(group_id=int(send_group_id), message=msg)
+        await boss_delete_all.finish()
+    bosss = None
+    try:
+        bosss = group_boss[group_id]
+    except:
+        msg = f'本群尚未生成世界Boss,请等待世界boss刷新!'
+        if XiuConfig().img:
+            pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
+            await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic))
+        else:
+            await bot.send_group_msg(group_id=int(send_group_id), message=msg)
+        await boss_delete_all.finish()
 
-@battle.handle(parameterless=[Cooldown(at_sender=True)])
+    if not bosss:
+        msg = f'本群尚未生成世界Boss,请等待世界boss刷新!'
+        if XiuConfig().img:
+            pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
+            await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic))
+        else:
+            await bot.send_group_msg(group_id=int(send_group_id), message=msg)
+        await boss_delete_all.finish()
+
+    group_boss[group_id] = []
+    msg = f"所有的世界Boss都烟消云散了~~"
+    if XiuConfig().img:
+        pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
+        await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic))
+    else:
+        await bot.send_group_msg(group_id=int(send_group_id), message=msg)
+    await boss_delete_all.finish()
+
+
+@battle.handle(parameterless=[Cooldown(cd_time=XiuConfig().battle_boss_cd,at_sender=True)])
 async def battle_(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
+    
     bot, send_group_id = await assign_bot(bot=bot, event=event)
     isUser, user_info, msg = check_user(event)
     if not isUser:
@@ -330,19 +372,19 @@ async def battle_(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg
             await bot.send_group_msg(group_id=int(send_group_id), message=msg)
         await battle.finish()
 
-    try:
-        battle_flag[group_id]
-    except:
-        battle_flag[group_id] = False
+   # try:
+       # battle_flag[group_id]
+   # except:
+       # battle_flag[group_id] = False
 
-    if battle_flag[group_id]:
-        msg = f'当前有道友正在Boss战斗!'
-        if XiuConfig().img:
-            pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
-            await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic))
-        else:
-            await bot.send_group_msg(group_id=int(send_group_id), message=msg)
-        await battle.finish()
+   # if battle_flag[group_id]:
+    #    msg = f'当前有道友正在Boss战斗!'
+    #    if XiuConfig().img:
+     #       pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
+    #        await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic))
+     #   else:
+     #       await bot.send_group_msg(group_id=int(send_group_id), message=msg)
+     #   await battle.finish()
 
     if user_info.hp is None or user_info.hp == 0:
         # 判断用户气血是否为空
@@ -364,11 +406,28 @@ async def battle_(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg
 
     impart_data = xiuxian_impart.get_user_message(user_id)
     boss_atk = impart_data.boss_atk if impart_data.boss_atk is not None else 0
-
-    if user_weapon_data != None:
-        player['会心'] = int(user_weapon_data['crit_buff'] * 100)
+    user_armor_data = UserBuffDate(userinfo.user_id).get_user_armor_buff_data() #boss战防具会心
+    user_main_data = UserBuffDate(userinfo.user_id).get_user_main_buff_data() #boss战功法会心
+    user1_sub_buff_data = UserBuffDate(userinfo.user_id).get_user_sub_buff_data() #boss战辅修功法信息
+    integral_buff = user1_sub_buff_data['integral'] if user1_sub_buff_data is not None else 0
+    exp_buff = user1_sub_buff_data['exp'] if user1_sub_buff_data is not None else 0
+    
+    
+    
+    if  user_main_data != None: #boss战功法会心
+        main_crit_buff = user_main_data['crit_buff']
     else:
-        player['会心'] = 1
+        main_crit_buff = 0
+  
+    if  user_armor_data != None: #boss战防具会心
+        armor_crit_buff = user_armor_data['crit_buff']
+    else:
+        armor_crit_buff = 0
+    
+    if user_weapon_data != None:
+        player['会心'] = int(((user_weapon_data['crit_buff']) + (armor_crit_buff) + (main_crit_buff)) * 100)
+    else:
+        player['会心'] = (armor_crit_buff + main_crit_buff) * 100
     player['user_id'] = userinfo.user_id
     player['道号'] = userinfo.user_name
     player['气血'] = userinfo.hp
@@ -377,7 +436,7 @@ async def battle_(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg
     player['exp'] = userinfo.exp
 
     bossinfo = group_boss[group_id][boss_num - 1]
-    if bossinfo['jj'] == "祭道之上":
+    if bossinfo['jj'] == '零':
         boss_rank = USERRANK[(bossinfo['jj'])]
     else:
         boss_rank = USERRANK[(bossinfo['jj'] + '中期')]
@@ -405,10 +464,17 @@ async def battle_(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg
         user_boss_fight_info = get_user_boss_fight_info(user_id)
         user_boss_fight_info['boss_integral'] += boss_integral
         save_user_boss_fight_info(user_id, user_boss_fight_info)
-        msg = f"道友不敌{bossinfo['name']}，重伤逃遁，临逃前收获灵石{get_stone}枚，{more_msg}获得世界积分：{boss_integral}点"
+        
+        if exp_buff > 0:
+            now_exp = int(user_info.exp * exp_buff)
+            sql_message.update_exp(user_id, now_exp)
+            exp_msg = f"，获得修为{now_exp}点！"
+        else:
+            exp_msg =" "
+        msg = f"道友不敌{bossinfo['name']}，重伤逃遁，临逃前收获灵石{get_stone}枚，{more_msg}获得世界积分：{boss_integral}点{exp_msg} "
         battle_flag[group_id] = False
         try:
-            await send_forward_msg_list(bot, event, result)
+            await send_forward_img_list(bot, event, result)
         except ActionFailed:
             msg += "Boss战消息发送错误,可能被风控!"
         if XiuConfig().img:
@@ -417,13 +483,11 @@ async def battle_(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg
         else:
             await bot.send_group_msg(group_id=int(send_group_id), message=msg)
         await battle.finish()
-
+    
     elif victor == "群友赢了":
         # 新增boss战斗积分点数
         boss_all_hp = bossinfo['总血量']  # 总血量
         boss_integral = int((boss_old_hp / boss_all_hp) * 30)
-        if boss_integral < 5:  # 摸一下不给
-            boss_integral = 0
         if user_info.root == "器师":
             boss_integral = int(boss_integral * (1 + (user_rank - boss_rank)))
             more_msg = f"道友低boss境界{user_rank - boss_rank}层，获得{int(50 * (user_rank - boss_rank))}%积分加成！"
@@ -431,15 +495,32 @@ async def battle_(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg
             if boss_rank - user_rank >= 6:  # 超过太多不给
                 boss_integral = 0
                 more_msg = "道友的境界超过boss太多了,不齿！"
+                
+        if exp_buff > 0:
+            now_exp = int(user_info.exp * exp_buff)
+            sql_message.update_exp(user_id, now_exp)
+            exp_msg = f"获得修为{now_exp}点！"
+        else:
+            exp_msg =" "
+                
+        drops_id, drops_info =  boss_drops(user_rank, boss_rank, bossinfo, userinfo)
+        if drops_id == None:
+            drops_msg = " "
+        elif boss_rank < 20:           
+            drops_msg = f"boss的尸体上好像有什么东西， 凑近一看居然是{drops_info['name']}！ "
+            sql_message.send_back(user_info.user_id, drops_info['id'],drops_info['name'], drops_info['type'], 1)
+        else :
+            drops_msg = " "
+            
         group_boss[group_id].remove(group_boss[group_id][boss_num - 1])
         battle_flag[group_id] = False
         XiuxianDateManage().update_ls(user_id, get_stone, 1)
         user_boss_fight_info = get_user_boss_fight_info(user_id)
         user_boss_fight_info['boss_integral'] += boss_integral
         save_user_boss_fight_info(user_id, user_boss_fight_info)
-        msg = f"恭喜道友击败{bossinfo['name']}，收获灵石{get_stone}枚，{more_msg}获得世界积分：{boss_integral}点"
+        msg = f"恭喜道友击败{bossinfo['name']}，收获灵石{get_stone}枚，{more_msg}获得世界积分：{boss_integral}点!{exp_msg} {drops_msg}"
         try:
-            await send_forward_msg_list(bot, event, result)
+            await send_forward_img_list(bot, event, result)
         except ActionFailed:
             msg += "Boss战消息发送错,可能被风控!"
         if XiuConfig().img:
@@ -540,6 +621,7 @@ async def boss_info_(bot: Bot, event: GroupMessageEvent, args: Message = Command
 @create.handle(parameterless=[Cooldown(at_sender=True)])
 async def create_(bot: Bot, event: GroupMessageEvent):
     bot, send_group_id = await assign_bot(bot=bot, event=event)
+    import asyncio
     group_id = str(event.group_id)
     isInGroup = isInGroups(event)
     if not isInGroup:  # 不在配置表内
@@ -572,7 +654,64 @@ async def create_(bot: Bot, event: GroupMessageEvent):
         await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic))
     else:
         await bot.send_group_msg(group_id=int(send_group_id), message=msg)
+    # 调试用代码
+    """ await asyncio.sleep(1)
+    boss = group_boss[group_id][-1]
+    bossmsgs = f'''
+剩余血量：{number_to(boss['气血'])}
+        '''
+    msg = bossmsgs
+    if XiuConfig().img:
+        pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
+        await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic)) """
+    
     await create.finish()
+
+@create_appoint.handle()
+async def _(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
+    bot, send_group_id = await assign_bot(bot=bot, event=event)
+    group_id = str(event.group_id)
+    isInGroup = isInGroups(event)
+    if not isInGroup:#不在配置表内
+        msg = f'本群尚未开启世界Boss，请联系管理员开启!'
+        if XiuConfig().img:
+            msg = await pic_msg_format(msg, event)
+            pic = await get_msg_pic(msg)
+            await create_appoint.finish(MessageSegment.image(pic))
+        else:
+            await create_appoint.finish(msg, at_sender=True)
+    try:
+        group_boss[group_id]
+    except:
+        group_boss[group_id] = []
+    if len(group_boss[group_id]) >= config['Boss个数上限']:
+        msg = f"本群世界Boss已达到上限{config['Boss个数上限']}个，无法继续生成"
+        if XiuConfig().img:
+            msg = await pic_msg_format(msg, event)
+            pic = await get_msg_pic(msg)
+            await create_appoint.finish(MessageSegment.image(pic))
+        else:
+            await create_appoint.finish(msg, at_sender=True)
+    arg = args.extract_plain_text().split()
+    try:
+        name = arg[0]
+    except IndexError:
+        msg = f"请输入正确的指令！"
+        if XiuConfig().img:
+            msg = await pic_msg_format(msg, event)
+            pic = await get_msg_pic(msg)
+            await create_appoint.finish(MessageSegment.image(pic))
+        else:
+            await create_appoint.finish(msg, at_sender=True)
+    bossinfo = createboss_jj(name)
+    group_boss[group_id].append(bossinfo)
+    msg = f"已生成{bossinfo['jj']}Boss:{bossinfo['name']}，诸位道友请击败Boss获得奖励吧！"
+    if XiuConfig().img:
+        msg = await pic_msg_format(msg, event)
+        pic = await get_msg_pic(msg)
+        await create_appoint.finish(MessageSegment.image(pic))
+    else:
+        await create_appoint.finish(msg, at_sender=True)
 
 
 @set_group_boss.handle(parameterless=[Cooldown(at_sender=True)])
@@ -688,7 +827,7 @@ async def boss_integral_info_(bot: Bot, event: GroupMessageEvent):
             l_msg.append(msg)
     else:
         l_msg.append(f"世界积分商店内空空如也！")
-    await send_forward_msg(bot, event, '世界积分商店', bot.self_id, l_msg)
+    await send_forward_img(bot, event, '世界积分商店', bot.self_id, l_msg)
     await boss_integral_info.finish()
 
 
@@ -820,3 +959,79 @@ def save_user_boss_fight_info(user_id, data):
     with open(FILEPATH, mode=save_mode, encoding="UTF-8") as f:
         f.write(data)
         f.close()
+
+def get_dict_type_rate(data_dict):
+    """根据字典内概率,返回字典key"""
+    temp_dict = {}
+    for i, v in data_dict.items():
+        try:
+            temp_dict[i] = v["type_rate"]
+        except:
+            continue
+    key = OtherSet().calculated(temp_dict)
+    return key
+
+def get_goods_type():
+    data_dict = BOSSDLW['宝物']
+    return get_dict_type_rate(data_dict)
+
+def get_story_type():
+    """根据概率返回事件类型"""
+    data_dict = BOSSDLW
+    return get_dict_type_rate(data_dict)
+
+BOSSDLW ={"衣以候": "衣以侯布下了禁制镜花水月，",
+    "金凰儿": "金凰儿使用了神通：金凰天火罩！",
+    "九寒": "九寒使用了神通：寒冰八脉！",
+    "莫女": "莫女使用了神通：圣灯启语诀！",
+    "术方": "术方使用了神通：天罡咒！",
+    "卫起": "卫起使用了神通：雷公铸骨！",
+    "血枫": "血枫使用了神通：混世魔身！",
+    "以向": "以向使用了神通：云床九练！",
+    "砂鲛": "不说了！开鳖！",
+    "神风王": "不说了！开鳖！",
+    "鲲鹏": "鲲鹏使用了神通：逍遥游！",
+    "天龙": "天龙使用了神通：真龙九变！",
+    "历飞雨": "厉飞雨使用了神通：天煞震狱功！",
+    "外道贩卖鬼": "不说了！开鳖！",
+    "元磁道人": "元磁道人使用了法宝：元磁神山！",
+    "散发着威压的尸体": "尸体周围爆发了出强烈的罡气！"
+        
+    }
+
+
+def boss_drops(user_rank, boss_rank, boss, user_info):
+    boss_dice = random.randint(0,100)
+    drops_id = None
+    drops_info = None
+    if boss_rank - user_rank >= 6:
+        drops_id = None
+        drops_info = None
+    
+    elif  boss_dice >= 90:
+        drops_id,drops_info = get_drops(user_info)
+       
+    return drops_id, drops_info    
+        
+def get_drops(user_info):
+    """
+    随机获取一个boss掉落物
+    :param user_info:用户信息类
+    :param rift_rank:秘境等级
+    :return 法器ID, 法器信息json
+    """
+    drops_data = items.get_data_by_item_type(['掉落物'])
+    drops_id = get_id(drops_data, user_info.level)
+    drops_info = items.get_data_by_item_id(drops_id)
+    return drops_id, drops_info
+
+def get_id(dict_data, user_level):
+    """根据字典的rank、用户等级、秘境等级随机获取key"""
+    l_temp = []
+    final_rank = USERRANK[user_level]  # 秘境等级，会提高用户的等级
+    pass_rank = 55  # 最终等级超过次等级会抛弃
+    for k, v in dict_data.items():
+        if v["rank"] >= final_rank and (v["rank"] - final_rank) <= pass_rank:
+            l_temp.append(k)
+
+    return random.choice(l_temp)

@@ -1,6 +1,8 @@
 import random
+from pathlib import Path
 from ..xiuxian2_handle import XiuxianDateManage
 from .bossconfig import get_config
+import json
 
 config = get_config()
 JINGJIEEXP = {  # 数值为中期和圆满的平均值
@@ -22,22 +24,28 @@ JINGJIEEXP = {  # 数值为中期和圆满的平均值
     "仙王境": [15020246016, 21028344422, 27036442828],
     "准帝境": [54072885657, 75702039920, 97331194180],
     "仙帝境": [194662388360, 272527343704, 350392299048],
-    "祭道之上": [350392299048, 650392299048, 950392299048],
+    "祭道境": [1550392299048, 1850392299048, 2150392299048],
+    "零": [99999999999999],
 }
 
 jinjie_list = [k for k, v in JINGJIEEXP.items()]
 sql_message = XiuxianDateManage()  # sql类
 
+def get_boss_jinjie_dict():
+    CONFIGJSONPATH = Path() / "data" / "xiuxian" / "境界.json"
+    with open(CONFIGJSONPATH, "r", encoding="UTF-8") as f:
+        data = f.read()
+    temp_dict = {}
+    data = json.loads(data)
+    for k, v in data.items():
+        temp_dict[k] = v['exp']
+    return temp_dict
 
 def createboss():
     top_user_info = sql_message.get_top1_user()
     top_user_level = top_user_info.level
-    
-    if top_user_level == "江湖好手":
-        top_user_level = "搬血境"
-    
-    if top_user_level == "祭道之上":
-        level = top_user_level[:4]
+    if top_user_level == "零":
+        level = top_user_level
     else:
         level = top_user_level[:3]
     boss_jj = random.choice(jinjie_list[:jinjie_list.index(level) + 1])
@@ -70,7 +78,7 @@ JINGJIEEXP_root = {  # 数值为中期和圆满的平均值
 }
 
 
-def createboss_root():
+def createboss_root(): #修仙2
     boss_jj = random.choice(list(JINGJIEEXP_root.keys()))
     bossinfo = get_boss_exp_root(boss_jj)
     bossinfo['name'] = random.choice(config["Boss名字"])
@@ -78,8 +86,7 @@ def createboss_root():
     bossinfo['stone'] = random.choice(config["Boss灵石"][boss_jj])
     return bossinfo
 
-
-def get_boss_exp_root(boss_jj):
+def get_boss_exp_root(boss_jj):#修仙2
     bossexp = random.choice(JINGJIEEXP_root[boss_jj])
     bossinfo = {
         '气血': bossexp * config["Boss倍率"]["气血"],
@@ -88,3 +95,21 @@ def get_boss_exp_root(boss_jj):
         '攻击': int(bossexp * config["Boss倍率"]["攻击"])
     }
     return bossinfo
+
+def createboss_jj(boss_jj):
+    bossinfo = get_boss_exp_1(boss_jj)
+    bossinfo['name'] = random.choice(config["Boss名字"])
+    bossinfo['jj'] = boss_jj
+    bossinfo['stone'] = random.choice(config["Boss灵石"][boss_jj])
+    return bossinfo
+
+def get_boss_exp_1(boss_jj):
+    bossexp = random.choice(JINGJIEEXP[boss_jj])
+    bossinfo = {
+        '气血': bossexp * config["Boss倍率"]["气血"],
+        '总血量': bossexp * config["Boss倍率"]["气血"],
+        '真元': bossexp * config["Boss倍率"]["真元"],
+        '攻击': int(bossexp * config["Boss倍率"]["攻击"])
+    }
+    return bossinfo
+

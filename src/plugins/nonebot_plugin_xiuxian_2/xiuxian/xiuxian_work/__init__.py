@@ -5,7 +5,6 @@ from nonebot.params import RegexGroup
 from ..lay_out import assign_bot, Cooldown
 from nonebot.adapters.onebot.v11 import (
     Bot,
-    PRIVATE_FRIEND,
     GROUP,
     GroupMessageEvent,
     MessageSegment,
@@ -28,12 +27,12 @@ work = {}  # 悬赏令信息记录
 refreshnum: Dict[str, int] = {}  # 用户悬赏令刷新次数记录
 sql_message = XiuxianDateManage()  # sql类
 items = Items()
-lscost = 500000  # 刷新灵石消耗
+lscost = 1000000000 # 刷新灵石消耗
 count = 3  # 免费次数
 
 
 # 重置悬赏令刷新次数
-@resetrefreshnum.scheduled_job("cron", hour=0, minute=0)
+@resetrefreshnum.scheduled_job("cron", hour=8, minute=0)
 async def resetrefreshnum_():
     global refreshnum
     refreshnum = {}
@@ -44,7 +43,7 @@ last_work = on_command("最后的悬赏令", priority=15, block=True)
 do_work = on_regex(
     r"^悬赏令(刷新|终止|结算|接取|帮助)?(\d+)?",
     priority=10,
-    permission=PRIVATE_FRIEND | GROUP,
+    permission=GROUP,
     block=True
 )
 __work_help__ = f"""
@@ -52,7 +51,7 @@ __work_help__ = f"""
 指令：
 1、悬赏令:获取对应实力的悬赏令
 2、悬赏令刷新:刷新当前悬赏令,每日免费{count}次
-实力支持：江湖好手|搬血境|洞天境|化灵境|铭纹境|列阵境|尊者境|神火境|真一境|圣祭境|天神境|虚道境
+实力支持：江湖好手|搬血境|洞天境|化灵境|铭纹境|列阵境|尊者境|神火境|真一境|圣祭境|天神境|虚道境|斩我境|遁一境|至尊境|真仙境
 3、悬赏令终止:终止当前悬赏令任务
 4、悬赏令结算:结算悬赏奖励
 5、悬赏令接取+编号：接取对应的悬赏令
@@ -74,8 +73,8 @@ async def last_work_(bot: Bot, event: GroupMessageEvent):
     user_id = user_info.user_id
     user_level = user_info.level
     is_type, msg = check_user_type(user_id, 2)  # 需要在悬赏令中的用户
-    if (is_type and USERRANK[user_info.level] <= 22) or (
-        is_type and user_info.exp >= sql_message.get_level_power("虚道境圆满")) or (
+    if (is_type and USERRANK[user_info.level] <= 11) or (
+        is_type and user_info.exp >= sql_message.get_level_power("真仙境圆满")) or (
         is_type and int(user_info.exp) >= int(OtherSet().set_closing_type(user_level)) * XiuConfig().closing_exp_upper_limit    
         ):
         user_cd_message = sql_message.get_user_cd(user_id)
@@ -166,8 +165,9 @@ async def last_work_(bot: Bot, event: GroupMessageEvent):
 @do_work.handle(parameterless=[Cooldown(cd_time=1.3, at_sender=True)])
 async def do_work_(bot: Bot, event: GroupMessageEvent, args: Tuple[Any, ...] = RegexGroup()):
     bot, send_group_id = await assign_bot(bot=bot, event=event)
-    user_level = "虚道境圆满"
+    user_level = "仙王境初期"
     isUser, user_info, msg = check_user(event)
+    user_level_sx = user_info.level
     if not isUser:
         if XiuConfig().img:
             pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
@@ -187,7 +187,7 @@ async def do_work_(bot: Bot, event: GroupMessageEvent, args: Tuple[Any, ...] = R
             await bot.send_group_msg(group_id=int(send_group_id), message=msg)
         await do_work.finish()
     mode = args[0]  # 刷新、终止、结算、接取
-    if USERRANK[user_info.level] <= 22:
+    if USERRANK[user_info.level] <= 12:
         msg = f"道友的境界已过创业初期，悬赏令已经不能满足道友了！"
         if XiuConfig().img:
             pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
@@ -206,7 +206,7 @@ async def do_work_(bot: Bot, event: GroupMessageEvent, args: Tuple[Any, ...] = R
     user_level = user_info.level
     if int(user_info.exp) >= int(OtherSet().set_closing_type(user_level)) * XiuConfig().closing_exp_upper_limit:
         # 获取下个境界需要的修为 * 1.5为闭关上限
-        msg = f"道友的修为已经到达上限，悬赏令已无法在获得经验！"
+        msg = f"道友的修为已经到达上限，悬赏令已无法再获得经验！"
         if XiuConfig().img:
             pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
             await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic))
@@ -279,11 +279,20 @@ async def do_work_(bot: Bot, event: GroupMessageEvent, args: Tuple[Any, ...] = R
         except KeyError:
             usernums = 0
 
+        isUser, user_info, msg = check_user(event)
+        if not isUser:
+            if XiuConfig().img:
+                pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
+                await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic))
+            else:
+                await bot.send_group_msg(group_id=int(send_group_id), message=msg)
+                await do_work.finish()
+
         freenum = count - usernums - 1
         if freenum < 0:
             freenum = 0
-            if int(user_info.stone) < lscost:
-                msg = f"道友的灵石不足以刷新，下次刷新消耗灵石：{lscost}枚"
+            if int(user_info.stone) < int(lscost /USERRANK[user_level_sx]):
+                msg = f"道友的灵石不足以刷新，下次刷新消耗灵石：{int(lscost /USERRANK[user_level_sx])}枚"
                 if XiuConfig().img:
                     pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
                     await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic))
@@ -291,7 +300,7 @@ async def do_work_(bot: Bot, event: GroupMessageEvent, args: Tuple[Any, ...] = R
                     await bot.send_group_msg(group_id=int(send_group_id), message=msg)
                 await do_work.finish()
             else:
-                sql_message.update_ls(user_id, lscost, 2)
+                sql_message.update_ls(user_id, int(lscost/USERRANK[user_level_sx]) , 2)
                 stone_use = 1
 
         work_msg = workhandle().do_work(0, level=user_level, exp=user_info.exp, user_id=user_id)
@@ -302,9 +311,9 @@ async def do_work_(bot: Bot, event: GroupMessageEvent, args: Tuple[Any, ...] = R
             work_list.append([i[0], i[3]])
             work_msg_f += f"{n}、{get_work_msg(i)}"
             n += 1
-        work_msg_f += f"(悬赏令每日免费刷新次数：{count}，超过{count}次后，下次刷新消耗灵石{lscost},今日可免费刷新次数：{freenum}次)"
+        work_msg_f += f"(悬赏令每日免费刷新次数：{count}，超过{count}次后，下次刷新消耗灵石{int(lscost /USERRANK[user_level_sx])},今日可免费刷新次数：{freenum}次)"
         if int(stone_use) == 1:
-            work_msg_f += f"\n道友消耗灵石{lscost}枚，成功刷新悬赏令"
+            work_msg_f += f"\n道友消耗灵石{int(lscost /USERRANK[user_level_sx])}枚，成功刷新悬赏令"
         work[user_id] = do_is_work(user_id)
         work[user_id].msg = work_msg_f
         work[user_id].world = work_list

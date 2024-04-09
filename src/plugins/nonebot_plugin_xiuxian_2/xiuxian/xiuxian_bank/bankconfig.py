@@ -15,7 +15,7 @@ CONFIG = {
         "4": {"savemax": 8000000, "levelup": 1600000, 'interest': 0.0023, "level": "优质会员"},
         "5": {"savemax": 16000000, "levelup": 3200000, 'interest': 0.0024, "level": "黄金会员"},
         "6": {"savemax": 32000000, "levelup": 6400000, 'interest': 0.0025, "level": "钻石会员"},
-        "7": {"savemax": 64000000, "levelup": 0, 'interest': 0.0028, "level": "终极会员"},
+        "7": {"savemax": 64000000, "levelup": 0, 'interest': 0.0030, "level": "终极会员"},
     }
 }
 

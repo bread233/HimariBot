@@ -1,0 +1,116 @@
+{
+    "char": {
+        "title": "「暂别冬都」",
+        "pool_img": "https:\/\/patchwiki.biligame.com\/images\/ys\/thumb\/2\/27\/mpc7feb4vwq72hjampecwbw16jpikz7.png\/1200px-%E7%A5%88%E6%84%BF053-2%E6%9C%9F.png",
+        "start_time": "2023-09-05T18:00:00",
+        "end_time": "2023-09-26T14:59:00",
+        "up_char": [
+            {
+                "name": "达达利亚",
+                "star": 5,
+                "limited": false,
+                "zoom": 50.0
+            },
+            {
+                "name": "菲米尼",
+                "star": 4,
+                "limited": false,
+                "zoom": 50.0
+            },
+            {
+                "name": "早柚",
+                "star": 4,
+                "limited": false,
+                "zoom": 50.0
+            },
+            {
+                "name": "诺艾尔",
+                "star": 4,
+                "limited": false,
+                "zoom": 50.0
+            }
+        ]
+    },
+    "arms": {
+        "title": "「神铸赋形」",
+        "pool_img": "https:\/\/patchwiki.biligame.com\/images\/ys\/thumb\/c\/cb\/puylbprgyjmd1n2g5mhyxjoczjtn3j2.png\/1200px-%E7%A5%88%E6%84%BF053%E6%9C%9F%E6%AD%A6%E5%99%A8.png",
+        "start_time": "2023-09-05T18:00:00",
+        "end_time": "2023-09-26T14:59:00",
+        "up_char": [
+            {
+                "name": "贯虹之槊",
+                "star": 5,
+                "limited": false,
+                "zoom": 50.0
+            },
+            {
+                "name": "冬极白星",
+                "star": 5,
+                "limited": false,
+                "zoom": 50.0
+            },
+            {
+                "name": "笛剑",
+                "star": 4,
+                "limited": false,
+                "zoom": 50.0
+            },
+            {
+                "name": "祭礼大剑",
+                "star": 4,
+                "limited": false,
+                "zoom": 50.0
+            },
+            {
+                "name": "匣里灭辰",
+                "star": 4,
+                "limited": false,
+                "zoom": 50.0
+            },
+            {
+                "name": "流浪乐章",
+                "star": 4,
+                "limited": false,
+                "zoom": 50.0
+            },
+            {
+                "name": "弓藏",
+                "star": 4,
+                "limited": false,
+                "zoom": 50.0
+            }
+        ]
+    },
+    "char1": {
+        "title": "「陵薮市朝」",
+        "pool_img": "https:\/\/patchwiki.biligame.com\/images\/ys\/thumb\/1\/11\/aiccuczliikkm8domj8dbq80ybgx099.png\/1200px-%E7%A5%88%E6%84%BF053%E6%9C%9F.png",
+        "start_time": "2023-09-05T18:00:00",
+        "end_time": "2023-09-26T14:59:00",
+        "up_char": [
+            {
+                "name": "钟离",
+                "star": 5,
+                "limited": false,
+                "zoom": 50.0
+            },
+            {
+                "name": "菲米尼",
+                "star": 4,
+                "limited": false,
+                "zoom": 50.0
+            },
+            {
+                "name": "早柚",
+                "star": 4,
+                "limited": false,
+                "zoom": 50.0
+            },
+            {
+                "name": "诺艾尔",
+                "star": 4,
+                "limited": false,
+                "zoom": 50.0
+            }
+        ]
+    }
+}

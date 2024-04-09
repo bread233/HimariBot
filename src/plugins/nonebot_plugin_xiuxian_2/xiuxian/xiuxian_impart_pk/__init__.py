@@ -10,18 +10,17 @@ from nonebot.adapters.onebot.v11 import (
 )
 from ..lay_out import assign_bot, Cooldown
 from ..data_source import jsondata
-from ..read_buff import UserBuffDate
 from nonebot.log import logger
-from ..utils import check_user, get_msg_pic, send_forward_msg_list
+from ..utils import check_user, get_msg_pic, send_forward_img_list
 from .impart_pk_uitls import impart_pk_check
 from .xu_world import xu_world
 from .impart_pk import impart_pk
 from ..xiuxian_config import XiuConfig
-from ..xn_xiuxian_impart import XIUXIAN_IMPART_BUFF
-from ..xiuxian2_handle import XiuxianDateManage, OtherSet
+from ..xiuxian2_handle import XiuxianDateManage, OtherSet, UserBuffDate, XIUXIAN_IMPART_BUFF
 from .. import NICKNAME
 
 xiuxian_impart = XIUXIAN_IMPART_BUFF()
+
 from src.service.apscheduler import scheduler
 impart_re = scheduler
 
@@ -123,7 +122,7 @@ async def impart_pk_list_(bot: Bot, event: GroupMessageEvent):
             {"type": "node", "data": {"name": f"编号 {x}", "uin": bot.self_id,
                                       "content": msg}})
     try:
-        await send_forward_msg_list(bot, event, list_msg)
+        await send_forward_img_list(bot, event, list_msg)
     except ActionFailed:
         msg = "未知原因，查看失败!"
         if XiuConfig().img:
@@ -159,7 +158,7 @@ async def impart_pk_now_(bot: Bot, event: GroupMessageEvent, args: Message = Com
         await impart_pk_now.finish()
     num = args.extract_plain_text().strip()
     if impart_pk.find_user_data(user_info.user_id)["pk_num"] <= 0:
-        msg = "道友今日次数耗尽，明天再来吧！"
+        msg = "道友今日次数耗尽，每天再来吧！"
         if XiuConfig().img:
             pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
             await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic))
@@ -252,7 +251,7 @@ async def impart_pk_now_(bot: Bot, event: GroupMessageEvent, args: Message = Com
                                               "content": f"道友{player_2_name}次数耗尽，离开了虚神界！"}})
                 xu_world.del_xu_world(player_2)
             try:
-                await send_forward_msg_list(bot, event, msg_list)
+                await send_forward_img_list(bot, event, msg_list)
             except ActionFailed:
                 msg = "未知原因，对决显示失败!"
                 if XiuConfig().img:
@@ -277,7 +276,7 @@ async def impart_pk_now_(bot: Bot, event: GroupMessageEvent, args: Message = Com
                                               "content": f"道友{player_1_name}次数耗尽，离开了虚神界！"}})
                 xu_world.del_xu_world(player_1)
             try:
-                await send_forward_msg_list(bot, event, msg_list)
+                await send_forward_img_list(bot, event, msg_list)
             except ActionFailed:
                 msg = "未知原因，对决显示失败!"
                 if XiuConfig().img:
@@ -338,13 +337,15 @@ async def impart_pk_exp_(bot: Bot, event: GroupMessageEvent, args: Message = Com
     user_buff_data = UserBuffDate(user_id)
     mainbuffdata = user_buff_data.get_user_main_buff_data()
     mainbuffratebuff = mainbuffdata['ratebuff'] if mainbuffdata is not None else 0  # 功法修炼倍率
-    exp = int((int(impaer_exp_time) * XiuConfig().closing_exp) * ((level_rate * realm_rate * (1 + mainbuffratebuff))))  # 本次闭关获取的修为
+    mainbuffcloexp = mainbuffdata['clo_exp'] if mainbuffdata != None else 0  # 功法闭关经验
+    mainbuffclors = mainbuffdata['clo_rs'] if mainbuffdata != None else 0  # 功法闭关回复
+    exp = int((int(impaer_exp_time) * XiuConfig().closing_exp) * ((level_rate * realm_rate * (1 + mainbuffratebuff) * (1 + mainbuffcloexp))))  # 本次闭关获取的修为
     max_exp = int((int(OtherSet().set_closing_type(user_info.level)) * XiuConfig().closing_exp_upper_limit))  # 获取下个境界需要的修为 * 1.5为闭关上限
     if 0 < int(user_info.exp + exp) < max_exp:
         xiuxian_impart.use_impart_exp_day(impaer_exp_time, user_id)
         XiuxianDateManage().update_exp(user_id, exp)
         XiuxianDateManage().update_power2(user_id)  # 更新战力
-        result_msg, result_hp_mp = OtherSet().send_hp_mp(user_id, int(exp * hp_speed), int(exp * mp_speed))
+        result_msg, result_hp_mp = OtherSet().send_hp_mp(user_id, int(exp * hp_speed * (1 + mainbuffclors)), int(exp * mp_speed))
         XiuxianDateManage().update_user_attribute(user_id, result_hp_mp[0], result_hp_mp[1], int(result_hp_mp[2] / 10))
         msg = "虚神界修炼结束，共修炼{}分钟，本次闭关增加修为：{}{}{}".format(impaer_exp_time, exp, result_msg[0],
                                                        result_msg[1])

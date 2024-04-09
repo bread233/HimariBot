@@ -2,19 +2,27 @@ from .xiuxian2_handle import XiuxianDateManage
 from nonebot.adapters.onebot.v11 import (
     Bot,
     MessageEvent,
-    GroupMessageEvent
+    GroupMessageEvent,
+    MessageSegment
 )
+import os
+import asyncio
+import aiofiles
+import base64
 import json
 import random
 import math
 import datetime
 import unicodedata
 from nonebot.params import Depends
+from nonebot.log import logger
 from base64 import b64encode
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 from wcwidth import wcwidth
-import os
+from tempfile import NamedTemporaryFile
+from nonebot.adapters import MessageSegment
+from concurrent.futures import ThreadPoolExecutor
 from .data_source import jsondata
 from pathlib import Path
 
@@ -148,6 +156,15 @@ class Txt2Img:
         self.img_width = 780
         self.black_clor = (255, 255, 255)
         self.line_num = 0  
+        
+        
+        self.user_font_size = int(size * 1.5)
+        self.lrc_font_size = int(size)
+        self.font_family = str(jsondata.FONT_FILE)
+        self.share_img_width = 1080
+        self.line_space = int(size)
+        self.lrc_line_space = int(size / 2)
+        
           
     def prepare(self, text, scale):
         text = unicodedata.normalize('NFKC', text)
@@ -172,7 +189,7 @@ class Txt2Img:
         line_num = line_num + text_new.count("\n")
         return text_new, line_num
 
-    def draw_to(self, text, boss_name="", scale = True):
+    def sync_draw_to(self, text, boss_name="", scale = True):
         font_size = self.font_size
         black_clor = self.black_clor
         upper_size = self.upper_size
@@ -238,7 +255,7 @@ class Txt2Img:
             mi_banner.transpose(Image.FLIP_LEFT_RIGHT).transpose(Image.FLIP_TOP_BOTTOM),
             (img_width - out_padding - banner_size + 1, img_hight - out_padding - banner_size + 1),
         )
-
+        
         # # # # 
         draw.text(
             (left_size, upper_size),
@@ -261,21 +278,197 @@ class Txt2Img:
                     (int(img_width - boss_img_w), int(img_hight - boss_img_h)),
                     boss_img
                 )
-        return self.img2b64(out_img)
+        return out_img
 
 
-    def img2b64(self, out_img) -> str:
-        """ image to base64 """
+    async def draw_to(self, text, boss_name="", scale=True):
+        loop = asyncio.get_running_loop()
+        # 异步执行 sync_draw_to 来创建图像对象
+        out_img = await loop.run_in_executor(None, self.sync_draw_to, text, boss_name, scale)
+        # 然后异步转换图像为base64字符串
+        base64_str = await self.img2b64(out_img)
+        return base64_str
+
+
+    async def save(self, title, lrc):
+        """保存图片"""
+        border_color = (220, 211, 196)
+        text_color = (125, 101, 89)
+
+        out_padding = 30
+        padding = 45
+        banner_size = 20
+
+        user_font = ImageFont.truetype(self.font_family, self.user_font_size)
+        lyric_font = ImageFont.truetype(self.font_family, self.lrc_font_size)
+
+        if title == ' ':
+            title = ''
+
+        lrc = self.wrap(lrc)
+
+        if lrc.find("\n") > -1:
+            lrc_rows = len(lrc.split("\n"))
+        else:
+            lrc_rows = 1
+
+        w = self.share_img_width
+
+        if title:
+            inner_h = (
+                padding * 2
+                + self.user_font_size
+                + self.line_space
+                + self.lrc_font_size * lrc_rows
+                + (lrc_rows - 1) * (self.lrc_line_space)
+            )
+        else:
+            inner_h = (
+                padding * 2
+                + self.lrc_font_size * lrc_rows
+                + (lrc_rows - 1) * (self.lrc_line_space)
+            )
+
+        h = out_padding * 2 + inner_h
+
+        out_img = Image.new(mode="RGB", size=(w, h), color=(255, 255, 255))
+        draw = ImageDraw.Draw(out_img)
+
+        mi_img = Image.open(jsondata.BACKGROUND_FILE)
+        mi_banner = Image.open(jsondata.BANNER_FILE).resize(
+            (banner_size, banner_size), resample=3
+        )
+
+        # add background
+        for x in range(int(math.ceil(h / 100))):
+            out_img.paste(mi_img, (0, x * 100))
+
+        # add border
+        def draw_rectangle(draw, rect, width):
+            for i in range(width):
+                draw.rectangle(
+                    (rect[0] + i, rect[1] + i, rect[2] - i, rect[3] - i),
+                    outline=border_color,
+                )
+
+        draw_rectangle(
+            draw, (out_padding, out_padding, w - out_padding, h - out_padding), 2
+        )
+
+        # add banner
+        out_img.paste(mi_banner, (out_padding, out_padding))
+        out_img.paste(
+            mi_banner.transpose(Image.FLIP_TOP_BOTTOM),
+            (out_padding, h - out_padding - banner_size + 1),
+        )
+        out_img.paste(
+            mi_banner.transpose(Image.FLIP_LEFT_RIGHT),
+            (w - out_padding - banner_size + 1, out_padding),
+        )
+        out_img.paste(
+            mi_banner.transpose(Image.FLIP_LEFT_RIGHT).transpose(Image.FLIP_TOP_BOTTOM),
+            (w - out_padding - banner_size + 1, h - out_padding - banner_size + 1),
+        )
+
+        if title:
+            user_w, user_h = ImageDraw.Draw(
+                Image.new(mode="RGB", size=(1, 1))
+            ).textsize(title, font=user_font, spacing=self.line_space)
+            draw.text(
+                ((w - user_w) // 2, out_padding + padding),
+                title,
+                font=user_font,
+                fill=text_color,
+                spacing=self.line_space,
+            )
+            draw.text(
+                (
+                    out_padding + padding,
+                    out_padding + padding + self.user_font_size + self.line_space,
+                ),
+                lrc,
+                font=lyric_font,
+                fill=text_color,
+                spacing=self.lrc_line_space,
+            )
+        else:
+            draw.text(
+                (out_padding + padding, out_padding + padding),
+                lrc,
+                font=lyric_font,
+                fill=text_color,
+                spacing=self.lrc_line_space,
+            )
+        base64_str = await self.img2b64(out_img)
+        return base64_str
+    
+
+    def sync_img2b64(self, out_img) -> str:
+        """ 将图片转换为base64 """
         buf = BytesIO()
         out_img.save(buf, format="PNG")
         base64_str = "base64://" + b64encode(buf.getvalue()).decode()
         return base64_str
+    
+    async def img2b64(self, out_img):
+        loop = asyncio.get_running_loop()
+        with ThreadPoolExecutor() as pool:
+            base64_str = await loop.run_in_executor(pool, self.sync_img2b64, out_img)
+        return base64_str
+    
+    
+    def wrap(self, string):
+        max_width = int(1850 / self.lrc_font_size)
+        temp_len = 0
+        result = ''
+        for ch in string:
+            result += ch
+            temp_len += wcwidth(ch)
+            if ch == '\n':
+                temp_len = 0
+            if temp_len >= max_width:
+                temp_len = 0
+                result += '\n'
+        result = result.rstrip()
+        return result
 
+    
+    
 
 async def get_msg_pic(msg, boss_name="", scale = True):
     img = Txt2Img()
-    pic = img.draw_to(msg, boss_name, scale)
+    pic = await img.draw_to(msg, boss_name, scale)
     return pic
+
+
+async def send_forward_img(bot, event, name, uin, msgs):
+    img = Txt2Img()
+    combined_msg = '\n'.join(msgs)
+    img_data = await img.draw_to(combined_msg)
+    base64_str = img_data.split("base64://")[1] if "base64://" in img_data else img_data
+
+    # 直接构造CQ码
+    message = f"[CQ:image,file=base64://{base64_str}]"
+    
+    if isinstance(event, GroupMessageEvent):
+        await bot.send_group_msg(group_id=event.group_id, message=message)
+    else:
+        await bot.send_private_msg(user_id=event.user_id, message=message)
+
+
+async def send_forward_img_list(bot, event, messages):
+    img = Txt2Img()
+    combined_msg = '\n'.join([str(msg['data']['content']) for msg in messages])
+    img_data = await img.draw_to(combined_msg)
+    base64_str = img_data.split("base64://")[1] if "base64://" in img_data else img_data
+
+    # 直接构造CQ码
+    message = f"[CQ:image,file=base64://{base64_str}]"
+    
+    if isinstance(event, GroupMessageEvent):
+        await bot.send_group_msg(group_id=event.group_id, message=message)
+    else:
+        await bot.send_private_msg(user_id=event.user_id, message=message)
 
 
 def CommandObjectID() -> int:
@@ -317,4 +510,9 @@ def number_to(num):
         level -= 1
     return '{}{}'.format(round(num, 1), units[level])
 
-
+async def pic_msg_format(msg, event):
+    user_name = (
+        event.sender.card if event.sender.card else event.sender.nickname
+    )
+    result = "@" + user_name + "\n" + msg
+    return result

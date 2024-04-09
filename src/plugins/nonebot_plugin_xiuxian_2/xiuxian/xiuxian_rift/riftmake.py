@@ -2,12 +2,10 @@ import random
 from .riftconfig import get_config
 from ..xiuxian2_handle import OtherSet
 from .jsondata import read_f
-from ..read_buff import UserBuffDate
-from ..xiuxian2_handle import XiuxianDateManage
+from ..xiuxian2_handle import XiuxianDateManage, UserBuffDate, XIUXIAN_IMPART_BUFF
 from ..player_fight import Boss_fight
 from ..item_json import Items
 from ..xiuxian_config import USERRANK
-from ..xn_xiuxian_impart import XIUXIAN_IMPART_BUFF
 
 sql_message = XiuxianDateManage()
 xiuxian_impart = XIUXIAN_IMPART_BUFF()
@@ -20,27 +18,56 @@ NONEMSG = [
 ]
 
 TREASUREMSG = [
+    "道友进入秘境后误入一处兵冢，仔细查探一番后竟然找到了{}",
+    "在秘境最深处与神秘势力大战，底牌尽出总算是抢到了{}"
+]
+
+TREASUREMSG_1 = [
+    "道友进入秘境后闯过了重重试炼，拿到了{}",
+    "道友进入秘境后闯过了重重试炼，拿到了{}"
+]
+
+TREASUREMSG_2 = [
+    "道友进入秘境后偶遇了一位修为深不可测的大能，大能见与你有缘，留下一本{}后飘然离去",
+    "道友进入秘境后偶遇了一位修为深不可测的大能，大能见与你有缘，留下一本{}后飘然离去"
+]
+
+TREASUREMSG_3 = [
+    "道友进入秘境后四处寻宝许久却两手空空，正当秘境快要关闭时你瞥见石缝里的一本灰色书籍，打开一看居然是{}",
+    "道友进入秘境后四处寻宝许久却两手空空，正当秘境快要关闭时你瞥见石缝里的一本灰色书籍，打开一看居然是{}"
+]
+
+TREASUREMSG_4 = [
     "道友进入秘境后搜刮了一番，{}",
     "道友进入秘境后竟然发现了一位前辈坐化于此，{}"
 ]
+
+TREASUREMSG_5 = [
+    "道友在秘境里探索险境，突然感觉一阵天旋地转，清醒过来时已被踢出秘境！但手里多了一本书籍，竟然是失传已久的{}！",
+    "道友在秘境里探索险境，突然感觉一阵天旋地转，清醒过来时已被踢出秘境！但手里多了一本书籍，竟然是失传已久的{}！"
+]
+
 
 STORY = {
     "宝物": {
         "type_rate": 300,
         "功法": {
-            "type_rate": 25,
+            "type_rate": 50,
+        },
+        "辅修功法": {
+            "type_rate": 45,
         },
         "神通": {
-            "type_rate": 25,
+            "type_rate": 50,
         },
         "法器": {
-            "type_rate": 50,
+            "type_rate": 25,
         },
         "防具": {
-            "type_rate": 50,
+            "type_rate": 30,
         },
         "灵石": {
-            "type_rate": 150,
+            "type_rate": 100,
             "stone": 500000
         }
     },
@@ -50,14 +77,14 @@ STORY = {
             "type_rate": 200,
             "Boss数据": {
                 "name": ["墨蛟", "婴鲤兽", "千目妖", "鸡冠蛟", "妖冠蛇", "铁火蚁", "天晶蚁", "银光鼠", "紫云鹰", "狗青"],
-                "hp": [1.2, 1.4, 1.6, 1.8, 2, 3],
+                "hp": [1.2, 1.4, 1.6, 1.8, 2, 3, 5, 10],
                 "mp": 10,
-                "atk": [0.1, 0.12, 0.14, 0.16, 0.18, 0.5],
+                "atk": [0.1, 0.12, 0.14, 0.16, 0.18, 0.5, 1, 2],
             },
             "success": {
                 "desc": "道友大战一番成功战胜{}!",
                 "give": {
-                    "exp": [0.01, 0.02, 0.03, 0.04, 0.05],
+                    "exp": [0.01, 0.02, 0.03, 0.04, 0.05, 0.07, 0.09],
                     "stone": 500000
                 }
             },
@@ -65,6 +92,7 @@ STORY = {
                 "desc": "道友大战一番不敌{}，仓皇逃窜！",
             }
         },
+
         "掉血事件": {
             "type_rate": 100,
             "desc": [
@@ -99,11 +127,24 @@ async def get_boss_battle_info(user_info, rift_rank, bot_id):
     player = {"user_id": None, "道号": None, "气血": None, "攻击": None, "真元": None, '会心': None, '防御': 0}
     userinfo = sql_message.get_user_real_info(user_info.user_id)
     user1_weapon_data = UserBuffDate(user_info.user_id).get_user_weapon_data()
+    user_armor_data = UserBuffDate(user_info.user_id).get_user_armor_buff_data()
+    user_armor_data = UserBuffDate(user_info.user_id).get_user_armor_buff_data()#秘境战斗防具会心
+    user_main_crit_data = UserBuffDate(user_info.user_id).get_user_main_buff_data() #秘境战斗功法会心
+    
+    if user_main_crit_data is not None: #秘境战斗功法会心
+        main_crit_buff = ((user_main_crit_data['crit_buff']) * 100)
+    else:
+        main_crit_buff = 0
+    
+    if  user_armor_data != None: #秘境战斗防具会心
+        armor_crit_buff = user_armor_data['crit_buff']
+    else:
+        armor_crit_buff = 0
 
     if user1_weapon_data is not None:
-        player['会心'] = int(user1_weapon_data['crit_buff'] * 100)
+        player['会心'] = int(((user1_weapon_data['crit_buff']) + armor_crit_buff +  main_crit_buff) * 100) 
     else:
-        player['会心'] = 1
+        player['会心'] = (armor_crit_buff + main_crit_buff) * 100
 
     player['user_id'] = userinfo.user_id
     player['道号'] = userinfo.user_name
@@ -118,13 +159,15 @@ async def get_boss_battle_info(user_info, rift_rank, bot_id):
         "气血": int(base_exp * random.choice(boss_data["hp"])),
         "攻击": int(base_exp * random.choice(boss_data["atk"])),
         "真元": base_exp * boss_data["mp"],
+        "jj":"斩我境",
         'stone': 1
     }
+
 
     result, victor, bossinfo_new, stone = await Boss_fight(player, boss_info, bot_id=bot_id)  # 未开启，1不写入，2写入
 
     if victor == "群友赢了":  # 获胜
-        user_rank = 50 - USERRANK[user_info.level]  # 50-用户当前等级
+        user_rank = 56 - USERRANK[user_info.level]  # 56-用户当前等级 原50
         success_info = STORY['战斗']['Boss战斗']["success"]
         msg = success_info['desc'].format(boss_info["name"])
         give_exp = int(random.choice(success_info["give"]["exp"]) * user_info.exp)
@@ -172,15 +215,15 @@ def get_treasure_info(user_info, rift_rank):
     msg = None
     if rift_type == "法器":
         weapon_info = get_weapon(user_info, rift_rank)
-        temp_msg = f"竟然获得了{weapon_info[1]['level']}:{weapon_info[1]['name']}!"
+        temp_msg = f"{weapon_info[1]['level']}:{weapon_info[1]['name']}!"
         msg = random.choice(TREASUREMSG).format(temp_msg)
         sql_message.send_back(user_info.user_id, weapon_info[0], weapon_info[1]['name'], weapon_info[1]['type'], 1)
         # 背包sql
 
     elif rift_type == "防具":  # todo
         armor_info = get_armor(user_info, rift_rank)
-        temp_msg = f"竟然获得了{armor_info[1]['level']}防具：{armor_info[1]['name']}!"
-        msg = random.choice(TREASUREMSG).format(temp_msg)
+        temp_msg = f"{armor_info[1]['level']}防具：{armor_info[1]['name']}!"
+        msg = random.choice(TREASUREMSG_1).format(temp_msg)
         sql_message.send_back(user_info.user_id, armor_info[0], armor_info[1]['name'], armor_info[1]['type'], 1)
         # 背包sql
 
@@ -189,33 +232,47 @@ def get_treasure_info(user_info, rift_rank):
         if give_main_info[0]:  # 获得了
             main_buff_id = give_main_info[1]
             main_buff = items.get_data_by_item_id(main_buff_id)
-            temp_msg = f"竟然获得了{main_buff['level']}功法：{main_buff['name']}!"
-            msg = random.choice(TREASUREMSG).format(temp_msg)
+            temp_msg = f"{main_buff['level']}功法：{main_buff['name']}"
+            msg = random.choice(TREASUREMSG_2).format(temp_msg)
             sql_message.send_back(user_info.user_id, main_buff_id, main_buff['name'], main_buff['type'], 1)
         else:
-            msg = '竟空手而归！'
+            msg = '道友在秘境中获得一本书籍，翻开一看居然是绿野仙踪...'
 
     elif rift_type == "神通":
         give_sec_info = get_sec_info(user_info.level, rift_rank)
         if give_sec_info[0]:  # 获得了
             sec_buff_id = give_sec_info[1]
             sec_buff = items.get_data_by_item_id(sec_buff_id)
-            temp_msg = f"竟然获得了{sec_buff['level']}功法：{sec_buff['name']}!"
-            msg = random.choice(TREASUREMSG).format(temp_msg)
+            temp_msg = f"{sec_buff['level']}神通：{sec_buff['name']}!"
+            msg = random.choice(TREASUREMSG_3).format(temp_msg)
             sql_message.send_back(user_info.user_id, sec_buff_id, sec_buff['name'], sec_buff['type'], 1)
             # 背包sql
         else:
-            msg = '竟空手而归！'
+            msg = '道友在秘境中获得一本书籍，翻开一看居然是金瓶梅...'
 
+    elif rift_type == "辅修功法":
+        give_sub_info = get_sub_info(user_info.level, rift_rank)
+        if give_sub_info[0]:  # 获得了
+            sub_buff_id = give_sub_info[1]
+            sub_buff = items.get_data_by_item_id(sub_buff_id)
+            temp_msg = f"{sub_buff['level']}辅修功法：{sub_buff['name']}!"
+            msg = random.choice(TREASUREMSG_5).format(temp_msg)
+            sql_message.send_back(user_info.user_id, sub_buff_id, sub_buff['name'], sub_buff['type'], 1)
+            # 背包sql
+        else:
+            msg = '道友在秘境中获得一本书籍，翻开一看居然是四库全书...'
+
+    
     elif rift_type == "灵石":
         stone_base = STORY['宝物']['灵石']['stone']
         user_rank = random.randint(1, 10)  # 随机等级
         give_stone = (rift_rank + user_rank) * stone_base
         sql_message.update_ls(user_info.user_id, give_stone, 1)
         temp_msg = f"竟然获得了灵石：{give_stone}枚！"
-        msg = random.choice(TREASUREMSG).format(temp_msg)
+        msg = random.choice(TREASUREMSG_4).format(temp_msg)
 
     return msg
+
 
 
 def get_dict_type_rate(data_dict):
@@ -323,6 +380,23 @@ def get_sec_info(user_level, rift_rank):
         sec_buff_id = random.choice(sec_buff_id_list)
         return is_success, sec_buff_id
     return is_success, sec_buff_id
+
+def get_sub_info(user_level, rift_rank):
+    """获取辅修功法的信息"""
+    user_rank = USERRANK[user_level]  # type=int，用户等级
+    sub_buff_type = get_skill_by_rank(user_level, rift_rank)  # 天地玄黄
+    sub_buff_id_list = skill_data[sub_buff_type]['fx_list']
+    init_rate = 60  # 初始概率为60
+    finall_rate = init_rate + rift_rank * 5
+    finall_rate = finall_rate if finall_rate <= 100 else 100
+    is_success = False
+    sub_buff_id = 0
+    if random.randint(0, 100) <= finall_rate:  # 成功
+        is_success = True
+        sub_buff_id = random.choice(sub_buff_id_list)
+        return is_success, sub_buff_id
+    return is_success, sub_buff_id
+
 
 
 def get_skill_by_rank(user_level, rift_rank):
