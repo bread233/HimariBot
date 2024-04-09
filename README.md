@@ -2,10 +2,14 @@
 
 ## How to start
 
-1. generate project using `nb create` .
-2. create your plugin using `nb plugin create` .
-3. writing your plugins under `src/plugins` folder.
-4. run your bot using `nb run --reload` .
+1. generate project using `poetry install` .
+2. run your bot using `poetry run python bot.py` .
+
+## Start with docker
+
+Ubuntu:
+
+sudo docker run --name himaribot --privileged=true -p 8181:8181 --network host -d xmb233/himaribot:v1.0
 
 ## Documentation
 
