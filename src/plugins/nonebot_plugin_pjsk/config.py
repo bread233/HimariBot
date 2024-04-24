@@ -11,12 +11,12 @@ class ConfigModel(BaseModel):
     pjsk_req_retry: int = 2
     pjsk_req_proxy: Optional[str] = None
     pjsk_assets_prefix: List[str] = [
-        "https://ghproxy.com/https://raw.githubusercontent.com/TheOriginalAyaka/sekai-stickers/main/",
+        "https://raw.githubusercontent.com/TheOriginalAyaka/sekai-stickers/main/",
         "https://raw.gitmirror.com/TheOriginalAyaka/sekai-stickers/main/",
         "https://raw.githubusercontent.com/TheOriginalAyaka/sekai-stickers/main/",
     ]
     pjsk_repo_prefix: List[str] = [
-        "https://ghproxy.com/https://raw.githubusercontent.com/Agnes4m/nonebot_plugin_pjsk/main/",
+        "https://raw.githubusercontent.com/Agnes4m/nonebot_plugin_pjsk/main/",
         "https://raw.gitmirror.com/Agnes4m/nonebot_plugin_pjsk/main/",
         "https://raw.githubusercontent.com/Agnes4m/nonebot_plugin_pjsk/main/",
     ]
