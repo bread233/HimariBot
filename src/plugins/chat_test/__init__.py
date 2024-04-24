@@ -26,13 +26,13 @@ __plugin_meta__ = PluginMetadata(
 
 chat_matcher = on_command("在?", aliases={'zai?','在吗?','在吗？','在？','zaima?'}, rule=to_me())
 
-@chat_matcher.handle()
+#@chat_matcher.handle()
 async def chat(args: Message = CommandArg()):
     await chat_matcher.finish(f"error!出问题了！")
 
 chat_matcher1 = on_command("hmr", aliases=Bot_NICKNAME)
 
-@chat_matcher1.handle()
+#@chat_matcher1.handle()
 async def chat1(args: Message = CommandArg()):
     if next(x for x in {'在?','zai?','在吗?','在吗？','在？','zaima?'} if x in args.extract_plain_text()):
         await chat_matcher1.finish(f"error!出问题了！")
@@ -65,10 +65,10 @@ async def chain_reply(bot, ev, chain, msg):
 
 mc_matcher = on_command("mc帮助", aliases={"mc连接","mc登录"})
 
-msgs = ["客户端连接方法：\n1，先下载hmcl客户端，直接创建离线账号并且安装1.20.1的客户端（不用安装forge）\n2，多人游戏中填写下记服务器 xmb-home-pc.softether.net:25565",
-        "客户端直接百度hmcl或者下载群里的\n或者进入链接下载\n xmb-home-pc.softether.net:65332/webdav \n 账号密码都是 mc",
-        "只玩就不用往下看了，下面是服务端配置mod文件位置",
-        "mod安装位置：\n1，登录管理网页： xmb-home-pc.softether.net:23333\n2，用户名：user 密码：User12345\n3，第一个实例点击管理\n4，在实例功能组中点击 文件管理\n5，在mods文件夹中上传mod\n6，回到控制台重启实例"
+msgs = ["客户端连接方法：\n https://www.superbread.uk/2024/04/23/minecraft%e5%ae%a2%e6%88%b7%e7%ab%af%e4%bd%bf%e7%94%a8%e4%b8%8emod%e5%ae%89%e8%a3%85/",
+        "下载包:\n https://www.superbread.uk/nas/sharing/KSBjRGyg2",
+        "宝可梦服:\n pkm.superbread.uk",
+        "工业2服:\n fcy.superbread.uk"
         ]
 
 @mc_matcher.handle()
