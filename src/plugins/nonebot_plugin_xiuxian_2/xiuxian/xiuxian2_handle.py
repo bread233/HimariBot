@@ -1416,7 +1416,10 @@ def final_user_data(user_data):
         armor_atk_buff = 0
     else:
         armor_info = items.get_data_by_item_id(user_buff_data.armor_buff) #防具攻击
-        armor_atk_buff = armor_info['atk_buff'] 
+        try:
+            armor_atk_buff = armor_info['atk_buff'] 
+        except:
+            atk_buff_msg = "攻击力buff获取失败"
     #
     if int(user_buff_data.faqi_buff) == 0:
         weapon_atk_buff = 0
@@ -1914,7 +1917,10 @@ def get_armor_info_msg(armor_id, armor_info=None):
     if armor_info is None:
         armor_info = items.get_data_by_item_id(armor_id)
     def_buff_msg = f"提升{int(armor_info['def_buff'] * 100)}%减伤率！"
-    atk_buff_msg = f"提升{int(armor_info['atk_buff'] * 100)}%攻击力！" if armor_info['atk_buff'] != 0 else ''
+    try:
+        atk_buff_msg = f"提升{int(armor_info['atk_buff'] * 100)}%攻击力！" if armor_info['atk_buff'] != 0 else ''
+    except:
+        atk_buff_msg = "攻击力buff获取失败"
     crit_buff_msg = f"提升{int(armor_info['crit_buff'] * 100)}%会心率！" if armor_info['crit_buff'] != 0 else ''
     msg += f"名字：{armor_info['name']}\n"
     msg += f"品阶：{armor_info['level']}\n"
