@@ -1419,7 +1419,7 @@ def final_user_data(user_data):
         try:
             armor_atk_buff = armor_info['atk_buff'] 
         except:
-            atk_buff_msg = "攻击力buff获取失败"
+            armor_atk_buff = 0
     #
     if int(user_buff_data.faqi_buff) == 0:
         weapon_atk_buff = 0
@@ -1432,8 +1432,12 @@ def final_user_data(user_data):
     main_atk_buff = main_buff_data['atkbuff'] if main_buff_data is not None else 0
     user_data[15] = int(user_data[15] * (1 + main_hp_buff + impart_hp_per))  # hp
     user_data[16] = int(user_data[16] * (1 + main_mp_buff + impart_mp_per))  # mp
-    user_data[17] = int((user_data[17] * (user_data[18] * 0.04 + 1) * (1 + main_atk_buff) * (
-            1 + weapon_atk_buff) * (1 + armor_atk_buff)) * (1 + impart_atk_per)) + int(user_buff_data.atk_buff)
+    try:
+        user_data[17] = int((user_data[17] * (user_data[18] * 0.04 + 1) * (1 + main_atk_buff) * (
+                1 + weapon_atk_buff) * (1 + armor_atk_buff)) * (1 + impart_atk_per)) + int(user_buff_data.atk_buff)
+    except:
+         user_data[17] = int((user_data[17] * (user_data[18] * 0.04 + 1) * (1 + main_atk_buff) * (
+                1 + weapon_atk_buff)) * (1 + impart_atk_per)) + int(user_buff_data.atk_buff)
     # 每级+4%攻击
     user_data = tuple(user_data)
     return user_data
@@ -1894,7 +1898,10 @@ def get_weapon_info_msg(weapon_id, weapon_info=None):
     msg = ''
     if weapon_info is None:
         weapon_info = items.get_data_by_item_id(weapon_id)
-    atk_buff_msg = f"提升{int(weapon_info['atk_buff'] * 100)}%攻击力！" if weapon_info['atk_buff'] != 0 else ''
+    try:
+        atk_buff_msg = f"提升{int(weapon_info['atk_buff'] * 100)}%攻击力！" if weapon_info['atk_buff'] != 0 else ''
+    except:
+        atk_buff_msg = "获取数据失败"
     crit_buff_msg = f"提升{int(weapon_info['crit_buff'] * 100)}%会心率！" if weapon_info['crit_buff'] != 0 else ''
     crit_atk_msg = f"提升{int(weapon_info['critatk'] * 100)}%会心伤害！" if weapon_info['critatk'] != 0 else ''
     def_buff_msg = f"提升{int(weapon_info['def_buff'] * 100)}%减伤率！" if weapon_info['def_buff'] != 0 else ''
