@@ -89,7 +89,10 @@ async def xiuxian_message_(bot: Bot, event: GroupMessageEvent):
     if user_weapon_data is not None:
         weapon_name = f"{user_weapon_data['name']}({user_weapon_data['level']})"
     if user_armor_data is not None:
-        armor_name = f"{user_armor_data['name']}({user_armor_data['level']})"
+        try:
+            armor_name = f"{user_armor_data['name']}({user_armor_data['level']})"
+        except:
+            armor_name = '无'
     main_rate_buff = UserBuffDate(user_id).get_user_main_buff_data()#功法突破概率提升
     number =  main_rate_buff['number'] if main_rate_buff is not None else 0
     DETAIL_MAP = {

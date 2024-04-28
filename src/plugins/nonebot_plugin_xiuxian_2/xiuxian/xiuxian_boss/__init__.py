@@ -420,7 +420,10 @@ async def battle_(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg
         main_crit_buff = 0
   
     if  user_armor_data != None: #boss战防具会心
-        armor_crit_buff = user_armor_data['crit_buff']
+        try:
+            armor_crit_buff = user_armor_data['crit_buff']
+        except:
+            armor_crit_buff = 0
     else:
         armor_crit_buff = 0
     
