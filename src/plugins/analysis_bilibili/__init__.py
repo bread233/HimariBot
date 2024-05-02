@@ -99,7 +99,7 @@ def format_msg(msg_list: List[Union[List[str], str]], is_plain_text: bool = Fals
     return msg
 
 
-async def send_msg(msg_list: List[Union[List[str], str, bool]]) -> None:
+async def send_msg(msg_list: List[Union[List[str], str, bool]],text) -> None:
     if msg_list is False:
         return
     if msg_list is None:
@@ -113,6 +113,8 @@ async def send_msg(msg_list: List[Union[List[str], str, bool]]) -> None:
     except Exception as e:
         logger.exception(e)
         logger.warning(f"{msg_list}\n此次解析的内容可能被风控！")
+        error_msg = f"{text}\n此次解析的内容可能被风控！"
+        await analysis_bili.finish(error_msg)
 
 
 async def get_msg(event: Event, text: str, search: bool = False) -> Union[List[str], bool]:
@@ -150,11 +152,11 @@ async def get_msg(event: Event, text: str, search: bool = False) -> Union[List[s
 async def handle_analysis(event: Event) -> None:
     text = str(event.message).strip()
     msg = await get_msg(event, text)
-    await send_msg(msg)
+    await send_msg(msg,text)
 
 
 @search_bili.handle()
 async def handle_search(event: Event) -> None:
     text = str(event.message)[3:].strip()
     msg = await get_msg(event, text, search=True)
-    await send_msg(msg)
+    await send_msg(msg,text)
