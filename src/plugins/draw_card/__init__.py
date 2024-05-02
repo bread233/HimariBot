@@ -16,7 +16,7 @@ from src.service.apscheduler import scheduler
 
 from .handles.base_handle import BaseHandle
 from .handles.azur_handle import AzurHandle
-from .handles.fgo_handle import FgoHandle
+#from .handles.fgo_handle import FgoHandle
 from .handles.genshin_handle import GenshinHandle
 from .handles.guardian_handle import GuardianHandle
 from .handles.onmyoji_handle import OnmyojiHandle
@@ -165,7 +165,7 @@ async def _():
 
         games = (
             Game({"azur", "碧蓝航线"}, AzurHandle(), draw_config.AZUR_FLAG),
-            Game({"fgo", "命运冠位指定"}, FgoHandle(), draw_config.FGO_FLAG),
+            #Game({"fgo", "命运冠位指定"}, FgoHandle(), draw_config.FGO_FLAG),
             Game(
                 {"genshin", "原神"},
                 GenshinHandle(),
