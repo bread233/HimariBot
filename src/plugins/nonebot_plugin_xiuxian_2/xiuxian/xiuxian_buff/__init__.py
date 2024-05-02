@@ -322,7 +322,10 @@ async def qc_(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
             main_crit_buff = 0
         
         if user1_armor_crit_buff is not None: #玩家1防具会心
-            armor_crit_buff = user1_armor_crit_buff['crit_buff']
+            try:
+                armor_crit_buff = user1_armor_crit_buff['crit_buff']
+            except:
+                armor_crit_buff = 0
         else:
             armor_crit_buff = 0
             
@@ -342,7 +345,10 @@ async def qc_(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
             main_crit_buff2 = 0
         
         if user2_armor_crit_buff is not None: #玩家2防具会心
-            armor_crit_buff2 = user2_armor_crit_buff['crit_buff']
+            try:
+                armor_crit_buff2 = user2_armor_crit_buff['crit_buff']
+            except:
+                armor_crit_buff2 = 0
         else:
             armor_crit_buff2 = 0
             
@@ -859,7 +865,10 @@ async def mind_state_(bot: Bot, event: GroupMessageEvent):
         main_def =0
     
     if user_armor_crit_data is not None: #我的状态防具会心
-        armor_crit_buff = ((user_armor_crit_data['crit_buff']) * 100)
+        try:
+            armor_crit_buff = ((user_armor_crit_data['crit_buff']) * 100)
+        except:
+            armor_crit_buff = 0
     else:
         armor_crit_buff = 0
         
@@ -870,7 +879,10 @@ async def mind_state_(bot: Bot, event: GroupMessageEvent):
 
     user_armor_data = user_buff_data.get_user_armor_buff_data()
     if user_armor_data is not None:
-        def_buff = int(user_armor_data['def_buff'] * 100) #我的状态防具减伤
+        try:
+            def_buff = int(user_armor_data['def_buff'] * 100) #我的状态防具减伤
+        except:
+            def_buff = 0
     else:
         def_buff = 0
     

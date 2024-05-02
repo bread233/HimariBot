@@ -1416,7 +1416,10 @@ def final_user_data(user_data):
         armor_atk_buff = 0
     else:
         armor_info = items.get_data_by_item_id(user_buff_data.armor_buff) #防具攻击
-        armor_atk_buff = armor_info['atk_buff'] 
+        try:
+            armor_atk_buff = armor_info['atk_buff'] 
+        except:
+            armor_atk_buff = 0
     #
     if int(user_buff_data.faqi_buff) == 0:
         weapon_atk_buff = 0
@@ -1429,8 +1432,12 @@ def final_user_data(user_data):
     main_atk_buff = main_buff_data['atkbuff'] if main_buff_data is not None else 0
     user_data[15] = int(user_data[15] * (1 + main_hp_buff + impart_hp_per))  # hp
     user_data[16] = int(user_data[16] * (1 + main_mp_buff + impart_mp_per))  # mp
-    user_data[17] = int((user_data[17] * (user_data[18] * 0.04 + 1) * (1 + main_atk_buff) * (
-            1 + weapon_atk_buff) * (1 + armor_atk_buff)) * (1 + impart_atk_per)) + int(user_buff_data.atk_buff)
+    try:
+        user_data[17] = int((user_data[17] * (user_data[18] * 0.04 + 1) * (1 + main_atk_buff) * (
+                1 + weapon_atk_buff) * (1 + armor_atk_buff)) * (1 + impart_atk_per)) + int(user_buff_data.atk_buff)
+    except:
+         user_data[17] = int((user_data[17] * (user_data[18] * 0.04 + 1) * (1 + main_atk_buff) * (
+                1 + weapon_atk_buff)) * (1 + impart_atk_per)) + int(user_buff_data.atk_buff)
     # 每级+4%攻击
     user_data = tuple(user_data)
     return user_data
@@ -1891,7 +1898,10 @@ def get_weapon_info_msg(weapon_id, weapon_info=None):
     msg = ''
     if weapon_info is None:
         weapon_info = items.get_data_by_item_id(weapon_id)
-    atk_buff_msg = f"提升{int(weapon_info['atk_buff'] * 100)}%攻击力！" if weapon_info['atk_buff'] != 0 else ''
+    try:
+        atk_buff_msg = f"提升{int(weapon_info['atk_buff'] * 100)}%攻击力！" if weapon_info['atk_buff'] != 0 else ''
+    except:
+        atk_buff_msg = "获取数据失败"
     crit_buff_msg = f"提升{int(weapon_info['crit_buff'] * 100)}%会心率！" if weapon_info['crit_buff'] != 0 else ''
     crit_atk_msg = f"提升{int(weapon_info['critatk'] * 100)}%会心伤害！" if weapon_info['critatk'] != 0 else ''
     def_buff_msg = f"提升{int(weapon_info['def_buff'] * 100)}%减伤率！" if weapon_info['def_buff'] != 0 else ''
@@ -1914,7 +1924,10 @@ def get_armor_info_msg(armor_id, armor_info=None):
     if armor_info is None:
         armor_info = items.get_data_by_item_id(armor_id)
     def_buff_msg = f"提升{int(armor_info['def_buff'] * 100)}%减伤率！"
-    atk_buff_msg = f"提升{int(armor_info['atk_buff'] * 100)}%攻击力！" if armor_info['atk_buff'] != 0 else ''
+    try:
+        atk_buff_msg = f"提升{int(armor_info['atk_buff'] * 100)}%攻击力！" if armor_info['atk_buff'] != 0 else ''
+    except:
+        atk_buff_msg = "攻击力buff获取失败"
     crit_buff_msg = f"提升{int(armor_info['crit_buff'] * 100)}%会心率！" if armor_info['crit_buff'] != 0 else ''
     msg += f"名字：{armor_info['name']}\n"
     msg += f"品阶：{armor_info['level']}\n"

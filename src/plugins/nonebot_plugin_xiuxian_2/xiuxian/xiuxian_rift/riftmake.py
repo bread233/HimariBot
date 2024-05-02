@@ -137,7 +137,10 @@ async def get_boss_battle_info(user_info, rift_rank, bot_id):
         main_crit_buff = 0
     
     if  user_armor_data != None: #秘境战斗防具会心
-        armor_crit_buff = user_armor_data['crit_buff']
+        try:
+            armor_crit_buff = user_armor_data['crit_buff']
+        except:
+            armor_crit_buff = 0
     else:
         armor_crit_buff = 0
 

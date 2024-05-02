@@ -1462,7 +1462,10 @@ def get_user_def_buff(user_id):
     else:
         main_def =0
     if user_armor_data is not None:
-        def_buff = user_armor_data['def_buff']  #减伤公式
+        try:
+            def_buff = user_armor_data['def_buff']  #减伤公式
+        except:
+            def_buff = 0
     else:
         def_buff = 0
     return round(1 - (def_buff + weapon_def + main_def ), 2)  # 初始减伤率
