@@ -24,7 +24,11 @@ async def handle_tarot_spread(bot: Bot, event: MessageEvent):
     
     selected_cards = random.sample(list(cards_dict.keys()), spread_info["cards_num"])
     nodes = []  
-    gid = str(event.group_id)
+    try:
+        gid = str(event.group_id)
+    except:
+        gid = ""
+
     uid = str(event.user_id)
     try:
         member_info = await bot.get_group_member_info(group_id=gid, user_id=uid)
@@ -73,7 +77,12 @@ async def handle_tarot_spread(bot: Bot, event: MessageEvent):
 
     if isinstance(event, GroupMessageEvent):
         # 群组聊天中使用合并转发
-        await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)
+        try:
+            await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)
+        except:
+            await bot.send(event, f"合并消息发送失败，尝试发送私聊")
+            for node in nodes:
+                await bot.send_private_msg(user_id=uid, message=node["data"]["content"])
     else:
         # 私聊中合并消息内容并发送
         combined_message = Message()
