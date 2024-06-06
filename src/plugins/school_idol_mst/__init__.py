@@ -30,6 +30,9 @@ def update_status(Vo,Da,Vi):
     Da = Da if Da else 0
     Vi = Vi if Vi else 0
 
+    if Vo > 1500 or Da > 1500 or Vi > 1500:
+        return "单属性最大值大于当前版本上限！请检查后重试！"
+
     Sum_ = Vo + Da + Vi
 
     c = int(30)
