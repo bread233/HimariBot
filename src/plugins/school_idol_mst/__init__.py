@@ -70,7 +70,7 @@ def update_score(Sum,Sum_):
 
     text = f"""
 您的面板为
-【{Sum_}】→【{Sum}】(+90)
+【{Sum_}】→【{Sum}】(+{Sum-Sum_})
 S评价(13000)还需要在最终试验中获得【{scores[0]}pt】
 A+评价(11500)还需要在最终试验中获得【{scores[1]}pt】
 A评价(10000)还需要在最终试验中获得【{scores[2]}pt】
