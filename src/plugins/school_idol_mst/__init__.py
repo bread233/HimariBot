@@ -63,17 +63,25 @@ def update_score(Sum,Sum_):
     sum_value = sum_value if sum_value else 0
     status_score = status_impact(sum_value)
 
-    ranks = [13000,11500,10000,8000,6000,5000,3000,0]
+    ranks = [14500,13000,11500,10000,8000,6000,5000,3000,0]
     scores = []
     for rank in ranks:
         scores.append(result_to_score(int(rank), rank_score, status_score))
-
-    text = f"""
+    if scores[0] < 60000 and Sum > 3600:
+        text = f"""
 您的面板为
 【{Sum_}】→【{Sum}】(+{Sum-Sum_})
-S评价(13000)还需要在最终试验中获得【{scores[0]}pt】
-A+评价(11500)还需要在最终试验中获得【{scores[1]}pt】
-A评价(10000)还需要在最终试验中获得【{scores[2]}pt】
+S+评价(14500)还需要在最终试验中获得【{scores[0]}pt】
+S评价(13000)还需要在最终试验中获得【{scores[1]}pt】
+A+评价(11500)还需要在最终试验中获得【{scores[2]}pt】
+"""
+    else:
+        text = f"""
+您的面板为
+【{Sum_}】→【{Sum}】(+{Sum - Sum_})
+S评价(13000)还需要在最终试验中获得【{scores[1]}pt】
+A+评价(11500)还需要在最终试验中获得【{scores[2]}pt】
+A评价(10000)还需要在最终试验中获得【{scores[3]}pt】
 """
 
     return text.strip()
