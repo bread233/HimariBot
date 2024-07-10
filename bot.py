@@ -4,7 +4,7 @@ import nonebot
 from datetime import datetime
 from nonebot.adapters.onebot.v11 import Adapter as ONEBOT_V11Adapter
 
-from nonebot.adapters.ntchat import Adapter as NTCHATAdapter
+#from nonebot.adapters.ntchat import Adapter as NTCHATAdapter
 from nonebot.log import logger, default_format
 
 # win 环境下 asyncio.loop 配置
@@ -62,7 +62,7 @@ nonebot.init()
 
 driver = nonebot.get_driver()
 driver.register_adapter(ONEBOT_V11Adapter)
-driver.register_adapter(NTCHATAdapter)
+#driver.register_adapter(NTCHATAdapter)
 
 # 测试用
 nonebot.load_builtin_plugins("echo")
