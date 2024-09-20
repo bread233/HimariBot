@@ -30,15 +30,15 @@ def update_status(Vo,Da,Vi):
     Da = Da if Da else 0
     Vi = Vi if Vi else 0
 
-    if Vo > 1500 or Da > 1500 or Vi > 1500:
+    if Vo > 1800 or Da > 1800 or Vi > 1800:
         return "单属性最大值大于当前版本上限！请检查后重试！"
 
     Sum_ = Vo + Da + Vi
 
     c = int(30)
-    Vo = min(Vo + c, 1500)
-    Da = min(Da + c, 1500)
-    Vi = min(Vi + c, 1500)
+    Vo = min(Vo + c, 1800)
+    Da = min(Da + c, 1800)
+    Vi = min(Vi + c, 1800)
 
     Sum = Vo + Da + Vi
     return update_score(Sum,Sum_)
@@ -58,7 +58,7 @@ def score_impact(score):
 
 def update_score(Sum,Sum_):
     rank_score = int(1700)
-    
+
     sum_value = int(Sum)
     sum_value = sum_value if sum_value else 0
     status_score = status_impact(sum_value)
