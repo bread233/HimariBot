@@ -67,7 +67,7 @@ def update_score(Sum,Sum_):
     scores = []
     for rank in ranks:
         scores.append(result_to_score(int(rank), rank_score, status_score))
-    if scores[0] < 60000 and Sum > 3600:
+    if scores[3] <= 0 :
         text = f"""
 您的面板为
 【{Sum_}】→【{Sum}】(+{Sum-Sum_})
