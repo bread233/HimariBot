@@ -6,42 +6,44 @@ ENV PIP_NO_CACHE_DIR=1 \
     POETRY_HOME=/opt/poetry \
     PATH="/opt/poetry/bin:$PATH" \
     HOST=0.0.0.0 \
-    PORT=8181
+    PORT=8181 \
+    POETRY_VIRTUALENVS_CREATE=false
 
 WORKDIR /app
 
-# 基础依赖
+# 1. 安装系统依赖
+#   - build-essential / gcc: 编译 C 扩展
+#   - libjpeg / zlib / libpng: Pillow 用
+#   - libffi-dev: 某些加密/HTTP库用
+#   - git: !!! 很关键，如果 pyproject 里有 git+https 依赖，没有 git 会直接让 poetry install 失败
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
+    git \
     libffi-dev \
     libjpeg-dev \
     zlib1g-dev \
     libpng-dev \
-    && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
 
-# 安装 Poetry
+# 2. 安装 poetry
 RUN pip install --no-cache-dir "poetry>=1.8,<2.0"
 
-# 预加载依赖清单（加速构建）
+# 3. 先拷贝依赖文件，加速缓存
 COPY pyproject.toml poetry.lock* ./
 
-RUN poetry config virtualenvs.create false \
-    && poetry install --no-dev --no-interaction --no-ansi
+# 4. 安装依赖（加 -vvv 方便你在 Actions 里看到详细错误）
+RUN poetry install --no-dev --no-interaction --no-ansi -vvv
 
-# 拷贝完整代码
+# 5. 再拷贝项目代码
 COPY . .
 
-# 如果容器里还没有 .env.dev，则用 example 拷一份默认的
-RUN if [ ! -f ".env.dev" ] && [ -f ".env.dev.example" ]; then \
-      cp .env.dev.example .env.dev; \
-    fi
+# 6. 环境文件：容器内部先复制一份默认 dev 配置
+#    （宿主机会用 volume 把外面的 .env.dev 覆盖进来）
+RUN cp .env.dev.example .env.dev
 
-# 暴露端口
 EXPOSE 8181
 
-# 声明数据卷
 VOLUME ["/app/data", "/app/log", "/root/.local/share/nonebot2"]
 
-# 启动命令
 CMD ["python", "bot.py"]
