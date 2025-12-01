@@ -19,20 +19,25 @@
 
 ```bash
 mkdir -p /home/xmb/bot/himari/{data,log}
+
+```
+
 cd /home/xmb/bot/himari
 #### 2️⃣ 拷贝配置文件
 从示例文件复制并按需修改：
 
-bash
+```bash
 复制代码
 cp /home/xmb/bot/himaribot-test-a01/.env.dev.example .env.dev
 vim .env.dev
 ⚠️ .env.dev 内包含 Bot Token、AppID 等敏感信息
 请妥善保管，勿提交至 GitHub
 
+```
+
 #### 3️⃣ 创建 docker-compose.yml
-yaml
-复制代码
+
+```bash
 version: "3.9"
 
 services:
@@ -49,19 +54,23 @@ services:
       - /home/xmb/bot/himari/data:/app/data
       - /home/xmb/bot/himari/log:/app/log
       - /home/xmb/bot/himari/.env.dev:/app/.env.dev:ro
+      
+```
+
 #### 4️⃣ 启动服务
-bash
+```bash
 复制代码
 docker compose up -d
+```
+
 #### 5️⃣ 查看日志
-bash
+```bash
 复制代码
 docker compose logs -f
 🎉 你的 HimariBot 已成功运行！
-
+```
 🔸 方式二：docker run 启动
-bash
-复制代码
+```bash
 docker run -d \
   --name himaribot \
   --restart=always \
@@ -70,24 +79,26 @@ docker run -d \
   -v /home/xmb/bot/himari/log:/app/log \
   -v /home/xmb/bot/himari/.env.dev:/app/.env.dev:ro \
   xmb233/himaribot:latest
+```
 #### 🔄 更新/重启服务
-bash
+```bash
 复制代码
 docker compose pull
 docker compose up -d
 若修改 .env.dev 后需重启容器：
-
-bash
-复制代码
+```
+```bash
 docker compose restart
+```
 #### 📁 数据存储说明
+```bash
 容器路径	说明	是否挂载
 /app/data	数据库、插件数据	✔ 推荐
 /app/log	日志文件	✔ 推荐
 /app/.env.dev	环境配置	✔ 必须
 
 挂载后容器升级不会丢数据 🛡
-
+```
 ### 🧩 技术栈
 Python 3.9
 
