@@ -107,21 +107,24 @@ def pic2b64(pic: Image) -> str:
 
 async def getPicUrl():
     async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
-        response = await client.get('http://118.31.18.68:8080/news/api/news-file/get')
+        response = await client.get('https://60s.viki.moe/v2/60s')
         if response.status_code != 200:
             logger.debug('URL获取失败')
             return()
         else:
             logger.debug('图片URL获取成功')
-        date_str = json.loads(response.text)['result']['date']
+        date_str = json.loads(response.text)['data']['date']
         dt_now = datetime.datetime.now().strftime('%Y-%m-%d')
         if datetime.datetime.strptime(date_str, "%Y-%m-%d") != datetime.datetime.strptime(dt_now, "%Y-%m-%d"):
+            return (f"易即今日api今天没更新 最后更新日期：{date_str}")
             raise ValueError(f"易即今日api今天没更新啊：{date_str}")
-        return (json.loads(response.text)['result']['data'][0])
+        return (json.loads(response.text)['data']['image'])
 
 async def get_calendar() -> bytes:
+    url = await getPicUrl()
+    if "今天没更新" in url:
+        return url
     try:
-        url = await getPicUrl()
         async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
             response = await client.get(url)
             if response.is_error:
@@ -157,7 +160,10 @@ async def push_calendar(group_id: str):
         moyu_img = await get_calendar()
     except ValueError:
         moyu_img = await get_calendar_url(wechat_oa_cookie, wechat_oa_token)
-
+    if "没更新" in moyu_img:
+        return await bot.send_group_msg(
+        group_id=int(group_id), message=moyu_img
+    ) 
     await bot.send_group_msg(
         group_id=int(group_id), message=MessageSegment.image(moyu_img)
     )

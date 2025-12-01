@@ -717,10 +717,18 @@ class BiliClient:
             )
 
             response = client.get("https://www.bilibili.com/1/dynamic", cookies=cookies)
-            spm_prefix = re.search(
+            match = re.search(
                 r'<meta name="spm_prefix" content="([^"]+?)">', response.text
-            ).group(1)
+            )
+
+            if match:
+                spm_prefix = match.group(1)
+            else:
+                print("[bilibilibot] 未找到 spm_prefix，可能是 B站网页结构已变，请检查 Cookie 或页面内容")
+                return  # 避免继续执行导致崩溃
+
             cookies.update(response.cookies)
+
 
             data = {
                 "3064": 1,

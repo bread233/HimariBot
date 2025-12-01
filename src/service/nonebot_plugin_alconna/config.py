@@ -1,9 +1,9 @@
-from typing import List
+from typing import List, Literal, Optional
 
-from pydantic import Extra, Field, BaseModel
+from pydantic import Field, BaseModel
 
 
-class Config(BaseModel, extra=Extra.ignore):
+class Config(BaseModel):
     """Plugin Config Here"""
 
     alconna_auto_send_output: bool = False
@@ -23,3 +23,15 @@ class Config(BaseModel, extra=Extra.ignore):
 
     alconna_global_extensions: List[str] = Field(default_factory=list)
     """全局加载的扩展, 路径以 . 分隔, 如 foo.bar.baz:DemoExtension"""
+
+    alconna_context_style: Optional[Literal["bracket", "parentheses"]] = Field(default=None)
+    """全局命令上下文插值的风格，None 为关闭，bracket 为 {...}，parentheses 为 $(...)"""
+
+    alconna_enable_saa_patch: bool = False
+    """是否启用 SAA 补丁"""
+
+    alconna_apply_filehost: bool = False
+    """是否启用文件托管"""
+
+    alconna_apply_fetch_targets: bool = False
+    """是否启动时拉取一次发送对象列表"""

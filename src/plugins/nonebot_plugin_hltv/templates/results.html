@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CS2 比赛结果</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            color: #fff;
+            padding: 20px;
+            min-width: 600px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            padding: 20px 0;
+            margin-bottom: 20px;
+            border-bottom: 2px solid rgba(255,255,255,0.1);
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .header .subtitle {
+            color: #888;
+            font-size: 14px;
+            margin-top: 8px;
+        }
+        
+        .filter-info {
+            text-align: center;
+            color: #ffd700;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+        
+        .match-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: all 0.2s;
+        }
+        
+        .match-card:hover {
+            background: rgba(255,255,255,0.08);
+            transform: translateX(5px);
+        }
+        
+        .match-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .team {
+            flex: 1;
+            display: flex;
+            align-items: center;
+        }
+        
+        .team-left {
+            justify-content: flex-end;
+            text-align: right;
+        }
+        
+        .team-right {
+            justify-content: flex-start;
+            text-align: left;
+        }
+        
+        .team-name {
+            font-size: 16px;
+            font-weight: 600;
+        }
+        
+        .team-name.winner {
+            color: #4ade80;
+        }
+        
+        .team-name.loser {
+            color: #888;
+        }
+        
+        .score {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 100px;
+            padding: 0 20px;
+        }
+        
+        .score-num {
+            font-size: 24px;
+            font-weight: 700;
+            padding: 0 10px;
+        }
+        
+        .score-num.winner {
+            color: #4ade80;
+        }
+        
+        .score-num.loser {
+            color: #666;
+        }
+        
+        .score-sep {
+            color: #444;
+            font-size: 20px;
+        }
+        
+        .match-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255,255,255,0.05);
+        }
+        
+        .event-name {
+            color: #aaa;
+            font-size: 13px;
+        }
+        
+        .stars {
+            display: flex;
+            gap: 2px;
+        }
+        
+        .star {
+            color: #ffd700;
+            font-size: 12px;
+        }
+        
+        .star.empty {
+            color: #333;
+        }
+        
+        .tier-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+        
+        .tier-s { background: linear-gradient(135deg, #ffd700, #ff8c00); color: #000; }
+        .tier-a { background: linear-gradient(135deg, #c084fc, #7c3aed); color: #fff; }
+        .tier-b { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: #fff; }
+        .tier-c { background: linear-gradient(135deg, #4ade80, #22c55e); color: #000; }
+        
+        .footer {
+            text-align: center;
+            padding: 20px 0;
+            color: #666;
+            font-size: 12px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            margin-top: 20px;
+        }
+        
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎮 CS2 比赛结果</h1>
+            <div class="subtitle">数据来源: HLTV.org</div>
+        </div>
+        
+        {% if filter_text %}
+        <div class="filter-info">{{ filter_text }}</div>
+        {% endif %}
+        
+        {% if results %}
+        {% for match in results %}
+        <div class="match-card">
+            <div class="match-row">
+                <div class="team team-left">
+                    <span class="team-name {{ 'winner' if match.score1 > match.score2 else 'loser' }}">
+                        {{ match.team1 }}
+                    </span>
+                </div>
+                
+                <div class="score">
+                    <span class="score-num {{ 'winner' if match.score1 > match.score2 else 'loser' }}">
+                        {{ match.score1 }}
+                    </span>
+                    <span class="score-sep">:</span>
+                    <span class="score-num {{ 'winner' if match.score2 > match.score1 else 'loser' }}">
+                        {{ match.score2 }}
+                    </span>
+                </div>
+                
+                <div class="team team-right">
+                    <span class="team-name {{ 'winner' if match.score2 > match.score1 else 'loser' }}">
+                        {{ match.team2 }}
+                    </span>
+                </div>
+            </div>
+            
+            <div class="match-info">
+                <span class="event-name">
+                    {{ match.event }}
+                    {% if match.stars >= 5 %}
+                    <span class="tier-badge tier-s">S级</span>
+                    {% elif match.stars >= 4 %}
+                    <span class="tier-badge tier-a">A级</span>
+                    {% elif match.stars >= 3 %}
+                    <span class="tier-badge tier-b">B级</span>
+                    {% elif match.stars >= 1 %}
+                    <span class="tier-badge tier-c">C级</span>
+                    {% endif %}
+                </span>
+                <div class="stars">
+                    {% for i in range(5) %}
+                    <span class="star {{ '' if i < match.stars else 'empty' }}">★</span>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="no-data">暂无比赛结果</div>
+        {% endif %}
+        
+        <div class="footer">
+            Generated by nonebot-plugin-hltv • {{ time }}
+        </div>
+    </div>
+</body>
+</html>

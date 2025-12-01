@@ -1,19 +1,25 @@
 from __future__ import annotations
 
+import asyncio
 import weakref
 from weakref import ref
 from types import FunctionType
+from typing_extensions import Self
 from datetime import datetime, timedelta
 from typing import (
     TYPE_CHECKING,
     Any,
     Union,
+    Generic,
     Literal,
+    TypeVar,
     Callable,
     ClassVar,
+    Hashable,
     Iterable,
     NoReturn,
     Protocol,
+    Awaitable,
     cast,
     overload,
 )
@@ -23,26 +29,27 @@ from nonebot.params import Depends
 from nonebot.utils import escape_tag
 from nonebot.permission import Permission
 from nonebot.dependencies import Dependent
+from nepattern import ANY, STRING, AnyString
 from nonebot.message import run_postprocessor
-from nepattern import STRING, AnyOne, AnyString
 from nonebot.consts import ARG_KEY, RECEIVE_KEY
 from nonebot.internal.params import DefaultParam
-#from arclet.alconna.typing import ShortcutRegWrapper
+from arclet.alconna.typing import ShortcutRegWrapper
 from tarina import lang, is_awaitable, run_always_await
 from _weakref import _remove_dead_weakref  # type: ignore
 from arclet.alconna.tools import AlconnaFormat, AlconnaString
-#from nonebot.plugin.on import store_matcher, get_matcher_source
 from arclet.alconna.tools.construct import FuncMounter, MountConfig
+from nonebot.plugin.on import on_message, store_matcher, get_matcher_source
 from arclet.alconna import Arg, Args, Alconna, ShortcutArgs, command_manager
-from nonebot.typing import T_State, T_Handler, T_RuleChecker, T_PermissionChecker
 from nonebot.exception import PausedException, FinishedException, RejectedException
 from nonebot.internal.adapter import Bot, Event, Message, MessageSegment, MessageTemplate
 from nonebot.matcher import Matcher, matchers, current_bot, current_event, current_matcher
+from nonebot.typing import T_State, T_Handler, T_RuleChecker, T_PermissionChecker, _DependentCallable
 
 from .rule import alconna
 from .typings import MReturn
 from .model import CompConfig
-from .uniseg import Segment, UniMessage
+from .pattern import patterns
+from .uniseg import Text, Segment, UniMessage
 from .uniseg.template import UniMessageTemplate
 from .extension import Extension, ExtensionExecutor
 from .consts import ALCONNA_RESULT, ALCONNA_ARG_KEY, log
@@ -80,16 +87,16 @@ def extract_arg(path: str, target: ArgsMounter) -> Arg | None:
     return
 
 
-def _validate(target: Arg[Any], arg: MessageSegment):
+def _validate(target: Arg[Any], arg: Segment):
     value = target.value
-    if value == AnyOne:
+    if value == ANY:
         return arg
     if value == AnyString or (value == STRING and arg.is_text()):
         return str(arg)
     default_val = target.field.default
     if arg.is_text():
         arg = arg.data["text"]
-    res = value.invalidate(arg, default_val) if value.anti else value.validate(arg, default_val)
+    res = value.validate(arg, default_val)
     if target.optional and res.flag != "valid":
         return
     if res.flag == "error":
@@ -105,6 +112,90 @@ class _method:
         if instance is None:
             return self.__func__.__get__(owner, owner)
         return self.__func__.__get__(instance, owner)
+
+
+R = TypeVar("R")
+R1 = TypeVar("R1")
+T = TypeVar("T")
+T1 = TypeVar("T1")
+
+
+class WaiterIterator(Generic[R, T]):
+    def __init__(self, waiter: Waiter[R], default: T, timeout: float = 120):
+        self.waiter = waiter
+        self.timeout = timeout
+        self.default = default
+
+    def __aiter__(self) -> Self:
+        return self
+
+    @overload
+    def __anext__(self: WaiterIterator[R1, None]) -> Awaitable[R1 | None]: ...
+
+    @overload
+    def __anext__(self: WaiterIterator[R1, T1]) -> Awaitable[R1 | T1]: ...
+
+    def __anext__(self):  # type: ignore
+        return self.waiter.wait(default=self.default, timeout=self.timeout)  # type: ignore
+
+
+class Waiter(Generic[R]):
+    future: asyncio.Future
+    handler: _DependentCallable[R]
+
+    def __init__(self, handler: _DependentCallable[R], params: tuple, parameterless: Iterable[Any] | None = None):
+        self.future = asyncio.Future()
+        _handler = Dependent[Any].parse(call=handler, parameterless=parameterless, allow_types=params)
+
+        async def wrapper(matcher: Matcher, bot: Bot, event: Event, state: T_State):
+            if self.future.done():
+                matcher.skip()
+            result = await _handler(
+                matcher=self,
+                bot=bot,
+                event=event,
+                state=state,
+            )
+            if result is not None and not self.future.done():
+                self.future.set_result(result)
+                matcher.stop_propagation()
+                await matcher.finish()
+            matcher.skip()
+
+        self.handler = wrapper
+
+    def __aiter__(self) -> WaiterIterator[R, None]:
+        return WaiterIterator(self, None)
+
+    @overload
+    def __call__(self, *, default: T, timeout: float = 120) -> WaiterIterator[R, T]: ...
+
+    @overload
+    def __call__(self, *, timeout: float = 120) -> WaiterIterator[R, None]: ...
+
+    def __call__(
+        self, *, default: T | None = None, timeout: float = 120
+    ) -> WaiterIterator[R, T] | WaiterIterator[R, None]:
+        return WaiterIterator(self, default, timeout)  # type: ignore
+
+    @overload
+    async def wait(self, *, default: R | T, timeout: float = 120) -> R | T: ...
+
+    @overload
+    async def wait(self, *, timeout: float = 120) -> R | None: ...
+
+    async def wait(self, *, default: R | T | None = None, timeout: float = 120) -> R | T | None:
+        matcher = on_message(priority=0, block=False, handlers=[self.handler])
+        try:
+            return await asyncio.wait_for(self.future, timeout)
+        except asyncio.TimeoutError:
+            return default
+        finally:
+            self.future = asyncio.Future()
+            try:
+                matcher.destroy()
+            except (IndexError, ValueError):
+                pass
 
 
 class AlconnaMatcher(Matcher):
@@ -139,7 +230,8 @@ class AlconnaMatcher(Matcher):
         arguments: list[Any] | None = None,
         fuzzy: bool = True,
         prefix: bool = False,
-        #wrapper: ShortcutRegWrapper | None = None,
+        wrapper: ShortcutRegWrapper | None = None,
+        humanized: str | None = None,
     ) -> str:
         """操作快捷命令
 
@@ -150,6 +242,7 @@ class AlconnaMatcher(Matcher):
             fuzzy (bool, optional): 是否允许命令后随参数, 默认为 `True`
             prefix (bool, optional): 是否调用时保留指令前缀, 默认为 `False`
             wrapper (ShortcutRegWrapper, optional): 快捷指令的正则匹配结果的额外处理函数, 默认为 `None`
+            humanized (str, optional): 快捷指令的人类可读描述, 默认为 `None`
 
         Returns:
             str: 操作结果
@@ -189,6 +282,7 @@ class AlconnaMatcher(Matcher):
             fuzzy (bool, optional): 是否允许命令后随参数, 默认为 `True`
             prefix (bool, optional): 是否调用时保留指令前缀, 默认为 `False`
             wrapper (ShortcutRegWrapper, optional): 快捷指令的正则匹配结果的额外处理函数, 默认为 `None`
+            humanized (str, optional): 快捷指令的人类可读描述, 默认为 `None`
 
         Returns:
             str: 操作结果
@@ -311,10 +405,10 @@ class AlconnaMatcher(Matcher):
             priority=cls.priority + priority,
             block=block,
             handlers=handlers,
-            #source=get_matcher_source(_depth + 1),
+            source=get_matcher_source(_depth + 1),
             default_state=state,
         )
-        #store_matcher(matcher)
+        store_matcher(matcher)
         matcher.command = cls.command
         matcher.basepath = merge_path(path, cls.basepath)
         matcher.executor = cls.executor
@@ -388,9 +482,7 @@ class AlconnaMatcher(Matcher):
                 new_handler = Dependent(
                     call=func_handler.call,
                     params=func_handler.params,
-                    parameterless=Dependent.parse_parameterless(
-                        tuple(_parameterless), cls.HANDLER_PARAM_TYPES
-                    )
+                    parameterless=Dependent.parse_parameterless(tuple(_parameterless), cls.HANDLER_PARAM_TYPES)
                     + func_handler.parameterless,
                 )
                 cls.handlers[-1] = new_handler
@@ -454,9 +546,7 @@ class AlconnaMatcher(Matcher):
                 new_handler = Dependent(
                     call=func_handler.call,
                     params=func_handler.params,
-                    parameterless=Dependent.parse_parameterless(
-                        tuple(_parameterless), cls.HANDLER_PARAM_TYPES
-                    )
+                    parameterless=Dependent.parse_parameterless(tuple(_parameterless), cls.HANDLER_PARAM_TYPES)
                     + func_handler.parameterless,
                 )
                 cls.handlers[-1] = new_handler
@@ -502,9 +592,7 @@ class AlconnaMatcher(Matcher):
         """
         path = merge_path(path, cls.basepath)
         if not (arg := extract_arg(path, cls.command)):
-            raise ValueError(
-                lang.require("nbp-alc", "error.matcher_got_path").format(path=path, cmd=cls.command.path)
-            )
+            raise ValueError(lang.require("nbp-alc", "error.matcher_got_path").format(path=path, cmd=cls.command.path))
 
         async def _key_getter(event: Event, bot: Bot, matcher: AlconnaMatcher, state: T_State):
             matcher.set_target(ALCONNA_ARG_KEY.format(key=path))
@@ -512,18 +600,16 @@ class AlconnaMatcher(Matcher):
                 msg = await cls.executor.select(bot, event).message_provider(event, state, bot)
                 if not msg:
                     await matcher.reject(prompt, fallback=True)
-                if isinstance(msg, UniMessage):
-                    msg = await msg.export(bot, True)
+                if not isinstance(msg, UniMessage):
+                    msg = await UniMessage.generate(message=msg, event=event, bot=bot)
                 ms = msg[0]
-                if ms.is_text() and not ms.data["text"].strip():
+                if isinstance(ms, Text) and not ms.text.strip():
                     await matcher.reject(prompt, fallback=True)
                 log("DEBUG", escape_tag(lang.require("nbp-alc", "log.got_path/ms").format(path=path, ms=ms)))
                 if (res := _validate(arg, ms)) is None:  # type: ignore
                     log(
                         "TRACE",
-                        escape_tag(
-                            lang.require("nbp-alc", "log.got_path/validate").format(path=path, validate=res)
-                        ),
+                        escape_tag(lang.require("nbp-alc", "log.got_path/validate").format(path=path, validate=res)),
                     )
                     await matcher.reject(prompt, fallback=True)
                 if middleware:
@@ -542,9 +628,7 @@ class AlconnaMatcher(Matcher):
                 new_handler = Dependent(
                     call=func_handler.call,
                     params=func_handler.params,
-                    parameterless=Dependent.parse_parameterless(
-                        tuple(_parameterless), cls.HANDLER_PARAM_TYPES
-                    )
+                    parameterless=Dependent.parse_parameterless(tuple(_parameterless), cls.HANDLER_PARAM_TYPES)
                     + func_handler.parameterless,
                 )
                 cls.handlers[-1] = new_handler
@@ -574,7 +658,7 @@ class AlconnaMatcher(Matcher):
         if isinstance(message, MessageTemplate):
             return message.format(**state[ALCONNA_RESULT].result.all_matched_args, **state)
         if isinstance(message, UniMessageTemplate):
-            extra = {"$event": event, "$bot": bot, "$target": UniMessage.get_target(event, bot)}
+            extra = {"$event": event, "$target": UniMessage.get_target(event, bot)}
             try:
                 msg_id = UniMessage.get_message_id(event, bot)
             except Exception:
@@ -751,6 +835,21 @@ class AlconnaMatcher(Matcher):
             await cls.send(prompt, fallback=fallback, **kwargs)
         raise RejectedException
 
+    @classmethod
+    def waiter(cls, parameterless: Iterable[Any] | None = None):
+        """装饰一个函数来创建一个 `Waiter` 对象用以等待用户输入
+
+        函数内需要自行判断输入是否符合预期并返回结果
+
+        参数:
+            parameterless: 非参数类型依赖列表
+        """
+
+        def wrapper(func: _DependentCallable[R]):
+            return Waiter(func, cls.HANDLER_PARAM_TYPES, parameterless)
+
+        return wrapper
+
 
 def on_alconna(
     command: Alconna | str,
@@ -798,15 +897,9 @@ def on_alconna(
     """
     if isinstance(command, str):
         command = AlconnaFormat(command)
-    if aliases:
-        aliases = set(aliases)
-        command_manager.delete(command)
-        if command.command:
-            aliases.add(str(command.command))
-        command.command = "re:(" + "|".join(aliases) + ")"
-        command._hash = command._calc_hash()
-        command_manager.register(command)
-    _rule = alconna(
+
+    # 原始 Alconna Rule（真正做解析的）
+    _raw_rule = alconna(
         command,
         skip_for_unmatch,
         auto_send_output,
@@ -816,8 +909,24 @@ def on_alconna(
         use_origin,
         use_cmd_start,
         use_cmd_sep,
+        aliases,
     )
-    executor = cast(ExtensionExecutor, list(_rule.checkers)[0].call.executor)  # type: ignore
+
+    # 安全包装：防止 Rule 检查抛异常导致 ExceptionGroup
+    async def _safe_alconna_rule(bot: Bot, event: Event, state: T_State) -> bool:
+        try:
+            return await _raw_rule(bot, event, state)
+        except Exception as e:
+            log("WARNING", f"Alconna rule 检查时发生异常: {e!r}")
+            # 出错时视为“不匹配”，而不是让整个 matcher 报错
+            return False
+
+    # NoneBot 使用的 rule 是安全壳
+    _rule = Rule(_safe_alconna_rule)
+
+    # executor 仍然从原始 _raw_rule 中取
+    executor = cast(ExtensionExecutor, list(_raw_rule.checkers)[0].call.executor)  # type: ignore
+
     params = (
         (ExtensionParam.new(executor),)
         + Matcher.HANDLER_PARAM_TYPES[:-1]
@@ -826,27 +935,30 @@ def on_alconna(
             DefaultParam,
         )
     )
-    #source = get_matcher_source(_depth)
+    source = get_matcher_source(_depth)
     NewMatcher = type(
         AlconnaMatcher.__name__,
         (AlconnaMatcher,),
         {
             "_source": source,
             "type": "",
-            "rule": rule & _rule,
+            "rule": _rule & rule,
             "permission": Permission() | permission,
-            "handlers": [
-                handler
-                if isinstance(handler, Dependent)
-                else Dependent[Any].parse(call=handler, allow_types=params)
-                for handler in handlers
-            ]
-            if handlers
-            else [],
+            "handlers": (
+                [
+                    (
+                        handler
+                        if isinstance(handler, Dependent)
+                        else Dependent[Any].parse(call=handler, allow_types=params)
+                    )
+                    for handler in handlers
+                ]
+                if handlers
+                else []
+            ),
             "temp": temp,
             "expire_time": (
-                expire_time
-                and (expire_time if isinstance(expire_time, datetime) else datetime.now() + expire_time)
+                expire_time and (expire_time if isinstance(expire_time, datetime) else datetime.now() + expire_time)
             ),
             "priority": priority,
             "block": block,
@@ -860,7 +972,7 @@ def on_alconna(
     log("TRACE", f"Define new matcher {NewMatcher}")
 
     matchers[priority].append(NewMatcher)
-    #store_matcher(matcher)
+    store_matcher(matcher)
     matcher.command = command
     matcher.basepath = ""
     matcher.executor = executor
@@ -943,9 +1055,9 @@ def funcommand(
         )
 
         @matcher.handle()
-        async def handle(results: AlcExecResult):
+        async def handle_func(results: AlcExecResult):
             if res := results.get(func.__name__):
-                if is_awaitable(res):
+                if isinstance(res, Hashable) and is_awaitable(res):
                     res = await res
                 if isinstance(res, (str, Message, MessageSegment, Segment, UniMessage, UniMessageTemplate)):
                     await matcher.send(res, fallback=True)
@@ -956,6 +1068,10 @@ def funcommand(
 
 
 class Command(AlconnaString):
+    @staticmethod
+    def args_gen(pattern: str, types: dict):
+        return AlconnaString.args_gen(pattern, {**types, **patterns})
+
     def build(
         self,
         rule: Rule | T_RuleChecker | None = None,
@@ -983,7 +1099,18 @@ class Command(AlconnaString):
         params.pop("self")
         params.pop("__class__")
         alc = super().build()
-        return on_alconna(alc, **params)
+        matcher = on_alconna(alc, **params)
+        if self.actions:
+
+            @matcher.handle()
+            async def handle_actions(results: AlcExecResult):
+                for res in results.values():
+                    if is_awaitable(res):
+                        res = await res
+                    if isinstance(res, (str, Message, MessageSegment, Segment, UniMessage, UniMessageTemplate)):
+                        await matcher.send(res, fallback=True)
+
+        return matcher
 
 
 @run_postprocessor

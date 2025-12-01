@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <div class="card-icon">
+            {% if is_gain %}🏆{% else %}💀{% endif %}
+        </div>
+        <div>
+            <h2 class="card-title">
+                {{ user_name }} {{ title }}
+            </h2>
+            <p class="card-subtitle">{{ time }}</p>
+        </div>
+    </div>
+    
+    <div class="card-content">
+        <!-- 主要价值展示 -->
+        <div class="stat-card" style="margin-bottom: 20px; background: {% if is_gain %}linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%){% else %}linear-gradient(135deg, #fee2e2 0%, #fecaca 100%){% endif %};">
+            <div class="stat-label" style="color: {% if is_gain %}#065f46{% else %}#991b1b{% endif %};">
+                {% if is_gain %}💰 带出价值{% else %}💸 战损价值{% endif %}
+            </div>
+            <div class="stat-value" style="font-size: 36px; font-weight: 700; color: {% if is_gain %}#059669{% else %}#dc2626{% endif %};">
+                {{ main_value }}
+            </div>
+            <div class="badge" style="background-color: {% if is_gain %}#059669{% else %}#dc2626{% endif %}; color: white; margin-top: 8px;">
+                {% if is_gain %}百万撤离{% else %}百万战损{% endif %}
+            </div>
+        </div>
+        
+        <!-- 战绩详情 -->
+        <div class="info-row">
+            <span class="info-label">🗺️ 地图</span>
+            <span class="info-value">{{ map_name }}</span>
+        </div>
+        
+        <div class="info-row">
+            <span class="info-label">📊 结果</span>
+            <span class="info-value {% if result == '撤离成功' %}success{% else %}danger{% endif %}">{{ result }}</span>
+        </div>
+        
+        <div class="info-row">
+            <span class="info-label">⏱️ 存活时长</span>
+            <span class="info-value">{{ duration }}</span>
+        </div>
+        
+        <div class="info-row">
+            <span class="info-label">💀 击杀干员</span>
+            <span class="info-value">{{ kill_count }}</span>
+        </div>
+        
+        <!-- 财务详情 -->
+        <div style="margin-top: 20px;">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label" style="font-size: 16px;">💰 带出</div>
+                    <div class="stat-value success">{{ price }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label" style="font-size: 16px;">💸 战损</div>
+                    <div class="stat-value danger">{{ loss }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+ 
+{% endblock %}

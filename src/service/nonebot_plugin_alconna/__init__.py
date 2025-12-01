@@ -2,10 +2,14 @@ import contextlib
 
 import nonebot
 
-nonebot.load_plugin("nonebot_plugin_alconna.uniseg")
+import sys
+
+sys.modules.setdefault("nonebot_plugin_alconna", sys.modules[__name__])
+
+#nonebot.load_plugin("nonebot_plugin_alconna.uniseg")
 
 from tarina import lang
-from nonebot import get_driver
+from nonebot import get_plugin_config
 from arclet.alconna import Args as Args
 from arclet.alconna import Field as Field
 from arclet.alconna import count as count
@@ -38,35 +42,48 @@ from arclet.alconna import SubcommandResult as SubcommandResult
 from .consts import log
 from .config import Config
 from .uniseg import At as At
-from .uniseg import Card as Card
+from . import pattern as pattern
 from .uniseg import File as File
 from .uniseg import Text as Text
 from .model import Match as Match
 from .model import Query as Query
+from .typings import AtID as AtID
+from .typings import Bold as Bold
+from .typings import Code as Code
 from .params import Check as Check
 from .uniseg import AtAll as AtAll
 from .uniseg import Audio as Audio
 from .uniseg import Emoji as Emoji
+from .uniseg import Hyper as Hyper
 from .uniseg import Image as Image
 from .uniseg import MsgId as MsgId
 from .uniseg import Other as Other
 from .uniseg import Reply as Reply
 from .uniseg import Video as Video
 from .uniseg import Voice as Voice
+from .typings import Style as Style
 from .params import assign as assign
 from .rule import alconna as alconna
+from .uniseg import Custom as Custom
+from .uniseg import SCOPES as SCOPES
 from .uniseg import Target as Target
 from .uniseg import UniMsg as UniMsg
+from .pattern import select as select
+from .typings import Italic as Italic
 from .uniseg import RefNode as RefNode
 from .uniseg import Segment as Segment
 from .uniseg import get_bot as get_bot
 from .matcher import Command as Command
+from .typings import Spoiler as Spoiler
 from .matcher import referent as referent
 from .params import AlcResult as AlcResult
 from .uniseg import MessageId as MessageId
 from .uniseg import MsgTarget as MsgTarget
 from .uniseg import Reference as Reference
+from .uniseg import patch_saa as patch_saa
+from .typings import Underline as Underline
 from .argv import MessageArgv as MessageArgv
+from .params import AlcContext as AlcContext
 from .params import AlcMatches as AlcMatches
 from .params import AlconnaArg as AlconnaArg
 from .params import match_path as match_path
@@ -76,28 +93,40 @@ from .extension import Extension as Extension
 from .extension import Interface as Interface
 from .matcher import funcommand as funcommand
 from .matcher import on_alconna as on_alconna
+from .typings import ImageOrUrl as ImageOrUrl
 from .params import match_value as match_value
 from .uniseg import image_fetch as image_fetch
+from .pattern import select_last as select_last
 from .params import AlconnaMatch as AlconnaMatch
 from .params import AlconnaQuery as AlconnaQuery
+from .uniseg import SupportScope as SupportScope
 from .model import CommandResult as CommandResult
+from .pattern import select_first as select_first
 from .params import AlcExecResult as AlcExecResult
 from .params import AlconnaResult as AlconnaResult
 from .uniseg import MessageTarget as MessageTarget
+from .typings import Strikethrough as Strikethrough
 from .consts import ALCONNA_RESULT as ALCONNA_RESULT
+from .params import AlconnaContext as AlconnaContext
 from .params import AlconnaMatches as AlconnaMatches
+from .uniseg import SupportAdapter as SupportAdapter
+from .uniseg import apply_filehost as apply_filehost
 from .matcher import AlconnaMatcher as AlconnaMatcher
 from .consts import ALCONNA_ARG_KEY as ALCONNA_ARG_KEY
 from .uniseg import SerializeFailed as SerializeFailed
+from .uniseg import custom_register as custom_register
 from .extension import load_from_path as load_from_path
 from .uniseg import UniversalMessage as UniversalMessage
 from .uniseg import UniversalSegment as UniversalSegment
 from .params import AlconnaExecResult as AlconnaExecResult
 from .params import AlconnaDuplication as AlconnaDuplication
+from .uniseg import apply_media_to_url as apply_media_to_url
 from .consts import ALCONNA_EXEC_RESULT as ALCONNA_EXEC_RESULT
+from .uniseg import apply_fetch_targets as apply_fetch_targets
+from .uniseg import SupportAdapterModule as SupportAdapterModule
 from .extension import add_global_extension as add_global_extension
 
-__version__ = "0.33.8"
+__version__ = "0.44.0"
 
 __plugin_meta__ = PluginMetadata(
     name="Alconna 插件",
@@ -105,7 +134,7 @@ __plugin_meta__ = PluginMetadata(
     usage="matcher = on_alconna(...)",
     homepage="https://github.com/nonebot/plugin-alconna",
     type="library",
-    supported_adapters=None,
+    supported_adapters=set(SupportAdapterModule.__members__.values()),
     config=Config,
     extra={
         "author": "RF-Tar-Railt",
@@ -115,8 +144,13 @@ __plugin_meta__ = PluginMetadata(
 )
 
 with contextlib.suppress(ValueError, LookupError):
-    global_config = get_driver().config
-    _config = Config.parse_obj(global_config)
+    _config = get_plugin_config(Config)
     for path in _config.alconna_global_extensions:
         log("DEBUG", lang.require("nbp-alc", "log.load_global_extensions").format(path=path))
         load_from_path(path)
+    if _config.alconna_apply_filehost:
+        apply_filehost()
+    if _config.alconna_enable_saa_patch:
+        patch_saa()
+    if _config.alconna_apply_fetch_targets:
+        apply_fetch_targets()

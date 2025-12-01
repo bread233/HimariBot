@@ -5,10 +5,10 @@ from typing import Any, Dict, Type, Tuple, Union, Literal, TypeVar, ClassVar, Op
 from nonebot.typing import T_State
 from tarina import run_always_await
 from nepattern.util import CUnionType
-from pydantic.fields import Undefined
 from tarina.generic import get_origin
 from nonebot.dependencies import Param
 from nonebot.internal.params import Depends
+from nonebot.compat import PydanticUndefined
 from nonebot.internal.matcher import Matcher
 from nonebot.internal.adapter import Bot, Event
 from arclet.alconna.builtin import generate_duplication
@@ -47,6 +47,14 @@ def _alconna_matches(state: T_State) -> Arparma:
 
 def AlconnaMatches() -> Arparma:
     return Depends(_alconna_matches, use_cache=False)
+
+
+def _alconna_ctx(state: T_State):
+    return state[ALCONNA_RESULT].context
+
+
+def AlconnaContext() -> Dict[str, Any]:
+    return Depends(_alconna_ctx, use_cache=False)
 
 
 def AlconnaMatch(name: str, middleware: Optional[MIDDLEWARE] = None) -> Match:
@@ -91,13 +99,11 @@ def AlconnaQuery(
 
 
 @overload
-def AlconnaDuplication() -> Duplication:
-    ...
+def AlconnaDuplication() -> Duplication: ...
 
 
 @overload
-def AlconnaDuplication(__t: Type[T_Duplication]) -> T_Duplication:
-    ...
+def AlconnaDuplication(__t: Type[T_Duplication]) -> T_Duplication: ...
 
 
 def AlconnaDuplication(__t: Optional[Type[T_Duplication]] = None) -> Duplication:
@@ -119,6 +125,7 @@ def AlconnaArg(path: str) -> Any:
 AlcResult = Annotated[CommandResult, AlconnaResult()]
 AlcExecResult = Annotated[Dict[str, Any], AlconnaExecResult()]
 AlcMatches = Annotated[Arparma, AlconnaMatches()]
+AlcContext = Annotated[Dict[str, Any], AlconnaContext()]
 
 
 def match_path(
@@ -135,9 +142,7 @@ def match_path(
         if path == "$main":
             return not result.components and (not additional or await additional(event, bot, state, result))
         else:
-            return result.query(path, "\0") != "\0" and (
-                not additional or await additional(event, bot, state, result)
-            )
+            return result.query(path, "\0") != "\0" and (not additional or await additional(event, bot, state, result))
 
     return wrapper
 
@@ -223,15 +228,13 @@ class ExtensionParam(Param):
         )
 
     @classmethod
-    def _check_param(
-        cls, param: inspect.Parameter, allow_types: Tuple[Type[Param], ...]
-    ) -> Optional["ExtensionParam"]:
+    def _check_param(cls, param: inspect.Parameter, allow_types: Tuple[Type[Param], ...]) -> Optional["ExtensionParam"]:
         if cls.executor.before_catch(param.name, param.annotation, param.default):
             return cls(param.default, name=param.name, type=param.annotation, validate=True)
 
     async def _solve(self, matcher: Matcher, event: Event, state: T_State, **kwargs: Any) -> Any:
         res = await self.executor.catch(event, state, self.extra["name"], self.extra["type"], self.default)
-        if res is not Undefined:
+        if res is not PydanticUndefined:
             return res
         return self.default
 
@@ -246,9 +249,7 @@ class AlconnaParam(Param):
         return f"AlconnaParam(type={self.extra['type']!r})"
 
     @classmethod
-    def _check_param(
-        cls, param: inspect.Parameter, allow_types: Tuple[Type[Param], ...]
-    ) -> Optional["AlconnaParam"]:
+    def _check_param(cls, param: inspect.Parameter, allow_types: Tuple[Type[Param], ...]) -> Optional["AlconnaParam"]:
         annotation = get_origin(param.annotation)
         if annotation in _Contents:
             annotation = get_args(param.annotation)[0]
@@ -268,12 +269,14 @@ class AlconnaParam(Param):
             return cls(param.default, name=param.name, type=Match)
         if isinstance(param.default, Query):
             return cls(param.default, type=Query)
+        if param.name in ("ctx", "context") and annotation is dict:
+            return cls(..., type=Literal["context"])
         return cls(param.default, name=param.name, type=param.annotation, validate=True)
 
     async def _solve(self, matcher: Matcher, event: Event, state: T_State, **kwargs: Any) -> Any:
         t = self.extra["type"]
         if ALCONNA_RESULT not in state:
-            return self.default if self.default not in (..., Empty) else Undefined
+            return self.default if self.default not in (..., Empty) else PydanticUndefined
         res: CommandResult = state[ALCONNA_RESULT]
         if t is CommandResult:
             return res
@@ -302,11 +305,13 @@ class AlconnaParam(Param):
             elif self.default.result != Empty:
                 q.available = True
             return q
+        if t == Literal["context"]:
+            return res.result.context
         if (key := ALCONNA_ARG_KEY.format(key=self.extra["name"])) in state:
             return state[key]
         if self.extra["name"] in res.result.all_matched_args:
             return res.result.all_matched_args[self.extra["name"]]
-        return self.default if self.default not in (..., Empty) else Undefined
+        return self.default if self.default not in (..., Empty) else PydanticUndefined
 
     async def _check(self, state: T_State, **kwargs: Any) -> Any:
         if self.extra["type"] == Any:

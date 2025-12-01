@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NoneBot HLTV 插件管理</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { padding-top: 20px; background-color: #f8f9fa; }
+        .card { margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .status-indicator { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .status-ok { background-color: #28a745; }
+        .status-err { background-color: #dc3545; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="d-flex flex-wrap justify-content-center py-3 mb-4 border-bottom">
+            <a href="/" class="d-flex align-items-center mb-3 mb-md-0 me-md-auto text-dark text-decoration-none">
+                <span class="fs-4">NoneBot HLTV Plugin</span>
+            </a>
+            <ul class="nav nav-pills">
+                <li class="nav-item"><a href="#status" class="nav-link active" data-bs-toggle="tab">状态</a></li>
+                <li class="nav-item"><a href="#config" class="nav-link" data-bs-toggle="tab">配置</a></li>
+                <li class="nav-item"><a href="#test" class="nav-link" data-bs-toggle="tab">测试</a></li>
+            </ul>
+        </header>
+
+        <div class="tab-content">
+            <!-- 状态面板 -->
+            <div class="tab-pane fade show active" id="status">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">插件状态</div>
+                            <div class="card-body">
+                                <p><span class="status-indicator status-ok"></span> 插件已加载</p>
+                                <p>API URL: <span id="current-api-url">加载中...</span></p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">快速操作</div>
+                            <div class="card-body">
+                                <button class="btn btn-primary btn-sm" onclick="checkApiStatus()">检查 API 连接</button>
+                                <div id="api-status-result" class="mt-2"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 配置面板 -->
+            <div class="tab-pane fade" id="config">
+                <div class="card">
+                    <div class="card-header">插件配置</div>
+                    <div class="card-body">
+                        <form id="config-form">
+                            <div class="mb-3">
+                                <label for="hltv_api_url" class="form-label">API Server URL</label>
+                                <input type="text" class="form-control" id="hltv_api_url" name="hltv_api_url" placeholder="https://your-app.vercel.app">
+                                <div class="form-text">留空则使用默认 API。</div>
+                            </div>
+                            
+                            <h5 class="mt-4">缓存配置 (秒)</h5>
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label for="cache_duration_matches" class="form-label">比赛缓存</label>
+                                    <input type="number" class="form-control" id="cache_duration_matches" name="cache_duration_matches">
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label for="cache_duration_teams" class="form-label">战队缓存</label>
+                                    <input type="number" class="form-control" id="cache_duration_teams" name="cache_duration_teams">
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label for="cache_duration_results" class="form-label">结果缓存</label>
+                                    <input type="number" class="form-control" id="cache_duration_results" name="cache_duration_results">
+                                </div>
+                            </div>
+
+                            <h5 class="mt-4">功能开关</h5>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="enable_caching" name="enable_caching">
+                                <label class="form-check-label" for="enable_caching">启用缓存</label>
+                            </div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="enable_detailed_logging" name="enable_detailed_logging">
+                                <label class="form-check-label" for="enable_detailed_logging">启用详细日志</label>
+                            </div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="show_live_scores" name="show_live_scores">
+                                <label class="form-check-label" for="show_live_scores">显示实时比分</label>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary mt-4">保存配置 (运行时生效)</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 测试面板 -->
+            <div class="tab-pane fade" id="test">
+                <div class="card">
+                    <div class="card-header">API 测试</div>
+                    <div class="card-body">
+                        <div class="input-group mb-3">
+                            <select class="form-select" id="test-type" style="max-width: 150px;">
+                                <option value="matches">CS2 比赛</option>
+                                <option value="results">比赛结果</option>
+                                <option value="ranking">战队排名</option>
+                                <option value="team">战队信息</option>
+                                <option value="player">选手信息</option>
+                            </select>
+                            <input type="text" class="form-control" id="test-arg" placeholder="参数 (如战队名/选手名)">
+                            <button class="btn btn-outline-secondary" type="button" onclick="runTest()">执行</button>
+                        </div>
+                        <pre id="test-output" class="bg-light p-3 border rounded" style="max-height: 400px; overflow-y: auto;">等待执行...</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 加载配置
+        async function loadConfig() {
+            try {
+                const res = await fetch('/hltv/api/config');
+                const data = await res.json();
+                
+                document.getElementById('current-api-url').textContent = data.hltv_api_url || '默认';
+                
+                // 填充表单
+                for (const [key, value] of Object.entries(data)) {
+                    const el = document.getElementById(key);
+                    if (el) {
+                        if (el.type === 'checkbox') {
+                            el.checked = value;
+                        } else {
+                            el.value = value;
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('加载配置失败', e);
+            }
+        }
+
+        // 保存配置
+        document.getElementById('config-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const data = {};
+            
+            // 处理所有字段
+            const inputs = e.target.querySelectorAll('input');
+            inputs.forEach(input => {
+                if (input.type === 'checkbox') {
+                    data[input.name] = input.checked;
+                } else if (input.type === 'number') {
+                    data[input.name] = parseInt(input.value);
+                } else {
+                    data[input.name] = input.value;
+                }
+            });
+
+            try {
+                const res = await fetch('/hltv/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                if (res.ok) {
+                    alert('配置已保存！');
+                    loadConfig();
+                } else {
+                    alert('保存失败');
+                }
+            } catch (e) {
+                alert('保存出错: ' + e);
+            }
+        });
+
+        // 检查 API
+        async function checkApiStatus() {
+            const el = document.getElementById('api-status-result');
+            el.textContent = '检查中...';
+            try {
+                const res = await fetch('/hltv/api/test?type=matches');
+                const data = await res.json();
+                if (data.success) {
+                    el.innerHTML = '<span class="text-success">连接成功!</span>';
+                } else {
+                    el.innerHTML = '<span class="text-danger">连接失败: ' + data.message + '</span>';
+                }
+            } catch (e) {
+                el.innerHTML = '<span class="text-danger">请求错误: ' + e + '</span>';
+            }
+        }
+
+        // 运行测试
+        async function runTest() {
+            const type = document.getElementById('test-type').value;
+            const arg = document.getElementById('test-arg').value;
+            const output = document.getElementById('test-output');
+            
+            output.textContent = '请求中...';
+            
+            try {
+                const res = await fetch(`/hltv/api/test?type=${type}&arg=${encodeURIComponent(arg)}`);
+                const data = await res.json();
+                output.textContent = JSON.stringify(data, null, 2);
+            } catch (e) {
+                output.textContent = '错误: ' + e;
+            }
+        }
+
+        // 初始化
+        loadConfig();
+    </script>
+</body>
+</html>

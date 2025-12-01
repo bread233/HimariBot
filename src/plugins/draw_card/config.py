@@ -117,7 +117,7 @@ class Config(BaseModel, extra=Extra.ignore):
     guardian: GuardianConfig = GuardianConfig()
     pcr: PcrConfig = PcrConfig()
     azur: AzurConfig = AzurConfig()
-    fgo: FgoConfig = FgoConfig()
+    #fgo: FgoConfig = FgoConfig()
     onmyoji: OnmyojiConfig = OnmyojiConfig()
     ba: BaConfig = BaConfig()
 

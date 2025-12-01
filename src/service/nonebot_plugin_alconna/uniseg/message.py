@@ -1,37 +1,23 @@
+import asyncio
 from io import BytesIO
 from pathlib import Path
 from copy import deepcopy
 from types import FunctionType
+from dataclasses import dataclass
 from typing_extensions import Self, SupportsIndex
-from typing import TYPE_CHECKING, List, Type, Tuple, Union, Literal, TypeVar, Iterable, Optional, overload
+from typing import TYPE_CHECKING, Any, List, Type, Tuple, Union, Literal, TypeVar, Iterable, Optional, overload
 
 from tarina import lang
 from nonebot.internal.adapter import Bot, Event, Message
 from nonebot.internal.matcher import current_bot, current_event
 
-from .receipt import Receipt
-from .adapters import MAPPING
+from .target import Target
+from .exporter import MessageExporter
 from .fallback import FallbackMessage
+from .constraint import SerializeFailed
 from .template import UniMessageTemplate
-from .export import Target, SerializeFailed
-from .segment import (
-    At,
-    Card,
-    File,
-    Text,
-    AtAll,
-    Audio,
-    Emoji,
-    Image,
-    Other,
-    Reply,
-    Video,
-    Voice,
-    Segment,
-    reply,
-    segments,
-    reply_handle,
-)
+from .adapters import BUILDER_MAPPING, EXPORTER_MAPPING
+from .segment import At, File, Text, AtAll, Audio, Emoji, Hyper, Image, Reply, Video, Voice, Segment
 
 T = TypeVar("T")
 TS = TypeVar("TS", bound=Segment)
@@ -284,7 +270,7 @@ class UniMessage(List[TS]):
             cls_or_self: Union["UniMessage[TS1]", Type["UniMessage[TS1]"]],  # type: ignore
             flag: Literal["xml", "json"],
             content: str,
-        ) -> "UniMessage[Union[TS1, Card]]":
+        ) -> "UniMessage[Union[TS1, Hyper]]":
             """创建卡片消息
 
             参数:
@@ -423,24 +409,31 @@ class UniMessage(List[TS]):
             return UniMessage(Reply(id))
 
         @_method
-        def card(cls_or_self, flag: Literal["xml", "json"], content: str) -> "UniMessage[Union[TS1, Card]]":
+        def card(cls_or_self, flag: Literal["xml", "json"], content: str) -> "UniMessage[Union[TS1, Hyper]]":
             if isinstance(cls_or_self, UniMessage):
-                cls_or_self.append(Card(flag, content))
+                cls_or_self.append(Hyper(flag, content))
                 return cls_or_self
-            return UniMessage(Card(flag, content))
+            return UniMessage(Hyper(flag, content))
 
     def __init__(
         self: "UniMessage[Segment]",
         message: Union[Iterable[Union[str, TS]], str, TS, None] = None,
     ):
         super().__init__()
+        from .segment import Segment as _Seg  # 这里引一次，下面要用
+
         if isinstance(message, str):
-            self.__iadd__(Text(message))
+            self.__iadd__(Text(message), _merge=False)
         elif isinstance(message, Iterable):
             for i in message:
-                self.__iadd__(Text(i) if isinstance(i, str) else i)
+                # 兼容：如果不小心传进来的是 Segment 子类（比如 Text 类本身），直接跳过
+                if isinstance(i, type) and issubclass(i, _Seg):
+                    continue
+                self.__iadd__(Text(i) if isinstance(i, str) else i, _merge=False)
         elif isinstance(message, Segment):
-            self.__iadd__(message)
+            self.__iadd__(message, _merge=False)
+
+        self.__merge_text__()
 
     def __str__(self) -> str:
         return "".join(str(seg) for seg in self)
@@ -463,69 +456,92 @@ class UniMessage(List[TS]):
         """
         return UniMessageTemplate(format_string, cls)
 
-    @overload
-    def __add__(self, other: str) -> "UniMessage[Union[TS, Text]]":
-        ...
+    def __merge_text__(self) -> Self:
+        if not self:
+            return self
+        result = []
+        last = list.__getitem__(self, 0)
+        for seg in list.__getitem__(self, slice(1, None)):
+            if isinstance(seg, Text) and isinstance(last, Text):
+                _len = len(last.text)
+                last.text += seg.text
+                for scale, styles in seg.styles.items():
+                    last.styles[(scale[0] + _len, scale[1] + _len)] = styles[:]
+            else:
+                result.append(last)
+                last = seg
+        result.append(last)
+        self.clear()
+        self.extend(result)
+        return self
 
     @overload
-    def __add__(self, other: Union[TS, Iterable[TS]]) -> "UniMessage[TS]":
-        ...
+    def __add__(self, other: str) -> "UniMessage[Union[TS, Text]]": ...
 
     @overload
-    def __add__(self, other: Union[TS1, Iterable[TS1]]) -> "UniMessage[Union[TS, TS1]]":
-        ...
+    def __add__(self, other: Union[TS, Iterable[TS]]) -> "UniMessage[TS]": ...
+
+    @overload
+    def __add__(self, other: Union[TS1, Iterable[TS1]]) -> "UniMessage[Union[TS, TS1]]": ...
 
     def __add__(self, other: Union[str, TS, TS1, Iterable[Union[TS, TS1]]]) -> "UniMessage":
+        from .segment import Segment as _Seg  # 这里定义 _Seg，后面用
+
         result: UniMessage = self.copy()
         if isinstance(other, str):
             if result and isinstance(text := result[-1], Text):
                 text.text += other
             else:
                 result.append(Text(other))
-        elif isinstance(other, Segment):
-            if result and isinstance(result[-1], Text) and isinstance(other, Text):
-                result[-1] = Text(result[-1].text + other.text)
-            else:
-                result.append(other)
+        elif isinstance(other, _Seg):
+            result.append(other)
         elif isinstance(other, Iterable):
             for seg in other:
                 result += seg
+        elif isinstance(other, type) and issubclass(other, _Seg):
+            # 有插件错误地把 Segment 类本身丢进来，比如 Text
+            # 这里我们选择忽略它，直接返回原消息
+            return result
         else:
             raise TypeError(f"Unsupported type {type(other)!r}")
+
+        result.__merge_text__()
         return result
 
     @overload
-    def __radd__(self, other: str) -> "UniMessage[Union[Text, TS]]":
-        ...
+    def __radd__(self, other: str) -> "UniMessage[Union[Text, TS]]": ...
 
     @overload
-    def __radd__(self, other: Union[TS, Iterable[TS]]) -> "UniMessage[TS]":
-        ...
+    def __radd__(self, other: Union[TS, Iterable[TS]]) -> "UniMessage[TS]": ...
 
     @overload
-    def __radd__(self, other: Union[TS1, Iterable[TS1]]) -> "UniMessage[Union[TS1, TS]]":
-        ...
+    def __radd__(self, other: Union[TS1, Iterable[TS1]]) -> "UniMessage[Union[TS1, TS]]": ...
 
     def __radd__(self, other: Union[str, TS1, Iterable[TS1]]) -> "UniMessage":
         result = UniMessage(other)
         return result + self
 
-    def __iadd__(self, other: Union[str, TS, Iterable[TS]]) -> Self:
+    def __iadd__(self, other: Union[str, TS, Iterable[TS]], _merge: bool = True) -> Self:
+        from .segment import Segment as _Seg  # 同样这里定义 _Seg
+
         if isinstance(other, str):
             if self and isinstance(text := self[-1], Text):
                 text.text += other
             else:
                 self.append(Text(other))  # type: ignore
-        elif isinstance(other, Segment):
-            if self and (isinstance(text := self[-1], Text) and isinstance(other, Text)):
-                text.text += other.text
-            else:
-                self.append(other)
+        elif isinstance(other, _Seg):
+            self.append(other)
         elif isinstance(other, Iterable):
             for seg in other:
-                self.__iadd__(seg)
+                self.__iadd__(seg, _merge)
+        elif isinstance(other, type) and issubclass(other, _Seg):
+            # 错误传入类对象，忽略
+            return self
         else:
             raise TypeError(f"Unsupported type {type(other)!r}")
+
+        if _merge:
+            self.__merge_text__()
         return self
 
     @overload
@@ -573,7 +589,7 @@ class UniMessage(List[TS]):
         """
 
     @overload
-    def __getitem__(self, args: slice) -> Self:
+    def __getitem__(self, args: slice) -> "UniMessage[TS]":
         """切片消息段
 
         参数:
@@ -592,7 +608,7 @@ class UniMessage(List[TS]):
             int,
             slice,
         ],
-    ) -> Union[TS, TS1, "UniMessage[TS1]", Self]:
+    ) -> Union[TS, TS1, "UniMessage[TS]", "UniMessage[TS1]"]:
         arg1, arg2 = args if isinstance(args, tuple) else (args, None)
         if isinstance(arg1, int) and arg2 is None:
             return super().__getitem__(arg1)
@@ -724,7 +740,7 @@ class UniMessage(List[TS]):
         """深拷贝消息"""
         return deepcopy(self)
 
-    def include(self, *types: Type[Segment]) -> Self:
+    def include(self, *types: Type[Segment]) -> "UniMessage[TS]":
         """过滤消息
 
         参数:
@@ -735,7 +751,7 @@ class UniMessage(List[TS]):
         """
         return UniMessage(seg for seg in self if seg.__class__ in types)
 
-    def exclude(self, *types: Type[Segment]) -> Self:
+    def exclude(self, *types: Type[Segment]) -> "UniMessage[TS]":
         """过滤消息
 
         参数:
@@ -753,7 +769,11 @@ class UniMessage(List[TS]):
 
     @staticmethod
     async def generate(
-        *, message: Optional[Message] = None, event: Optional[Event] = None, bot: Optional[Bot] = None
+        *,
+        message: Optional[Message] = None,
+        event: Optional[Event] = None,
+        bot: Optional[Bot] = None,
+        adapter: Optional[str] = None,
     ):
         if not message:
             if not event:
@@ -765,28 +785,55 @@ class UniMessage(List[TS]):
                 message = event.get_message()
             except Exception:
                 return UniMessage()
-        result = UniMessage()
-        msg_copy = message.copy()
-        if (event and bot) and (_reply := await reply_handle(event, bot)):
-            result.append(_reply)
-        elif (res := reply.validate(message[0])).success:
-            res.value.origin = message[0]
-            result.append(res.value)
-            msg_copy.pop(0)
-        for seg in msg_copy:
-            for pat in segments:
-                if (res := pat.validate(seg)).success:
-                    res.value.origin = seg
-                    result.append(res.value)
-                    break
-            else:
-                result.append(Other(seg))
+        if not adapter:
+            if not bot:
+                try:
+                    bot = current_bot.get()
+                except LookupError as e:
+                    raise SerializeFailed(lang.require("nbp-uniseg", "bot_missing")) from e
+            _adapter = bot.adapter
+            adapter = _adapter.get_name()
+        if not (fn := BUILDER_MAPPING.get(adapter)):
+            raise SerializeFailed(lang.require("nbp-uniseg", "unsupported").format(adapter=adapter))
+        result = UniMessage(fn.generate(message))
+        if (event and bot) and (_reply := await fn.extract_reply(event, bot)):
+            if result.has(Reply) and result.index(Reply) == 0:
+                result.pop(0)
+            result.insert(0, _reply)
         return result
 
     @staticmethod
-    def get_message_id(
-        event: Optional[Event] = None, bot: Optional[Bot] = None, adapter: Optional[str] = None
-    ) -> str:
+    def generate_without_reply(
+        *,
+        message: Optional[Message] = None,
+        event: Optional[Event] = None,
+        bot: Optional[Bot] = None,
+        adapter: Optional[str] = None,
+    ):
+        if not message:
+            if not event:
+                try:
+                    event = current_event.get()
+                except LookupError as e:
+                    raise SerializeFailed(lang.require("nbp-uniseg", "event_missing")) from e
+            try:
+                message = event.get_message()
+            except Exception:
+                return UniMessage()
+        if not adapter:
+            if not bot:
+                try:
+                    bot = current_bot.get()
+                except LookupError as e:
+                    raise SerializeFailed(lang.require("nbp-uniseg", "bot_missing")) from e
+            _adapter = bot.adapter
+            adapter = _adapter.get_name()
+        if not (fn := BUILDER_MAPPING.get(adapter)):
+            raise SerializeFailed(lang.require("nbp-uniseg", "unsupported").format(adapter=adapter))
+        return UniMessage(fn.generate(message))
+
+    @staticmethod
+    def get_message_id(event: Optional[Event] = None, bot: Optional[Bot] = None, adapter: Optional[str] = None) -> str:
         if not event:
             try:
                 event = current_event.get()
@@ -800,14 +847,12 @@ class UniMessage(List[TS]):
                     raise SerializeFailed(lang.require("nbp-uniseg", "bot_missing")) from e
             _adapter = bot.adapter
             adapter = _adapter.get_name()
-        if fn := MAPPING.get(adapter):
+        if fn := EXPORTER_MAPPING.get(adapter):
             return fn.get_message_id(event)
         raise SerializeFailed(lang.require("nbp-uniseg", "unsupported").format(adapter=adapter))
 
     @staticmethod
-    def get_target(
-        event: Optional[Event] = None, bot: Optional[Bot] = None, adapter: Optional[str] = None
-    ) -> Target:
+    def get_target(event: Optional[Event] = None, bot: Optional[Bot] = None, adapter: Optional[str] = None) -> Target:
         if not event:
             try:
                 event = current_event.get()
@@ -821,8 +866,8 @@ class UniMessage(List[TS]):
                     raise SerializeFailed(lang.require("nbp-uniseg", "bot_missing")) from e
             _adapter = bot.adapter
             adapter = _adapter.get_name()
-        if fn := MAPPING.get(adapter):
-            return fn.get_target(event)
+        if fn := EXPORTER_MAPPING.get(adapter):
+            return fn.get_target(event, bot)
         raise SerializeFailed(lang.require("nbp-uniseg", "unsupported").format(adapter=adapter))
 
     async def export(self, bot: Optional[Bot] = None, fallback: bool = True) -> Message:
@@ -834,7 +879,7 @@ class UniMessage(List[TS]):
         adapter = bot.adapter
         adapter_name = adapter.get_name()
         try:
-            if fn := MAPPING.get(adapter_name):
+            if fn := EXPORTER_MAPPING.get(adapter_name):
                 return await fn.export(self, bot, fallback)
             raise SerializeFailed(lang.require("nbp-uniseg", "unsupported").format(adapter=adapter_name))
         except SerializeFailed:
@@ -848,18 +893,23 @@ class UniMessage(List[TS]):
         bot: Optional[Bot] = None,
         fallback: bool = True,
         at_sender: Union[str, bool] = False,
-        reply_to: Union[str, bool] = False,
-    ) -> Receipt:
-        if not bot:
-            try:
-                bot = current_bot.get()
-            except LookupError as e:
-                raise SerializeFailed(lang.require("nbp-uniseg", "bot_missing")) from e
+        reply_to: Union[str, bool, Reply, None] = False,
+    ) -> "Receipt":
         if not target:
             try:
                 target = current_event.get()
             except LookupError as e:
                 raise SerializeFailed(lang.require("nbp-uniseg", "event_missing")) from e
+        if not bot:
+            try:
+                bot = current_bot.get()
+            except LookupError as e:
+                if not isinstance(target, Target):
+                    raise SerializeFailed(lang.require("nbp-uniseg", "bot_missing")) from e
+                try:
+                    bot = await target.select()
+                except Exception as e1:
+                    raise SerializeFailed(lang.require("nbp-uniseg", "bot_missing")) from e1
         if at_sender:
             if isinstance(at_sender, str):
                 self.insert(0, At("user", at_sender))  # type: ignore
@@ -868,23 +918,140 @@ class UniMessage(List[TS]):
             else:
                 raise TypeError("at_sender must be str when target is not Event")
         if reply_to:
-            if isinstance(reply_to, bool):
-                if isinstance(target, Event):
-                    reply_to = self.get_message_id(target, bot)
-                else:
-                    raise TypeError("reply_to must be str when target is not Event")
-            self.insert(0, Reply(reply_to))  # type: ignore
+            if isinstance(reply_to, Reply):
+                self.insert(0, reply_to)  # type: ignore
+            else:
+                if isinstance(reply_to, bool):
+                    if isinstance(target, Event):
+                        reply_to = self.get_message_id(target, bot)
+                    else:
+                        raise TypeError("reply_to must be str when target is not Event")
+                self.insert(0, Reply(reply_to))  # type: ignore
         msg = await self.export(bot, fallback)
         adapter = bot.adapter
         adapter_name = adapter.get_name()
-        if not (fn := MAPPING.get(adapter_name)):
+        if not (fn := EXPORTER_MAPPING.get(adapter_name)):
             raise SerializeFailed(lang.require("nbp-uniseg", "unsupported").format(adapter=adapter_name))
-        if isinstance(target, Event):
-            _target = fn.get_target(target)
-            try:
-                res = await fn.send_to(_target, bot, msg)
-            except (AssertionError, NotImplementedError):
-                res = await bot.send(target, msg)
-        else:
-            res = await fn.send_to(target, bot, msg)
+        res = await fn.send_to(target, bot, msg)
         return Receipt(bot, target, fn, res if isinstance(res, list) else [res])
+
+
+@dataclass
+class Receipt:
+    bot: Bot
+    context: Union[Event, Target]
+    exporter: MessageExporter
+    msg_ids: List[Any]
+
+    @property
+    def recallable(self) -> bool:
+        return self.exporter.__class__.recall != MessageExporter.recall
+
+    @property
+    def editable(self) -> bool:
+        return self.exporter.__class__.edit != MessageExporter.edit
+
+    def get_reply(self, index: int = -1) -> Union[Reply, None]:
+        if not self.msg_ids:
+            return
+        try:
+            msg_id = self.msg_ids[index]
+        except IndexError:
+            msg_id = self.msg_ids[0]
+        if not msg_id:
+            return
+        try:
+            return self.exporter.get_reply(msg_id)
+        except NotImplementedError:
+            return
+
+    async def recall(self, delay: float = 0, index: int = -1):
+        if not self.msg_ids:
+            return self
+        if delay > 1e-4:
+            await asyncio.sleep(delay)
+        try:
+            msg_id = self.msg_ids[index]
+        except IndexError:
+            msg_id = self.msg_ids[0]
+        if not msg_id:
+            return self
+        try:
+            await self.exporter.recall(msg_id, self.bot, self.context)
+            self.msg_ids.remove(msg_id)
+            return self
+        except NotImplementedError:
+            return self
+
+    async def edit(
+        self,
+        message: Union[UniMessage, str, Iterable[Union[str, Segment]], Segment],
+        delay: float = 0,
+        index: int = -1,
+    ):
+        if not self.msg_ids:
+            return self
+        if delay > 1e-4:
+            await asyncio.sleep(delay)
+        message = UniMessage(message)
+        msg = await self.exporter.export(message, self.bot, True)
+        try:
+            msg_id = self.msg_ids[index]
+        except IndexError:
+            msg_id = self.msg_ids[0]
+        if not msg_id:
+            return self
+        try:
+            res = await self.exporter.edit(msg, msg_id, self.bot, self.context)
+            if res:
+                if isinstance(res, list):
+                    self.msg_ids.remove(msg_id)
+                    self.msg_ids.extend(res)
+                else:
+                    self.msg_ids[index] = res
+            return self
+        except NotImplementedError:
+            return self
+
+    async def send(
+        self,
+        message: Union[UniMessage, str, Iterable[Union[str, Segment]], Segment],
+        fallback: bool = True,
+        at_sender: Union[str, bool] = False,
+        reply_to: Union[str, bool, Reply, None] = False,
+        delay: float = 0,
+    ):
+        if delay > 1e-4:
+            await asyncio.sleep(delay)
+        message = UniMessage(message)
+        if at_sender:
+            if isinstance(at_sender, str):
+                message.insert(0, At("user", at_sender))  # type: ignore
+            elif isinstance(self.context, Event):
+                message.insert(0, At("user", self.context.get_user_id()))  # type: ignore
+            else:
+                raise TypeError("at_sender must be str when target is not Event")
+        if reply_to:
+            if isinstance(reply_to, Reply):
+                message.insert(0, reply_to)  # type: ignore
+            else:
+                if isinstance(reply_to, bool):
+                    if isinstance(self.context, Event):
+                        reply_to = self.exporter.get_message_id(self.context)
+                    else:
+                        raise TypeError("reply_to must be str when target is not Event")
+                self.insert(0, Reply(reply_to))  # type: ignore
+        msg = await self.exporter.export(message, self.bot, fallback)
+        res = await self.exporter.send_to(self.context, self.bot, msg)
+        self.msg_ids.extend(res if isinstance(res, list) else [res])
+        return self
+
+    async def reply(
+        self,
+        message: Union[UniMessage, str, Iterable[Union[str, Segment]], Segment],
+        fallback: bool = True,
+        at_sender: Union[str, bool] = False,
+        index: int = -1,
+        delay: float = 0,
+    ):
+        return await self.send(message, fallback, at_sender, self.get_reply(index), delay)

@@ -18,6 +18,7 @@ from typing import (
     cast,
 )
 
+import _string  # type: ignore
 from tarina.tools import gen_subclass
 
 from .segment import Segment
@@ -32,6 +33,43 @@ _MAPPING = {cls.__name__: cls for cls in gen_subclass(Segment)}
 _PATTERN = re.compile("(" + "|".join(_MAPPING.keys()) + r")\((.*)\)$")
 
 
+def _eval(route: str, obj: Any):
+    res = obj
+    parts = re.split(r"\.|(\[.+\])|(\(.*\))", route)
+    for part in parts[1:]:
+        if not part:
+            continue
+        if part.startswith("_"):
+            raise ValueError(route)
+        if part.startswith("[") and part.endswith("]"):
+            item = part[1:-1]
+            if item[0] in ("'", '"') and item[-1] in ("'", '"'):
+                res = res[item[1:-1]]
+            elif ":" in item:
+                res = res[slice(*(int(x) if x else None for x in item.split(":")))]
+            else:
+                res = res[int(item)]
+        elif part.startswith("(") and part.endswith(")"):
+            item = part[1:-1]
+            if not item:
+                res = res()
+            else:
+                _parts = item.split(",")
+                _args = []
+                _kwargs = {}
+                for part in _parts:
+                    part = part.strip()
+                    if re.match(".+=.+", part):
+                        k, v = part.split("=")
+                        _kwargs[k] = v
+                    else:
+                        _args.append(part)
+                res = res(*_args, **_kwargs)
+        else:
+            res = getattr(res, part)
+    return res
+
+
 class UniMessageTemplate(Formatter):
     """通用消息模板格式化实现类。
 
@@ -40,7 +78,7 @@ class UniMessageTemplate(Formatter):
         factory: 消息类型工厂，默认为 `str`
     """
 
-    def __init__(self, template: Union[str, "UniMessage"], factory: Type["UniMessage"]) -> None:
+    def __init__(self, template: Union[str, "UniMessage[Any]"], factory: Type["UniMessage[Any]"]) -> None:
         self.template = template
         self.factory = factory
         self.format_specs: Dict[str, FormatSpecFunc] = {}
@@ -126,14 +164,14 @@ class UniMessageTemplate(Formatter):
                     for part in parts:
                         part = part.strip()
                         if part.startswith("$") and (key := part.split(".")[0]) in kwargs:
-                            _args.append(eval(part[1:], {}, {key[1:]: kwargs[key]}))
+                            _args.append(_eval(part[1:], kwargs[key]))
                         elif re.match(".+=.+", part):
                             k, v = part.split("=")
                             if v in kwargs:
                                 _kwargs[k] = kwargs[v]
                                 used_args.add(v)
                             elif v.startswith("$") and (key := v.split(".")[0]) in kwargs:
-                                _kwargs[k] = eval(v[1:], {}, {key[1:]: kwargs[key]})
+                                _kwargs[k] = _eval(v[1:], kwargs[key])
                             else:
                                 _kwargs[k] = v
                         elif part in kwargs:
@@ -178,6 +216,13 @@ class UniMessageTemplate(Formatter):
         if formatter is None and format_spec in _MAPPING:
             formatter = _MAPPING[format_spec]  # type: ignore
         return super().format_field(value, format_spec) if formatter is None else formatter(value)
+
+    def get_field(self, field_name, args, kwargs):
+        first, rest = _string.formatter_field_name_split(field_name)
+
+        obj = self.get_value(first, args, kwargs)
+
+        return obj, first
 
     def _add(self, a: Any, b: Any) -> Any:
         try:

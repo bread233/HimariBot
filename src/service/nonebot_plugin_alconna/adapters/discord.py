@@ -8,17 +8,13 @@ from nonebot.adapters.discord import Bot
 from nonebot.permission import Permission
 from nonebot.dependencies import Dependent
 from arclet.alconna import Args, Option, Alconna, Subcommand
+from nepattern import ANY, FLOAT, NUMBER, INTEGER, UnionPattern
 from nonebot.adapters.discord.event import ApplicationCommandInteractionEvent
 from nonebot.typing import T_State, T_Handler, T_RuleChecker, T_PermissionChecker
 from nonebot.adapters.discord.commands.storage import _application_command_storage
 from nonebot.adapters.discord.api.types import MessageFlag, InteractionCallbackType
 from nonebot.internal.matcher.matcher import current_bot, current_event, current_matcher
-from nepattern import FLOAT, NUMBER, INTEGER, AnyOne, BasePattern, PatternModel, UnionPattern
-from nonebot.adapters.discord.commands.matcher import (
-    SlashCommandMatcher,
-    ApplicationCommandConfig,
-    on_slash_command,
-)
+from nonebot.adapters.discord.commands.matcher import SlashCommandMatcher, ApplicationCommandConfig, on_slash_command
 from nonebot.adapters.discord.message import (
     Message,
     EmbedSegment,
@@ -57,52 +53,25 @@ from nonebot.adapters.discord.api import (
     ApplicationCommandInteractionDataOption,
 )
 
-from nonebot_plugin_alconna.uniseg import At
+from nonebot_plugin_alconna.uniseg import At, AtAll
+from nonebot_plugin_alconna.uniseg import Other, Reply
 from nonebot_plugin_alconna.typings import SegmentPattern
 from nonebot_plugin_alconna.uniseg import Image as UniImg
+from nonebot_plugin_alconna.uniseg import Emoji as UniEmoji
 from nonebot_plugin_alconna import Extension, UniMessage, log
 from nonebot_plugin_alconna.matcher import _M, AlconnaMatcher
 
-Text = str
-Embed = SegmentPattern("embed", EmbedSegment, MessageSegment.embed)
-Sticker = SegmentPattern("sticker", StickerSegment, MessageSegment.sticker)
-Component = SegmentPattern("component", ComponentSegment, MessageSegment.component)
-Timestamp = SegmentPattern("timestamp", TimestampSegment, MessageSegment.timestamp)
-Emoji = SegmentPattern("emoji", CustomEmojiSegment, MessageSegment.custom_emoji)
-Image = SegmentPattern("attachment", AttachmentSegment, MessageSegment.attachment)
-MentionUser = SegmentPattern("mention_user", MentionUserSegment, MessageSegment.mention_user)
-MentionChannel = SegmentPattern("mention_channel", MentionChannelSegment, MessageSegment.mention_channel)
-MentionRole = SegmentPattern("mention_role", MentionRoleSegment, MessageSegment.mention_role)
-MentionEveryone = SegmentPattern("mention_everyone", MentionEveryoneSegment, MessageSegment.mention_everyone)
-Reference = SegmentPattern("reference", ReferenceSegment, MessageSegment.reference)
-
-
-MentionID = (
-    UnionPattern(
-        [
-            BasePattern(
-                model=PatternModel.TYPE_CONVERT,
-                origin=int,
-                alias="MentionUser",
-                accepts=[MentionUser],
-                converter=lambda _, x: int(x.data["user_id"]),
-            ),
-            BasePattern(
-                r"@(\d+)",
-                model=PatternModel.REGEX_CONVERT,
-                origin=int,
-                alias="@xxx",
-                accepts=[str],
-                converter=lambda _, x: int(x[1]),
-            ),
-            INTEGER,
-        ]
-    )
-    @ "mention_id"
-)
-"""
-内置类型，允许传入提醒元素(Mention)或者'@xxxx'式样的字符串或者数字, 返回数字
-"""
+Embed = SegmentPattern("embed", EmbedSegment, Other, MessageSegment.embed)
+Sticker = SegmentPattern("sticker", StickerSegment, Other, MessageSegment.sticker)
+Component = SegmentPattern("component", ComponentSegment, Other, MessageSegment.component)
+Timestamp = SegmentPattern("timestamp", TimestampSegment, Other, MessageSegment.timestamp)
+CustomEmoji = Emoji = SegmentPattern("emoji", CustomEmojiSegment, UniEmoji, MessageSegment.custom_emoji)
+Image = SegmentPattern("attachment", AttachmentSegment, UniImg, MessageSegment.attachment)
+MentionUser = SegmentPattern("mention_user", MentionUserSegment, At, MessageSegment.mention_user)
+MentionChannel = SegmentPattern("mention_channel", MentionChannelSegment, At, MessageSegment.mention_channel)
+MentionRole = SegmentPattern("mention_role", MentionRoleSegment, At, MessageSegment.mention_role)
+MentionEveryone = SegmentPattern("mention_everyone", MentionEveryoneSegment, AtAll, MessageSegment.mention_everyone)
+Reference = SegmentPattern("reference", ReferenceSegment, Reply, MessageSegment.reference)
 
 
 def _translate_args(args: Args) -> List[AnyCommandOption]:
@@ -150,7 +119,7 @@ def _translate_args(args: Args) -> List[AnyCommandOption]:
                     )
                 )
             continue
-        elif arg.value == AnyOne:
+        elif arg.value == ANY:
             result.append(
                 StringOption(
                     name=arg.name,
@@ -284,9 +253,7 @@ def translate(
     state: Optional[T_State] = None,
     _depth: int = 0,
 ) -> Type[SlashCommandMatcher]:
-    if alc.prefixes != ["/"] or (
-        not alc.prefixes and isinstance(alc.command, str) and not alc.command.startswith("/")
-    ):
+    if alc.prefixes != ["/"] or (not alc.prefixes and isinstance(alc.command, str) and not alc.command.startswith("/")):
         raise ValueError(lang.require("nbp-alc", "error.discord_prefix"))
     allow_opt = [
         opt
@@ -382,10 +349,7 @@ class DiscordSlashExtension(Extension):
             return False
         if not isinstance(event, ApplicationCommandInteractionEvent):
             return False
-        if (
-            event.data.name != self.application_command.name
-            or event.data.type != self.application_command.type
-        ):
+        if event.data.name != self.application_command.name or event.data.type != self.application_command.type:
             return False
         if not event.data.guild_id and self.application_command.guild_ids is None:
             return True

@@ -1,7 +1,7 @@
 import random
 from pathlib import Path
 from base64 import b64decode
-from typing import TYPE_CHECKING, List, Type, Union, Literal, Optional, overload
+from typing import TYPE_CHECKING, List, Type, Union, Literal, Callable, Optional, Awaitable, overload
 
 from yarl import URL
 from nonebot import get_bots
@@ -12,6 +12,16 @@ from nonebot.internal.driver.model import Request
 from nonebot.internal.adapter import Bot, Event, Adapter
 
 from .segment import Image
+
+
+async def reply_fetch(event: Event, bot: Bot):
+    from .adapters import BUILDER_MAPPING
+
+    _adapter = bot.adapter
+    adapter = _adapter.get_name()
+    if not (fn := BUILDER_MAPPING.get(adapter)):
+        return
+    return await fn.extract_reply(event, bot)
 
 
 async def image_fetch(event: Event, bot: Bot, state: T_State, img: Image, **kwargs):
@@ -27,7 +37,7 @@ async def image_fetch(event: Event, bot: Bot, state: T_State, img: Image, **kwar
 
         return await origin.download(bot)
 
-    if img.url:  # mirai2, qqguild, kook, villa, feishu, minecraft, ding
+    if img.url:  # mirai2, qqguild, kook, villa, minecraft, ding
         req = Request("GET", img.url, **kwargs)
         resp = await bot.adapter.request(req)
         return resp.content
@@ -68,53 +78,71 @@ async def image_fetch(event: Event, bot: Bot, state: T_State, img: Image, **kwar
         req = Request("GET", url, **kwargs)
         resp = await bot.adapter.request(req)
         return resp.content
+    if adapter_name == "Feishu":
+        if TYPE_CHECKING:
+            from nonebot.adapters.feishu.bot import Bot
+            from nonebot.adapters.feishu.event import MessageEvent
+
+            assert isinstance(bot, Bot)
+            assert isinstance(event, MessageEvent)
+        return await bot.get_msg_resource(message_id=event.message_id, file_key=img.id, type_="image")
     if adapter_name == "ntchat":
         raise NotImplementedError("ntchat image fetch not implemented")
 
 
 @overload
-def get_bot(*, index: int) -> Bot:
-    ...
+async def get_bot(*, index: int) -> Bot: ...
 
 
 @overload
-def get_bot(*, rand: Literal[True]) -> Bot:
-    ...
+async def get_bot(*, rand: Literal[True]) -> Bot: ...
 
 
 @overload
-def get_bot(*, bot_id: str) -> Bot:
-    ...
+async def get_bot(*, bot_id: str) -> Bot: ...
 
 
 @overload
-def get_bot(*, adapter: Union[Type[Adapter], str]) -> List[Bot]:
-    ...
+async def get_bot(*, predicate: Callable[[Bot], Awaitable[bool]]) -> List[Bot]: ...
 
 
 @overload
-def get_bot(*, adapter: Union[Type[Adapter], str], index: int) -> Bot:
-    ...
+async def get_bot(*, predicate: Callable[[Bot], Awaitable[bool]], index: int) -> Bot: ...
 
 
 @overload
-def get_bot(*, adapter: Union[Type[Adapter], str], rand: Literal[True]) -> Bot:
-    ...
+async def get_bot(*, predicate: Callable[[Bot], Awaitable[bool]], rand: Literal[True]) -> Bot: ...
 
 
 @overload
-def get_bot(*, adapter: Union[Type[Adapter], str], bot_id: str) -> Bot:
-    ...
+async def get_bot(*, predicate: Callable[[Bot], Awaitable[bool]], bot_id: str) -> Bot: ...
 
 
-def get_bot(
+@overload
+async def get_bot(*, adapter: Union[Type[Adapter], str]) -> List[Bot]: ...
+
+
+@overload
+async def get_bot(*, adapter: Union[Type[Adapter], str], index: int) -> Bot: ...
+
+
+@overload
+async def get_bot(*, adapter: Union[Type[Adapter], str], rand: Literal[True]) -> Bot: ...
+
+
+@overload
+async def get_bot(*, adapter: Union[Type[Adapter], str], bot_id: str) -> Bot: ...
+
+
+async def get_bot(
     *,
     adapter: Union[Type[Adapter], str, None] = None,
     bot_id: Optional[str] = None,
     index: Optional[int] = None,
     rand: bool = False,
+    predicate: Union[Callable[[Bot], Awaitable[bool]], None] = None,
 ) -> Union[List[Bot], Bot]:
-    if not adapter:
+    if not predicate and not adapter:
         if rand:
             return random.choice(list(get_bots().values()))
         if index is not None:
@@ -122,11 +150,16 @@ def get_bot(
         return _get_bot(bot_id)
     bots = []
     for bot in get_bots().values():
-        _adapter = bot.adapter
-        if isinstance(adapter, str):
-            if _adapter.get_name() == adapter:
-                bots.append(bot)
-        elif isinstance(_adapter, adapter):
+        if not predicate:
+
+            async def _check_adapter(bot: Bot):
+                _adapter = bot.adapter
+                if isinstance(adapter, str):
+                    return _adapter.get_name() == adapter
+                return isinstance(_adapter, adapter)  # type: ignore
+
+            predicate = _check_adapter
+        if await predicate(bot):
             bots.append(bot)
     if not bot_id:
         if rand:

@@ -109,7 +109,10 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
+#.env
+.env.*
+!.env.example
+!.env.dev.example
 .venv
 env/
 venv/
@@ -139,3 +142,4 @@ dmypy.json
 .pytype/
 
 # End of https://www.toptal.com/developers/gitignore/api/python
+#data/

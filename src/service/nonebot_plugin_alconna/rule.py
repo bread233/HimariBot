@@ -1,26 +1,27 @@
 import asyncio
 import importlib
-from typing import Dict, List, Type, Union, Literal, Optional, cast
+from typing import Set, Dict, List, Type, Tuple, Union, Literal, Optional, cast
 
-from nonebot import get_driver
 from nonebot.typing import T_State
+from tarina import lang, init_spec
 from nonebot.matcher import Matcher
 from nonebot.utils import escape_tag
-from nonebot.params import EventMessage
 from nonebot.plugin.on import on_message
 from nonebot.internal.rule import Rule as Rule
 from nonebot.adapters import Bot, Event, Message
-from tarina import lang, init_spec, is_awaitable
+from nonebot import get_driver, get_plugin_config
 from arclet.alconna.exceptions import SpecialOptionTriggered
 from arclet.alconna import Alconna, Arparma, CompSession, output_manager, command_manager
 
 from .config import Config
 from .adapters import MAPPING
-from .uniseg import UniMessage
+from .uniseg import UniMsg, UniMessage
 from .model import CompConfig, CommandResult
+from .uniseg.constraint import UNISEG_MESSAGE
 from .extension import Extension, ExtensionExecutor
 from .consts import ALCONNA_RESULT, ALCONNA_EXTENSION, ALCONNA_EXEC_RESULT, log
 
+BASE_PATH = "src.service.nonebot_plugin_alconna"
 _modules = set()
 
 
@@ -63,31 +64,42 @@ class AlconnaRule:
         use_origin: bool = False,
         use_cmd_start: bool = False,
         use_cmd_sep: bool = False,
+        _aliases: Optional[Union[Set[str], Tuple[str, ...]]] = None,
     ):
         self.comp_config = comp_config
         self.use_origin = use_origin
         try:
             global_config = get_driver().config
-            config = Config.parse_obj(global_config)
+            config = get_plugin_config(Config)
             self.auto_send = auto_send_output or config.alconna_auto_send_output
-            if (
-                not command.prefixes
-                and (use_cmd_start or config.alconna_use_command_start)
-                and global_config.command_start
-            ):
-                command_manager.delete(command)
-                command.prefixes = list(global_config.command_start)
-                command._hash = command._calc_hash()
-                command_manager.register(command)
+            if (use_cmd_start or config.alconna_use_command_start) and global_config.command_start:
+                with command_manager.update(command):
+                    if command.prefixes:
+                        if command.command:
+                            command.prefixes = list(command.prefixes) + list(global_config.command_start)
+                        else:
+                            prefixes = list(command.prefixes)
+                            command.command = prefixes[0]
+                            command.prefixes = list(global_config.command_start)
+                            for prefix in prefixes[1:]:
+                                command.shortcut(prefix, prefix=True)  # type: ignore
+                    else:
+                        command.prefixes = list(global_config.command_start)
             if (use_cmd_sep or config.alconna_use_command_sep) and global_config.command_sep:
-                command.separators = tuple(global_config.command_sep)
-                command_manager.resolve(command).separators = tuple(global_config.command_sep)
+                with command_manager.update(command):
+                    command.separators = tuple(global_config.command_sep)
             if config.alconna_auto_completion and not self.comp_config:
                 self.comp_config = cast(CompConfig, {})
+            if config.alconna_context_style:
+                with command_manager.update(command):
+                    self.command.meta.context_style = config.alconna_context_style
             self.use_origin = use_origin or config.alconna_use_origin
         except ValueError:
             self.auto_send = auto_send_output
         self.command = command
+        if _aliases:
+            for alias in _aliases:
+                command.shortcut(alias, prefix=True)
         self.skip = skip_for_unmatch
         self.executor = ExtensionExecutor(self, extensions, exclude_ext)
         self.executor.post_init()
@@ -110,20 +122,12 @@ class AlconnaRule:
             if len(hides) < 3:
                 template = f"\n\n{{}}{{}}{{}}{lang.require('comp/nonebot', 'other')}\n"
                 self._comp_help = template.format(
-                    (lang.require("comp/nonebot", "tab").format(cmd=_tab) + "\n")
-                    if "tab" not in hides
-                    else "",
-                    (lang.require("comp/nonebot", "enter").format(cmd=_enter) + "\n")
-                    if "enter" not in hides
-                    else "",
-                    (lang.require("comp/nonebot", "exit").format(cmd=_exit) + "\n")
-                    if "exit" not in hides
-                    else "",
+                    ((lang.require("comp/nonebot", "tab").format(cmd=_tab) + "\n") if "tab" not in hides else ""),
+                    ((lang.require("comp/nonebot", "enter").format(cmd=_enter) + "\n") if "enter" not in hides else ""),
+                    ((lang.require("comp/nonebot", "exit").format(cmd=_exit) + "\n") if "exit" not in hides else ""),
                 )
 
-            async def _waiter_handle(
-                _bot: Bot, _event: Event, _matcher: Matcher, content: Message = EventMessage()
-            ):
+            async def _waiter_handle(_bot: Bot, _event: Event, _matcher: Matcher, content: UniMsg):
                 msg = str(content).lstrip()
                 _future = self._futures[_bot.self_id][_event.get_session_id()]
                 _interface = self._interfaces[_event.get_session_id()]
@@ -134,9 +138,7 @@ class AlconnaRule:
                     else:
                         _future.set_result(None)
                         await _matcher.pause(
-                            lang.require("analyser", "param_unmatched").format(
-                                target=msg.replace(_exit, "", 1)
-                            )
+                            lang.require("analyser", "param_unmatched").format(target=msg.replace(_exit, "", 1))
                         )
                 elif msg.startswith(_enter) and "enter" not in disables:
                     if msg == _enter:
@@ -145,9 +147,7 @@ class AlconnaRule:
                     else:
                         _future.set_result(None)
                         await _matcher.pause(
-                            lang.require("analyser", "param_unmatched").format(
-                                target=msg.replace(_enter, "", 1)
-                            )
+                            lang.require("analyser", "param_unmatched").format(target=msg.replace(_enter, "", 1))
                         )
                 elif msg.startswith(_tab) and "tab" not in disables:
                     offset = msg.replace(_tab, "", 1).lstrip() or 1
@@ -155,9 +155,7 @@ class AlconnaRule:
                         offset = int(offset)
                     except ValueError:
                         _future.set_result(None)
-                        await _matcher.pause(
-                            lang.require("analyser", "param_unmatched").format(target=offset)
-                        )
+                        await _matcher.pause(lang.require("analyser", "param_unmatched").format(target=offset))
                     else:
                         _interface.tab(offset)
                         await _matcher.pause(
@@ -178,15 +176,17 @@ class AlconnaRule:
     def __hash__(self) -> int:
         return hash(self.command.__hash__())
 
-    async def handle(self, bot: Bot, event: Event, msg: Message) -> Union[Arparma, Literal[False]]:
+    async def handle(self, bot: Bot, event: Event, state: T_State, msg: UniMessage) -> Union[Arparma, Literal[False]]:
+        ctx = await self.executor.context_provider(event, bot, state)
+
         if self.comp_config is None:
-            return self.command.parse(msg)
+            return self.command.parse(msg, ctx)
         res = None
         session_id = event.get_session_id()
         if session_id not in self._interfaces:
             self._interfaces[session_id] = CompSession(self.command)
         with self._interfaces[session_id]:
-            res = self.command.parse(msg)
+            res = self.command.parse(msg, ctx)
         if res:
             self._interfaces[session_id].exit()
             del self._interfaces[session_id]
@@ -197,9 +197,7 @@ class AlconnaRule:
         def _checker(_event: Event):
             return session_id == _event.get_session_id()
 
-        self._matchers[session_id] = on_message(
-            priority=0, block=True, rule=Rule(_checker), handlers=[self._waiter]
-        )
+        self._matchers[session_id] = on_message(priority=0, block=True, rule=Rule(_checker), handlers=[self._waiter])
         res = Arparma(
             self.command.path,
             msg,
@@ -208,6 +206,14 @@ class AlconnaRule:
         )
         _futures = self._futures.setdefault(bot.self_id, {})
         _futures[session_id] = asyncio.get_running_loop().create_future()
+
+        def _clear():
+            self._interfaces[session_id].exit()
+            self._matchers[session_id].destroy()
+            del _futures[session_id]
+            del self._matchers[session_id]
+            del self._interfaces[session_id]
+
         while self._interfaces[session_id].available:
             await self.send(f"{str(self._interfaces[session_id])}{self._comp_help}", bot, event, res)
             while True:
@@ -215,24 +221,16 @@ class AlconnaRule:
                     await asyncio.wait_for(_futures[session_id], timeout=self.comp_config.get("timeout", 60))
                 except asyncio.TimeoutError:
                     await self.send(lang.require("comp/nonebot", "timeout"), bot, event, res)
-                    self._interfaces[session_id].exit()
-                    self._matchers[session_id].destroy()
-                    del _futures[session_id]
-                    del self._matchers[session_id]
-                    del self._interfaces[session_id]
+                    _clear()
                     return res
                 finally:
                     if not _futures[session_id].done():
                         _futures[session_id].cancel()
-                ans: Union[Message, bool, None] = _futures[session_id].result()
+                ans: Union[UniMessage, bool, None] = _futures[session_id].result()
                 _futures[session_id] = asyncio.get_running_loop().create_future()
                 if ans is False:
                     await self.send(lang.require("comp/nonebot", "exited"), bot, event, res)
-                    self._interfaces[session_id].exit()
-                    self._matchers[session_id].destroy()
-                    del _futures[session_id]
-                    del self._matchers[session_id]
-                    del self._interfaces[session_id]
+                    _clear()
                     return res
                 elif ans is None:
                     continue
@@ -242,11 +240,7 @@ class AlconnaRule:
                 elif _res.exception and not isinstance(_res.exception, SpecialOptionTriggered):
                     await self.send(str(_res.exception), bot, event, res)
                 break
-        self._interfaces[session_id].exit()
-        self._matchers[session_id].destroy()
-        del _futures[session_id]
-        del self._matchers[session_id]
-        del self._interfaces[session_id]
+        _clear()
         return res
 
     async def __call__(self, event: Event, state: T_State, bot: Bot) -> bool:
@@ -254,16 +248,20 @@ class AlconnaRule:
         if not (msg := await self.executor.message_provider(event, state, bot, self.use_origin)):
             return False
         msg = await self.executor.receive_wrapper(bot, event, msg)
-        if isinstance(msg, UniMessage):
-            msg = await msg.export(bot, fallback=True)
         Arparma._additional.update(bot=lambda: bot, event=lambda: event, state=lambda: state)
         adapter_name = bot.adapter.get_name()
         if adapter_name in MAPPING and MAPPING[adapter_name] not in _modules:
-            importlib.import_module(f"nonebot_plugin_alconna.adapters.{MAPPING[adapter_name]}")
+            importlib.import_module(f"{BASE_PATH}.adapters.{MAPPING[adapter_name]}")
+            _modules.add(MAPPING[adapter_name])
+        if isinstance(msg, UniMessage):
+            _msg = msg
+        else:
+            _msg = await UniMessage.generate(message=msg, event=event, bot=bot)
+        state[UNISEG_MESSAGE] = _msg
         with output_manager.capture(self.command.name) as cap:
             output_manager.set_action(lambda x: x, self.command.name)
             try:
-                arp = await self.handle(bot, event, msg)
+                arp = await self.handle(bot, event, state, _msg)
                 if arp is False:
                     return False
             except Exception as e:
@@ -274,17 +272,13 @@ class AlconnaRule:
         if not arp.matched and not may_help_text and self.skip:
             log(
                 "TRACE",
-                escape_tag(
-                    lang.require("nbp-alc", "log.parse").format(msg=msg, cmd=self.command.path, arp=arp)
-                ),
+                escape_tag(lang.require("nbp-alc", "log.parse").format(msg=msg, cmd=self.command.path, arp=arp)),
             )
             return False
         if arp.head_matched:
             log(
                 "DEBUG",
-                escape_tag(
-                    lang.require("nbp-alc", "log.parse").format(msg=msg, cmd=self.command.path, arp=arp)
-                ),
+                escape_tag(lang.require("nbp-alc", "log.parse").format(msg=msg, cmd=self.command.path, arp=arp)),
             )
         if not may_help_text and arp.error_info:
             may_help_text = repr(arp.error_info)
@@ -294,15 +288,8 @@ class AlconnaRule:
         if not await self.executor.permission_check(bot, event):
             return False
         await self.executor.parse_wrapper(bot, state, event, arp)
-        state[ALCONNA_RESULT] = CommandResult(self.command, arp, may_help_text)
-        exec_result = self.command.exec_result
-        for key, value in exec_result.items():
-            if is_awaitable(value):
-                value = await value
-            if isinstance(value, (str, Message)):
-                value = await bot.send(event, value)
-            exec_result[key] = value
-        state[ALCONNA_EXEC_RESULT] = exec_result
+        state[ALCONNA_RESULT] = CommandResult(source=self.command, result=arp, output=may_help_text)
+        state[ALCONNA_EXEC_RESULT] = self.command.exec_result
         state[ALCONNA_EXTENSION] = self.executor.context
         return True
 

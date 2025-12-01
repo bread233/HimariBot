@@ -1,24 +1,66 @@
-from typing import Dict
+import os
+import importlib
+from pathlib import Path
+from warnings import warn
+from typing import Dict, cast
+from contextlib import suppress
 
-from ..export import MessageExporter
-from .qq import QQMessageExporter  # noqa: F401
-from .red import RedMessageExporter  # noqa: F401
-from .ding import DingMessageExporter  # noqa: F401
-from .dodo import DoDoMessageExporter  # noqa: F401
-from .kook import KookMessageExporter  # noqa: F401
-from .mirai import MiraiMessageExporter  # noqa: F401
-from .villa import VillaMessageExporter  # noqa: F401
-from .feishu import FeishuMessageExporter  # noqa: F401
-from .github import GithubMessageExporter  # noqa: F401
-from .ntchat import NTChatMessageExporter  # noqa: F401
-from .satori import SatoriMessageExporter  # noqa: F401
-from .console import ConsoleMessageExporter  # noqa: F401
-from .discord import DiscordMessageExporter  # noqa: F401
-from .qqguild import QQGuildMessageExporter  # noqa: F401
-from .bilibili import BilibiliMessageExporter  # noqa: F401
-from .onebot11 import Onebot11MessageExporter  # noqa: F401
-from .onebot12 import Onebot12MessageExporter  # noqa: F401
-from .telegram import TelegramMessageExporter  # noqa: F401
-from .minecraft import MinecraftMessageExporter  # noqa: F401
+from nonebot import get_adapters
 
-MAPPING: Dict[str, MessageExporter] = {cls.get_adapter(): cls() for cls in MessageExporter.__subclasses__()}
+from ..loader import BaseLoader
+from ..target import TargetFetcher
+from ..builder import MessageBuilder
+from ..exporter import MessageExporter
+
+root = Path(__file__).parent
+loaders: Dict[str, BaseLoader] = {}
+_adapters = [path.stem for path in root.iterdir() if path.is_dir() and not path.stem.startswith("_")]
+for name in _adapters:
+    try:
+        module = importlib.import_module(f".{name}", __package__)
+        loader = cast(BaseLoader, getattr(module, "Loader")())
+        loaders[loader.get_adapter().value] = loader
+    except Exception as e:
+        warn(f"Failed to import uniseg adapter {name}: {e}", RuntimeWarning, 15)
+
+EXPORTER_MAPPING: Dict[str, MessageExporter] = {}
+BUILDER_MAPPING: Dict[str, MessageBuilder] = {}
+FETCHER_MAPPING: Dict[str, TargetFetcher] = {}
+
+try:
+    adapters = get_adapters()
+except Exception as e:
+    warn(f"Failed to get nonebot adapters: {e}", RuntimeWarning, 15)
+else:
+    if not adapters:
+        warn(
+            "No adapters found, please make sure you have installed at least one adapter.",
+            RuntimeWarning,
+            15,
+        )
+    elif os.environ.get("PLUGIN_ALCONNA_TESTENV"):
+        for adapter, loader in loaders.items():
+            try:
+                EXPORTER_MAPPING[adapter] = loaders[adapter].get_exporter()
+                BUILDER_MAPPING[adapter] = loaders[adapter].get_builder()
+                with suppress(NotImplementedError):
+                    FETCHER_MAPPING[adapter] = loaders[adapter].get_fetcher()
+            except Exception as e:
+                warn(f"Failed to load uniseg adapter {adapter}: {e}", RuntimeWarning, 15)
+    else:
+        for adapter in adapters:
+            if adapter in loaders:
+                try:
+                    EXPORTER_MAPPING[adapter] = loaders[adapter].get_exporter()
+                    BUILDER_MAPPING[adapter] = loaders[adapter].get_builder()
+                    with suppress(NotImplementedError):
+                        FETCHER_MAPPING[adapter] = loaders[adapter].get_fetcher()
+                except Exception as e:
+                    warn(f"Failed to load uniseg adapter {adapter}: {e}", RuntimeWarning, 15)
+            else:
+                warn(
+                    f"Adapter {adapter} is not found in the uniseg.adapters,"
+                    f"please go to the github repo and create an issue for it.",
+                    RuntimeWarning,
+                    15,
+                )
