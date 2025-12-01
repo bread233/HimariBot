@@ -47,4 +47,4 @@ jobs:
             xmb233/himaribot:latest
 
       - name: Done
-        run: echo "Image pushed: xmb233/himaribot:${VERSION} & latest"
+        run: echo "Image pushed:xmb233/himaribot:${VERSION} & latest"
