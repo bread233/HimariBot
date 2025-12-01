@@ -34,7 +34,8 @@ COPY pyproject.toml poetry.lock* ./
 
 # 4. 在镜像里同步一下 lock
 RUN poetry lock --no-update \
- && poetry install --only main --no-interaction --no-ansi -vvv
+    && poetry install --only main --no-interaction --no-ansi -vvv \
+    && pip install "nonebot2[fastapi]"
 
 # 5. 再拷贝项目代码
 COPY . .
