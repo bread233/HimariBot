@@ -32,8 +32,9 @@ RUN pip install --no-cache-dir "poetry>=1.8,<2.0"
 # 3. 先拷贝依赖文件，加速缓存
 COPY pyproject.toml poetry.lock* ./
 
-# 4. 安装依赖（加 -vvv 方便你在 Actions 里看到详细错误）
-RUN poetry install --no-dev --no-interaction --no-ansi -vvv
+# 4. 在镜像里同步一下 lock
+RUN poetry lock --no-update \
+ && poetry install --only main --no-interaction --no-ansi -vvv
 
 # 5. 再拷贝项目代码
 COPY . .
