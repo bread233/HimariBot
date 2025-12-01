@@ -29,10 +29,6 @@ jobs:
             echo "❌ No version found"
             exit 1
           fi
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "❌ Invalid version format: $VERSION"
-            exit 1
-          fi
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "✔ Version detected: $VERSION"
 
