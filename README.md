@@ -18,17 +18,17 @@
 #### 1️⃣ 准备宿主机目录
 
 ```bash
-mkdir -p /home/xmb/bot/himari/{data,log}
+mkdir -p 宿主机目录/{data,log}
 
 ```
 
-cd /home/xmb/bot/himari
+cd 宿主机目录
 #### 2️⃣ 拷贝配置文件
 从示例文件复制并按需修改：
 
 ```bash
 复制代码
-cp /home/xmb/bot/himaribot-test-a01/.env.dev.example .env.dev
+cp 宿主机目录/.env.dev.example .env.dev
 vim .env.dev
 ⚠️ .env.dev 内包含 Bot Token、AppID 等敏感信息
 请妥善保管，勿提交至 GitHub
@@ -51,9 +51,9 @@ services:
       - "8181:8181"  # 宿主 8181 → 容器 8181
 
     volumes:
-      - /home/xmb/bot/himari/data:/app/data
-      - /home/xmb/bot/himari/log:/app/log
-      - /home/xmb/bot/himari/.env.dev:/app/.env.dev:ro
+      - 宿主机/data:/app/data
+      - 宿主机/log:/app/log
+      - 宿主机/.env.dev:/app/.env.dev:ro
       
 ```
 
@@ -75,9 +75,9 @@ docker run -d \
   --name himaribot \
   --restart=always \
   -p 8181:8181 \
-  -v /home/xmb/bot/himari/data:/app/data \
-  -v /home/xmb/bot/himari/log:/app/log \
-  -v /home/xmb/bot/himari/.env.dev:/app/.env.dev:ro \
+  -v 宿主机/data:/app/data \
+  -v 宿主机/log:/app/log \
+  -v 宿主机/.env.dev:/app/.env.dev:ro \
   xmb233/himaribot:latest
 ```
 #### 🔄 更新/重启服务
