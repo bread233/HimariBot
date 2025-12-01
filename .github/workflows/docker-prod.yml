@@ -1,0 +1,53 @@
+name: Build and Push Docker Image (a01)
+
+on:
+  push:
+    branches:
+      - a01
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 拉代码
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 设置 buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 登录 Docker Hub（要在仓库 Secrets 里设置账号密码）
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 从 pyproject.toml 读取 version
+      - name: Read version from pyproject.toml
+        id: get_version
+        run: |
+          VERSION=$(grep -oP '(?<=^version = ")([^"]+)' pyproject.toml || true)
+          if [ -z "$VERSION" ]; then
+            echo "❌ 未在 pyproject.toml 中找到 version 字段"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Current version: $VERSION"
+
+      # 构建并推送镜像
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: |
+            xmb233/himaribot:${{ env.VERSION }}
+            xmb233/himaribot:latest
+
+      - name: Done
+        run: |
+          echo "Pushed xmb233/himaribot:${VERSION} and :latest"
