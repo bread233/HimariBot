@@ -20,7 +20,7 @@
 ```bash
 mkdir -p /home/xmb/bot/himari/{data,log}
 cd /home/xmb/bot/himari
-2️⃣ 拷贝配置文件
+#### 2️⃣ 拷贝配置文件
 从示例文件复制并按需修改：
 
 bash
@@ -30,7 +30,7 @@ vim .env.dev
 ⚠️ .env.dev 内包含 Bot Token、AppID 等敏感信息
 请妥善保管，勿提交至 GitHub
 
-3️⃣ 创建 docker-compose.yml
+#### 3️⃣ 创建 docker-compose.yml
 yaml
 复制代码
 version: "3.9"
@@ -49,11 +49,11 @@ services:
       - /home/xmb/bot/himari/data:/app/data
       - /home/xmb/bot/himari/log:/app/log
       - /home/xmb/bot/himari/.env.dev:/app/.env.dev:ro
-4️⃣ 启动服务
+#### 4️⃣ 启动服务
 bash
 复制代码
 docker compose up -d
-5️⃣ 查看日志
+#### 5️⃣ 查看日志
 bash
 复制代码
 docker compose logs -f
@@ -70,7 +70,7 @@ docker run -d \
   -v /home/xmb/bot/himari/log:/app/log \
   -v /home/xmb/bot/himari/.env.dev:/app/.env.dev:ro \
   xmb233/himaribot:latest
-🔄 更新/重启服务
+#### 🔄 更新/重启服务
 bash
 复制代码
 docker compose pull
@@ -80,7 +80,7 @@ docker compose up -d
 bash
 复制代码
 docker compose restart
-📁 数据存储说明
+#### 📁 数据存储说明
 容器路径	说明	是否挂载
 /app/data	数据库、插件数据	✔ 推荐
 /app/log	日志文件	✔ 推荐
@@ -88,21 +88,21 @@ docker compose restart
 
 挂载后容器升级不会丢数据 🛡
 
-🧩 技术栈
+### 🧩 技术栈
 Python 3.9
 
 NoneBot2
 
 官方 QQ Webhook / OneBot v11
 
-Docker 容器部署
+### Docker 容器部署
 
-⚠️ 使用声明
+### ⚠️ 使用声明
 本项目仅供学习交流
 禁止用于违反法律法规及 QQ 协议的行为！
 
-⭐ 支持与反馈
+### ⭐ 支持与反馈
 如果 HimariBot 对你有帮助，请点亮 ⭐ 支持一下！
 
-GitHub 项目地址
+### GitHub 项目地址
 👉 https://github.com/bread233/HimariBot/tree/a01
