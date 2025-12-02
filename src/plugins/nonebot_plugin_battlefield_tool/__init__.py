@@ -2,24 +2,21 @@
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
-import aiohttp
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Optional
 
+import aiohttp
 from nonebot import get_driver, on_command
-from nonebot.log import logger
+from nonebot.params import CommandArg
 from nonebot.plugin import PluginMetadata
 from nonebot.rule import to_me
+from nonebot.log import logger
 
-# 这里仍然按 OneBot v11 的类型做注解，不过真正用的时候主要靠 event.get_plaintext()
-from nonebot.adapters.onebot.v11 import (
-    Bot,
-    MessageEvent,
-    GroupMessageEvent,
-    PrivateMessageEvent,
-    MessageSegment,
-)
+# 适配多协议：只在需要的地方做 isinstance 判断
+from nonebot.adapters.onebot.v11 import Bot as OB11Bot, MessageSegment as OB11MS
+from nonebot.adapters.qq import Bot as QQBot, Message as QQMessage, ImageElem
 
 from .config import Config, plugin_config
 from .database.battlefield_database import BattleFieldDataBase
@@ -31,7 +28,6 @@ from .core.exceptions import UserNotFoundError
 __plugin_meta__ = PluginMetadata(
     name="战地风云战绩查询插件（NoneBot版）",
     description="BF4/BF1/BFV/BF2042/BF6 战绩查询、武器/载具/士兵/服务器、战报等",
-    # 新命令名（无下划线）
     usage="使用 /bfstat /bfweapons /bfvehicles /bfsoldiers /bfrecent /bfservers /bfbind /bfinit /bfhelp 等命令（需 @ 机器人）",
     config=Config,
     extra={
@@ -46,19 +42,18 @@ driver = get_driver()
 DATA_DIR = Path() / "data" / "nonebot_plugin_battlefield_tool"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# 保持 Path
 db = BattleFieldDataBase(DATA_DIR)
 db_service = BattleFieldDBService(db)
 
-_session: aiohttp.ClientSession | None = None
+_session: Optional[aiohttp.ClientSession] = None
 wake_prefix: list[str] = []
 
 
 async def html_render(*args, **kwargs) -> str:
     """
-    兼容原 AstrBot battlefield 插件的 html_render 调用方式。
+    兼容原 AstrBot 插件调用方式的 html_render 适配层。
 
-    当前调用方式大致为：
+    当前各处调用大致为：
         html = await html_builder_func(...)
         url  = await html_render_func(
             html,
@@ -71,10 +66,8 @@ async def html_render(*args, **kwargs) -> str:
             },
         )
 
-    因此这里简单处理为：
-      - 取第一个参数作为 HTML 字符串；
-      - 直接原样返回；
-      - 如果以后你要接 Playwright / 截图服务，把 HTML 渲成图片，返回图片 URL 或 base64 即可。
+    这里暂时直接返回第一个参数的 HTML 字符串。
+    如后续需要接入截图服务，在这里把 HTML 渲成图片并返回 URL 即可。
     """
     if not args:
         logger.error("html_render 被调用但没有传入参数")
@@ -85,7 +78,6 @@ async def html_render(*args, **kwargs) -> str:
         logger.error(f"html_render 第一个参数不是 str，而是 {type(html)}，args={args!r}")
         return ""
 
-    # TODO: 将 html 渲成图片，返回图片 URL 或 base64://...
     return html
 
 
@@ -93,7 +85,7 @@ plugin_logic = BattlefieldPluginLogic(
     db_service=db_service,
     default_game=plugin_config.battlefield_default_game,
     timeout_config=plugin_config.battlefield_timeout_config,
-    img_quality=plugin_config.battlefield_img_quality,
+    img_quality=plugin_config.battlefield_img_quality or 70,
     session=None,
     bf_prompt=plugin_config.battlefield_bf_prompt,
     default_platform="pc",
@@ -128,23 +120,57 @@ async def _shutdown():
         logger.info("nonebot_plugin_battlefield_tool 已关闭 HTTP Session")
 
 
-def make_astr_like_event(event: MessageEvent, raw_message: str):
-    """把 OneBot 事件简单包装成 AstrBot 风格的 event，供核心逻辑复用"""
+def _get_sender_id_generic(event: Any) -> str:
+    """
+    同时兼容 OneBot v11 + QQ 官方事件的发送者 ID 获取。
+    只是当作数据库 key 用，不要求绝对准确。
+    """
+    # OneBot v11
+    uid = getattr(event, "user_id", None)
+    if uid is not None:
+        return str(uid)
+
+    # QQ 官方适配器：author.id / author.user_openid 等
+    author = getattr(event, "author", None)
+    if author is not None:
+        for attr in ("user_openid", "id"):
+            v = getattr(author, attr, None)
+            if v is not None:
+                return str(v)
+
+    return ""
+
+
+def _get_group_id_generic(event: Any) -> str:
+    # OneBot v11
+    gid = getattr(event, "group_id", None)
+    if gid is not None:
+        return str(gid)
+
+    # QQ 官方适配器：group_openid
+    gid = getattr(event, "group_openid", None)
+    if gid is not None:
+        return str(gid)
+
+    return ""
+
+
+def make_astr_like_event(event: Any, raw_message: str):
+    """把任意适配器的事件简单包装成 AstrBot 风格 event，供核心逻辑复用"""
 
     def is_private_chat() -> bool:
-        return isinstance(event, PrivateMessageEvent)
+        # 我们只真正支持群，用不到私聊，这里一律 False
+        return False
 
     def is_admin() -> bool:
         # TODO: 这里按你自己权限逻辑改
         return True
 
     def get_sender_id() -> str:
-        return str(event.user_id)
+        return _get_sender_id_generic(event)
 
     def get_group_id() -> str:
-        if isinstance(event, GroupMessageEvent):
-            return str(event.group_id)
-        return ""
+        return _get_group_id_generic(event)
 
     def plain_result(text: str):
         return text
@@ -164,42 +190,83 @@ def make_astr_like_event(event: MessageEvent, raw_message: str):
     )
 
 
-def _send_result_as_message_segment(result: Any) -> MessageSegment:
-    """
-    统一把 core 返回的 result 转成可发送的 MessageSegment。
+async def _fetch_bytes(url: str) -> Optional[bytes]:
+    """从 URL 下载图片字节，用于把 URL 转换为 base64."""
+    global _session
+    sess = _session or aiohttp.ClientSession()
+    try:
+        async with sess.get(url, timeout=15) as resp:
+            if resp.status == 200:
+                return await resp.read()
+            logger.error(f"下载图片失败: {url}, status={resp.status}")
+    except Exception as e:
+        logger.error(f"下载图片异常: {url}, err={e}")
+    return None
 
-    - bytes / bytearray: 当作图片二进制发送；
+
+async def _result_to_image_bytes(result: Any) -> Optional[bytes]:
+    """
+    把 core 返回的各种结果统一转换成图片字节：
+    - bytes / bytearray: 直接用
     - str:
-        - 以 http/https/base64:// 开头：当作图片（URL 或 base64）；
-        - 否则：当作普通文本。
+        - base64://xxxx  => decode
+        - http(s)://...  => 下载
+        - 其它            => 非图片，返回 None
     """
     if isinstance(result, (bytes, bytearray)):
-        return MessageSegment.image(result)
+        return bytes(result)
 
     if isinstance(result, str):
         lower = result.lower()
-        if lower.startswith("http://") or lower.startswith("https://") or lower.startswith("base64://"):
-            return MessageSegment.image(result)
-        return MessageSegment.text(result)
+        if lower.startswith("base64://"):
+            try:
+                return base64.b64decode(result[9:])
+            except Exception as e:
+                logger.error(f"base64 解码失败: {e}")
+                return None
+        if lower.startswith("http://") or lower.startswith("https://"):
+            return await _fetch_bytes(result)
 
-    # 兜底：直接转字符串发出去
-    return MessageSegment.text(str(result))
+    return None
 
 
-def _extract_arg_from_plaintext(plain: str, cmd: str) -> str:
+async def _send_result(bot: Any, event: Any, result: Any):
     """
-    从纯文本里把命令参数抠出来。
-
-    e.g. plain="/bfstat xiaomianbao,game=bf6", cmd="bfstat"
-         -> "xiaomianbao,game=bf6"
+    统一发送结果：
+    - 如果能识别出图片 → 转为 base64 后：
+        - OneBot v11: MessageSegment.image('base64://...')
+        - QQ 官方: ImageElem.from_base64(...)
+    - 否则当文本发送
     """
-    plain = plain.strip()
-    # 去掉前导斜杠
-    if plain.startswith("/"):
-        plain = plain[1:]
-    if plain.lower().startswith(cmd):
-        return plain[len(cmd):].strip()
-    return plain
+    img_bytes = await _result_to_image_bytes(result)
+
+    # 图片发送
+    if img_bytes is not None:
+        b64 = base64.b64encode(img_bytes).decode("ascii")
+
+        # OneBot v11
+        if isinstance(bot, OB11Bot):
+            seg = OB11MS.image(f"base64://{b64}")
+            await bot.send(event, seg)
+            return
+
+        # QQ 官方适配器
+        if isinstance(bot, QQBot):
+            img = ImageElem.from_base64(b64)
+            await bot.send(event, QQMessage(img))
+            return
+
+        # 其它适配器兜底
+        await bot.send(event, "[图片消息，当前适配器未专门适配，已丢弃]")
+        return
+
+    # 文本发送
+    await bot.send(event, str(result))
+
+
+# ===================== 命令实现 =====================
+# 说明：为兼容两个适配器，这里不对 bot/event 做类型注解；
+# CommandArg 直接用 str，避免适配器 Message 类型不一致导致依赖注入失败。
 
 
 # ===== bfstat（原 bf_stat） =====
@@ -207,16 +274,12 @@ bf_stat_cmd = on_command("bfstat", rule=to_me(), priority=10, block=True)
 
 
 @bf_stat_cmd.handle()
-async def _(bot: Bot, event: MessageEvent):
-    plain = event.get_plaintext()
-    arg_str = _extract_arg_from_plaintext(plain, "bfstat")
+async def _(bot, event, args: str = CommandArg()):
+    arg_str = (args or "").strip()
     raw_message = f"stat {arg_str}".strip()
 
     astr_event = make_astr_like_event(event, raw_message)
-
-    request_data = await plugin_logic.handle_player_data_request(
-        astr_event, ["stat"]
-    )
+    request_data = await plugin_logic.handle_player_data_request(astr_event, ["stat"])
 
     if request_data.error_msg:
         await bf_stat_cmd.finish(request_data.error_msg)
@@ -226,77 +289,88 @@ async def _(bot: Bot, event: MessageEvent):
             async for result in api_handlers.handle_btr_game(
                 astr_event, request_data, "stat"
             ):
-                await bf_stat_cmd.send(_send_result_as_message_segment(result))
+                await _send_result(bot, event, result)
         else:
             async for result in api_handlers.fetch_gt_data(
                 astr_event, request_data, "stat", "all"
             ):
-                await bf_stat_cmd.send(_send_result_as_message_segment(result))
+                await _send_result(bot, event, result)
 
     except UserNotFoundError:
         await bf_stat_cmd.finish("API查不到这个ID")
 
 
-# ===== bfweapons / 武器（原 bf_weapons） =====
+# ===== bfweapons / 武器 =====
 bf_weapons_cmd = on_command("bfweapons", aliases={"武器"}, rule=to_me(), priority=10, block=True)
 
 
 @bf_weapons_cmd.handle()
-async def _(bot: Bot, event: MessageEvent):
-    plain = event.get_plaintext()
-    arg_str = _extract_arg_from_plaintext(plain, "bfweapons")
+async def _(bot, event, args: str = CommandArg()):
+    arg_str = (args or "").strip()
     raw_message = f"weapons {arg_str}".strip()
 
     astr_event = make_astr_like_event(event, raw_message)
-    request_data = await plugin_logic.handle_player_data_request(astr_event, ["weapons", "武器"])
+    request_data = await plugin_logic.handle_player_data_request(
+        astr_event, ["weapons", "武器"]
+    )
 
     if request_data.error_msg:
         await bf_weapons_cmd.finish(request_data.error_msg)
 
     if request_data.game in ["bf2042", "bf6"]:
-        async for result in api_handlers.handle_btr_game(astr_event, request_data, "weapons"):
-            await bf_weapons_cmd.send(_send_result_as_message_segment(result))
+        async for result in api_handlers.handle_btr_game(
+            astr_event, request_data, "weapons"
+        ):
+            await _send_result(bot, event, result)
     else:
-        async for result in api_handlers.fetch_gt_data(astr_event, request_data, "weapons", "weapons"):
-            await bf_weapons_cmd.send(_send_result_as_message_segment(result))
+        async for result in api_handlers.fetch_gt_data(
+            astr_event, request_data, "weapons", "weapons"
+        ):
+            await _send_result(bot, event, result)
 
 
-# ===== bfvehicles / 载具（原 bf_vehicles） =====
+# ===== bfvehicles / 载具 =====
 bf_vehicles_cmd = on_command("bfvehicles", aliases={"载具"}, rule=to_me(), priority=10, block=True)
 
 
 @bf_vehicles_cmd.handle()
-async def _(bot: Bot, event: MessageEvent):
-    plain = event.get_plaintext()
-    arg_str = _extract_arg_from_plaintext(plain, "bfvehicles")
+async def _(bot, event, args: str = CommandArg()):
+    arg_str = (args or "").strip()
     raw_message = f"vehicles {arg_str}".strip()
 
     astr_event = make_astr_like_event(event, raw_message)
-    request_data = await plugin_logic.handle_player_data_request(astr_event, ["vehicles", "载具"])
+    request_data = await plugin_logic.handle_player_data_request(
+        astr_event, ["vehicles", "载具"]
+    )
 
     if request_data.error_msg:
         await bf_vehicles_cmd.finish(request_data.error_msg)
 
     if request_data.game in ["bf2042", "bf6"]:
-        async for result in api_handlers.handle_btr_game(astr_event, request_data, "vehicles"):
-            await bf_vehicles_cmd.send(_send_result_as_message_segment(result))
+        async for result in api_handlers.handle_btr_game(
+            astr_event, request_data, "vehicles"
+        ):
+            await _send_result(bot, event, result)
     else:
-        async for result in api_handlers.fetch_gt_data(astr_event, request_data, "vehicles", "vehicles"):
-            await bf_vehicles_cmd.send(_send_result_as_message_segment(result))
+        async for result in api_handlers.fetch_gt_data(
+            astr_event, request_data, "vehicles", "vehicles"
+        ):
+            await _send_result(bot, event, result)
 
 
-# ===== bfsoldiers / 士兵（原 bf_soldiers） =====
+# ===== bfsoldiers / 士兵（仅 2042 / 6） =====
 bf_soldiers_cmd = on_command("bfsoldiers", aliases={"士兵"}, rule=to_me(), priority=10, block=True)
 
 
 @bf_soldiers_cmd.handle()
-async def _(bot: Bot, event: MessageEvent):
-    plain = event.get_plaintext()
-    arg_str = _extract_arg_from_plaintext(plain, "bfsoldiers")
+async def _(bot, event, args: str = CommandArg()):
+    arg_str = (args or "").strip()
     raw_message = f"soldiers {arg_str}".strip()
 
     astr_event = make_astr_like_event(event, raw_message)
-    request_data = await plugin_logic.handle_player_data_request(astr_event, ["soldiers", "士兵"])
+    request_data = await plugin_logic.handle_player_data_request(
+        astr_event, ["soldiers", "士兵"]
+    )
 
     if request_data.error_msg:
         await bf_soldiers_cmd.finish(request_data.error_msg)
@@ -304,27 +378,30 @@ async def _(bot: Bot, event: MessageEvent):
     if request_data.game not in ["bf2042", "bf6"]:
         await bf_soldiers_cmd.finish("士兵数据查询仅支持 bf2042 / bf6")
 
-    async for result in api_handlers.handle_btr_game(astr_event, request_data, "soldiers"):
-        await bf_soldiers_cmd.send(_send_result_as_message_segment(result))
+    async for result in api_handlers.handle_btr_game(
+        astr_event, request_data, "soldiers"
+    ):
+        await _send_result(bot, event, result)
 
 
-# ===== bfrecent / 最近 / 战报（仅 bf6，原 bf_recent） =====
+# ===== bfrecent / 战报（仅 bf6） =====
 bf_recent_cmd = on_command("bfrecent", aliases={"最近", "战报"}, rule=to_me(), priority=10, block=True)
 
 
 @bf_recent_cmd.handle()
-async def _(bot: Bot, event: MessageEvent):
+async def _(bot, event, args: str = CommandArg()):
     if not plugin_config.battlefield_evaluation_provider:
         await bf_recent_cmd.finish("尚未配置 evaluation_provider，无法生成战报锐评。")
 
     provider = plugin_config.battlefield_evaluation_provider
 
-    plain = event.get_plaintext()
-    arg_str = _extract_arg_from_plaintext(plain, "bfrecent")
+    arg_str = (args or "").strip()
     raw_message = f"recent {arg_str}".strip()
 
     astr_event = make_astr_like_event(event, raw_message)
-    request_data = await plugin_logic.handle_player_data_request(astr_event, ["recent", "最近", "战报"])
+    request_data = await plugin_logic.handle_player_data_request(
+        astr_event, ["recent", "最近", "战报"]
+    )
 
     if request_data.error_msg:
         await bf_recent_cmd.finish(request_data.error_msg)
@@ -335,26 +412,26 @@ async def _(bot: Bot, event: MessageEvent):
     async for result, next_page, total_page in api_handlers.handle_btr_matches(
         astr_event, request_data, provider
     ):
-        await bf_recent_cmd.send(_send_result_as_message_segment(result))
+        await _send_result(bot, event, result)
         if next_page:
             await bf_recent_cmd.send(
-                f"可以用下面的指令翻页，当前页:{request_data.page}/{total_page}\n"
-                f"{next_page}"
+                f"可以用下面的指令翻页，当前页:{request_data.page}/{total_page}\n{next_page}"
             )
 
 
-# ===== bfservers / 服务器（原 bf_servers） =====
+# ===== bfservers / 服务器 =====
 bf_servers_cmd = on_command("bfservers", aliases={"服务器"}, rule=to_me(), priority=10, block=True)
 
 
 @bf_servers_cmd.handle()
-async def _(bot: Bot, event: MessageEvent):
-    plain = event.get_plaintext()
-    arg_str = _extract_arg_from_plaintext(plain, "bfservers")
+async def _(bot, event, args: str = CommandArg()):
+    arg_str = (args or "").strip()
     raw_message = f"servers {arg_str}".strip()
 
     astr_event = make_astr_like_event(event, raw_message)
-    request_data = await plugin_logic.handle_player_data_request(astr_event, ["servers", "服务器"])
+    request_data = await plugin_logic.handle_player_data_request(
+        astr_event, ["servers", "服务器"]
+    )
 
     if request_data.error_msg:
         await bf_servers_cmd.finish(request_data.error_msg)
@@ -372,21 +449,22 @@ async def _(bot: Bot, event: MessageEvent):
     async for result in await plugin_logic.process_api_response(
         astr_event, servers_data, "servers", request_data.game, html_render
     ):
-        await bf_servers_cmd.send(_send_result_as_message_segment(result))
+        await _send_result(bot, event, result)
 
 
-# ===== bfbind / 绑定（原 bf_bind） =====
+# ===== bfbind / 绑定 =====
 bf_bind_cmd = on_command("bfbind", aliases={"绑定"}, rule=to_me(), priority=10, block=True)
 
 
 @bf_bind_cmd.handle()
-async def _(bot: Bot, event: MessageEvent):
-    plain = event.get_plaintext()
-    arg_str = _extract_arg_from_plaintext(plain, "bfbind")
+async def _(bot, event, args: str = CommandArg()):
+    arg_str = (args or "").strip()
     raw_message = f"bind {arg_str}".strip()
 
     astr_event = make_astr_like_event(event, raw_message)
-    request_data = await plugin_logic.handle_player_data_request(astr_event, ["bind", "绑定"])
+    request_data = await plugin_logic.handle_player_data_request(
+        astr_event, ["bind", "绑定"]
+    )
 
     if request_data.error_msg:
         await bf_bind_cmd.finish(request_data.error_msg)
@@ -397,41 +475,33 @@ async def _(bot: Bot, event: MessageEvent):
     await bf_bind_cmd.finish(msg)
 
 
-# ===== bfinit（原 bf_init） =====
+# ===== bfinit / 设置默认游戏 =====
 bf_init_cmd = on_command("bfinit", rule=to_me(), priority=10, block=True)
 
 
 @bf_init_cmd.handle()
-async def _(bot: Bot, event: MessageEvent):
-    plain = event.get_plaintext()
-    arg_str = _extract_arg_from_plaintext(plain, "bfinit")
-    raw_message = f"bf_init {arg_str}".strip()  # 内部用字符串，随便
+async def _(bot, event, args: str = CommandArg()):
+    arg_str = (args or "").strip()
+    raw_message = f"bf_init {arg_str}".strip()
 
     astr_event = make_astr_like_event(event, raw_message)
-
     session_channel_id = plugin_logic.get_session_channel_id(astr_event)
-
-    if isinstance(event, GroupMessageEvent):
-        # TODO: 这里的管理员逻辑按你情况来实现
-        pass
 
     default_game = arg_str.strip()
     if not default_game:
         await bf_init_cmd.finish("请提供游戏代号，例如：bf4/bf1/bfv/bf2042/bf6")
 
-    msg = await db_service.upsert_session_channel(
-        session_channel_id, default_game
-    )
+    msg = await db_service.upsert_session_channel(session_channel_id, default_game)
     await bf_init_cmd.finish(msg)
 
 
-# ===== bfhelp（原 bf_help） =====
+# ===== bfhelp / 帮助 =====
 bf_help_cmd = on_command("bfhelp", rule=to_me(), priority=10, block=True)
 
 
 @bf_help_cmd.handle()
-async def _(bot: Bot, event: MessageEvent):
-    help_msg = f"""战地风云插件使用帮助（NoneBot 版）：
+async def _(bot, event):
+    help_msg = f"""战地风云插件使用帮助：
 1. 账号绑定
 命令: /bfbind [name] 或 /绑定 [name]
 
@@ -457,6 +527,6 @@ async def _(bot: Bot, event: MessageEvent):
 8. 服务器查询
 命令: /bfservers [server_name],game=[游戏代号] 或 /服务器 [server_name],game=[游戏代号]
 
-注意：所有命令都需要 @ 机器人 使用。
+※ 所有命令都需要 @机器人 使用
 """
     await bf_help_cmd.finish(help_msg)
