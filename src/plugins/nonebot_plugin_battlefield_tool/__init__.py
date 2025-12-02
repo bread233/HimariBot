@@ -62,37 +62,53 @@ _session: Optional[aiohttp.ClientSession] = None
 wake_prefix: list[str] = []
 
 
-async def html_render(*args, **kwargs) -> str:
+async def html_render(*args, **kwargs):
+    """
+    兼容 AstrBot 调用方式：
+        html_render(html, {}, True, {"timeout": 10000, "quality": ..., "clip": {...}})
+    实际用 nonebot_plugin_htmlrender.html_to_pic 把 HTML 渲成图片 bytes。
+    """
+
     if not args:
         logger.error("html_render 被调用但没有传入参数")
-        return ""
+        return "[html_render 调用出错: 未传入 HTML]"
 
     html = args[0]
     if not isinstance(html, str):
         logger.error(f"html_render 第一个参数不是 str，而是 {type(html)}，args={args!r}")
-        return ""
+        return f"[html_render 调用出错: 参数类型 {type(html)}]"
 
-    options = {}
+    # 第 4 个位置参数通常是 options dict
+    opts = {}
     if len(args) >= 4 and isinstance(args[3], dict):
-        options = args[3]
+        opts = args[3]
+    elif kwargs:
+        opts = kwargs
 
-    timeout_ms = int(options.get("timeout", 10000))
-    quality = int(options.get("quality", 90))
+    timeout_ms = int(opts.get("timeout", 10000))
+    quality = opts.get("quality", None)
+    clip = opts.get("clip") or {}
+
+    # 只用宽度，height 交给 full_page 自动撑开
+    width = int(clip.get("width", 1280))
 
     try:
         img_bytes: bytes = await html_to_pic(
-            html,
-            type="jpeg",
+            html=html,
+            wait=0,
+            type="png",
             quality=quality,
-            timeout=timeout_ms,
+            device_scale_factor=2,
+            screenshot_timeout=timeout_ms,
+            # 传给 get_new_page 的参数，用来设定 viewport
+            viewport={"width": width, "height": 10},
         )
+        # 直接返回 bytes，后面的 _send_result 会识别 bytes 当图片发
+        return img_bytes
     except Exception as e:
-        logger.error(f"调用 html_to_pic 失败: {e}")
-        return ""
-
-    # 直接返回 base64://xxx，让 _send_result 自动识别并构造图片消息
-    b64 = base64.b64encode(img_bytes).decode("ascii")
-    return f"base64://{b64}"
+        logger.exception(f"战地 html_render 渲图失败: {e}")
+        # 返回一段非空文本作为兜底，避免 QQ 出现 invalid content
+        return f"[战地战绩图片渲染失败: {e}]"
 
 plugin_logic = BattlefieldPluginLogic(
     db_service=db_service,
