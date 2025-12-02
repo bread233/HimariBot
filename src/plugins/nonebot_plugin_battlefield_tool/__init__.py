@@ -1,5 +1,3 @@
-# nonebot_plugin_battlefield_tool/__init__.py
-
 from __future__ import annotations
 
 import base64
@@ -16,7 +14,18 @@ from nonebot.log import logger
 
 # 适配多协议：只在需要的地方做 isinstance 判断
 from nonebot.adapters.onebot.v11 import Bot as OB11Bot, MessageSegment as OB11MS
-from nonebot.adapters.qq import Bot as QQBot, Message as QQMessage, ImageElem
+
+# QQ 官方适配器：可选导入
+try:
+    from nonebot.adapters.qq import (
+        Bot as QQBot,
+        Message as QQMessage,
+        MessageSegment as QQMS,
+    )
+except Exception:
+    QQBot = None      # type: ignore
+    QQMessage = None  # type: ignore
+    QQMS = None       # type: ignore
 
 from .config import Config, plugin_config
 from .database.battlefield_database import BattleFieldDataBase
@@ -233,40 +242,67 @@ async def _result_to_image_bytes(result: Any) -> Optional[bytes]:
 async def _send_result(bot: Any, event: Any, result: Any):
     """
     统一发送结果：
-    - 如果能识别出图片 → 转为 base64 后：
-        - OneBot v11: MessageSegment.image('base64://...')
-        - QQ 官方: ImageElem.from_base64(...)
+    - 优先处理 QQ 的原始 URL 图片（不损画质）
+    - 再尝试把结果转成图片字节：
+        - OneBot v11: base64://... → MessageSegment.image(...)
+        - QQ:         file_image(bytes) → 图片
     - 否则当文本发送
     """
+
+    # ===== QQ 适配器：优先直接用 URL 发送 =====
+    if QQBot is not None and QQMS is not None and isinstance(bot, QQBot):
+        if isinstance(result, str) and result.lower().startswith(("http://", "https://")):
+            seg = QQMS.image(result)  # adapter-qq: image(url)
+            await bot.send(event, seg)
+            return
+
+    # 其余情况再去尝试解析成图片字节（base64 / 下载 URL 等）
     img_bytes = await _result_to_image_bytes(result)
 
-    # 图片发送
+    # ===== 有图片字节，尝试发图片 =====
     if img_bytes is not None:
         b64 = base64.b64encode(img_bytes).decode("ascii")
 
-        # OneBot v11
+        # OneBot v11：使用 base64:// 方式发送
         if isinstance(bot, OB11Bot):
             seg = OB11MS.image(f"base64://{b64}")
             await bot.send(event, seg)
             return
 
-        # QQ 官方适配器
-        if isinstance(bot, QQBot):
-            img = ImageElem.from_base64(b64)
-            await bot.send(event, QQMessage(img))
+        # QQ 官方适配器：使用 file_image 发送本地二进制
+        if QQBot is not None and QQMS is not None and isinstance(bot, QQBot):
+            seg = QQMS.file_image(img_bytes)  # bytes -> LocalAttachment
+            await bot.send(event, seg)
             return
 
         # 其它适配器兜底
         await bot.send(event, "[图片消息，当前适配器未专门适配，已丢弃]")
         return
 
-    # 文本发送
+    # ===== 不是图片，当文本发送 =====
     await bot.send(event, str(result))
 
 
 # ===================== 命令实现 =====================
 # 说明：为兼容两个适配器，这里不对 bot/event 做类型注解；
-# CommandArg 直接用 str，避免适配器 Message 类型不一致导致依赖注入失败。
+# CommandArg 默认是适配器 Message，这里做一层兼容转 str。
+
+
+def _normalize_args(args: Any) -> str:
+    """把 CommandArg 注入的各种类型统一转成字符串"""
+    if args is None:
+        return ""
+    if isinstance(args, str):
+        return args
+    # 适配器 Message，一般有 extract_plain_text
+    extract = getattr(args, "extract_plain_text", None)
+    if callable(extract):
+        try:
+            return extract()
+        except Exception:
+            pass
+    # 兜底：直接 str
+    return str(args)
 
 
 # ===== bfstat（原 bf_stat） =====
@@ -274,8 +310,8 @@ bf_stat_cmd = on_command("bfstat", rule=to_me(), priority=10, block=True)
 
 
 @bf_stat_cmd.handle()
-async def _(bot, event, args: str = CommandArg()):
-    arg_str = (args or "").strip()
+async def _(bot, event, args: Any = CommandArg()):
+    arg_str = _normalize_args(args).strip()
     raw_message = f"stat {arg_str}".strip()
 
     astr_event = make_astr_like_event(event, raw_message)
@@ -305,8 +341,8 @@ bf_weapons_cmd = on_command("bfweapons", aliases={"武器"}, rule=to_me(), prior
 
 
 @bf_weapons_cmd.handle()
-async def _(bot, event, args: str = CommandArg()):
-    arg_str = (args or "").strip()
+async def _(bot, event, args: Any = CommandArg()):
+    arg_str = _normalize_args(args).strip()
     raw_message = f"weapons {arg_str}".strip()
 
     astr_event = make_astr_like_event(event, raw_message)
@@ -334,8 +370,8 @@ bf_vehicles_cmd = on_command("bfvehicles", aliases={"载具"}, rule=to_me(), pri
 
 
 @bf_vehicles_cmd.handle()
-async def _(bot, event, args: str = CommandArg()):
-    arg_str = (args or "").strip()
+async def _(bot, event, args: Any = CommandArg()):
+    arg_str = _normalize_args(args).strip()
     raw_message = f"vehicles {arg_str}".strip()
 
     astr_event = make_astr_like_event(event, raw_message)
@@ -363,8 +399,8 @@ bf_soldiers_cmd = on_command("bfsoldiers", aliases={"士兵"}, rule=to_me(), pri
 
 
 @bf_soldiers_cmd.handle()
-async def _(bot, event, args: str = CommandArg()):
-    arg_str = (args or "").strip()
+async def _(bot, event, args: Any = CommandArg()):
+    arg_str = _normalize_args(args).strip()
     raw_message = f"soldiers {arg_str}".strip()
 
     astr_event = make_astr_like_event(event, raw_message)
@@ -389,13 +425,13 @@ bf_recent_cmd = on_command("bfrecent", aliases={"最近", "战报"}, rule=to_me(
 
 
 @bf_recent_cmd.handle()
-async def _(bot, event, args: str = CommandArg()):
+async def _(bot, event, args: Any = CommandArg()):
     if not plugin_config.battlefield_evaluation_provider:
         await bf_recent_cmd.finish("尚未配置 evaluation_provider，无法生成战报锐评。")
 
     provider = plugin_config.battlefield_evaluation_provider
 
-    arg_str = (args or "").strip()
+    arg_str = _normalize_args(args).strip()
     raw_message = f"recent {arg_str}".strip()
 
     astr_event = make_astr_like_event(event, raw_message)
@@ -424,8 +460,8 @@ bf_servers_cmd = on_command("bfservers", aliases={"服务器"}, rule=to_me(), pr
 
 
 @bf_servers_cmd.handle()
-async def _(bot, event, args: str = CommandArg()):
-    arg_str = (args or "").strip()
+async def _(bot, event, args: Any = CommandArg()):
+    arg_str = _normalize_args(args).strip()
     raw_message = f"servers {arg_str}".strip()
 
     astr_event = make_astr_like_event(event, raw_message)
@@ -457,8 +493,8 @@ bf_bind_cmd = on_command("bfbind", aliases={"绑定"}, rule=to_me(), priority=10
 
 
 @bf_bind_cmd.handle()
-async def _(bot, event, args: str = CommandArg()):
-    arg_str = (args or "").strip()
+async def _(bot, event, args: Any = CommandArg()):
+    arg_str = _normalize_args(args).strip()
     raw_message = f"bind {arg_str}".strip()
 
     astr_event = make_astr_like_event(event, raw_message)
@@ -480,8 +516,8 @@ bf_init_cmd = on_command("bfinit", rule=to_me(), priority=10, block=True)
 
 
 @bf_init_cmd.handle()
-async def _(bot, event, args: str = CommandArg()):
-    arg_str = (args or "").strip()
+async def _(bot, event, args: Any = CommandArg()):
+    arg_str = _normalize_args(args).strip()
     raw_message = f"bf_init {arg_str}".strip()
 
     astr_event = make_astr_like_event(event, raw_message)
