@@ -42,7 +42,8 @@ driver = get_driver()
 DATA_DIR = Path() / "data" / "nonebot_plugin_battlefield_tool"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-db = BattleFieldDataBase(str(DATA_DIR))
+# 保持 Path，不要转 str
+db = BattleFieldDataBase(DATA_DIR)
 db_service = BattleFieldDBService(db)
 
 _session: aiohttp.ClientSession | None = None
