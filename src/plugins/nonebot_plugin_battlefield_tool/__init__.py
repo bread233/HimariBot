@@ -240,47 +240,43 @@ async def _result_to_image_bytes(result: Any) -> Optional[bytes]:
 
 
 async def _send_result(bot: Any, event: Any, result: Any):
-    """
-    统一发送结果：
-    - 优先处理 QQ 的原始 URL 图片（不损画质）
-    - 再尝试把结果转成图片字节：
-        - OneBot v11: base64://... → MessageSegment.image(...)
-        - QQ:         file_image(bytes) → 图片
-    - 否则当文本发送
-    """
-
-    # ===== QQ 适配器：优先直接用 URL 发送 =====
-    if QQBot is not None and QQMS is not None and isinstance(bot, QQBot):
-        if isinstance(result, str) and result.lower().startswith(("http://", "https://")):
-            seg = QQMS.image(result)  # adapter-qq: image(url)
-            await bot.send(event, seg)
-            return
-
-    # 其余情况再去尝试解析成图片字节（base64 / 下载 URL 等）
-    img_bytes = await _result_to_image_bytes(result)
-
-    # ===== 有图片字节，尝试发图片 =====
-    if img_bytes is not None:
-        b64 = base64.b64encode(img_bytes).decode("ascii")
-
-        # OneBot v11：使用 base64:// 方式发送
-        if isinstance(bot, OB11Bot):
-            seg = OB11MS.image(f"base64://{b64}")
-            await bot.send(event, seg)
-            return
-
-        # QQ 官方适配器：使用 file_image 发送本地二进制
+    try:
+        # ===== QQ 适配器：优先直接用 URL 发送 =====
         if QQBot is not None and QQMS is not None and isinstance(bot, QQBot):
-            seg = QQMS.file_image(img_bytes)  # bytes -> LocalAttachment
-            await bot.send(event, seg)
+            if isinstance(result, str) and result.lower().startswith(("http://", "https://")):
+                seg = QQMS.image(result)
+                await bot.send(event, seg)
+                return
+
+        img_bytes = await _result_to_image_bytes(result)
+
+        if img_bytes is not None:
+            b64 = base64.b64encode(img_bytes).decode("ascii")
+
+            if isinstance(bot, OB11Bot):
+                seg = OB11MS.image(f"base64://{b64}")
+                await bot.send(event, seg)
+                return
+
+            if QQBot is not None and QQMS is not None and isinstance(bot, QQBot):
+                seg = QQMS.file_image(img_bytes)
+                await bot.send(event, seg)
+                return
+
+            await bot.send(event, "[图片消息，当前适配器未专门适配，已丢弃]")
             return
 
-        # 其它适配器兜底
-        await bot.send(event, "[图片消息，当前适配器未专门适配，已丢弃]")
-        return
+        # 文本消息（→ 原来的 283 行）
+        await bot.send(event, str(result))
 
-    # ===== 不是图片，当文本发送 =====
-    await bot.send(event, str(result))
+    except Exception as e:
+        # 额外打印调试信息
+        logger.error(
+            f"发送战地结果失败: bot={type(bot)}, "
+            f"event={type(event)}, "
+            f"result_type={type(result)}, "
+            f"preview={str(result)[:200]!r}"
+        )
 
 
 # ===================== 命令实现 =====================
