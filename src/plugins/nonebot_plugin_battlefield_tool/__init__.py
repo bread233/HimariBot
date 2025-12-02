@@ -6,11 +6,15 @@ from types import SimpleNamespace
 from typing import Any, Optional
 
 import aiohttp
-from nonebot import get_driver, on_command
+from nonebot import get_driver, on_command, require
 from nonebot.params import CommandArg
 from nonebot.plugin import PluginMetadata
 from nonebot.rule import to_me
 from nonebot.log import logger
+
+# 先确保加载 htmlrender 插件
+require("nonebot_plugin_htmlrender")
+from nonebot_plugin_htmlrender import html_to_pic  # noqa: E402
 
 # 适配多协议：只在需要的地方做 isinstance 判断
 from nonebot.adapters.onebot.v11 import Bot as OB11Bot, MessageSegment as OB11MS
@@ -59,25 +63,6 @@ wake_prefix: list[str] = []
 
 
 async def html_render(*args, **kwargs) -> str:
-    """
-    兼容原 AstrBot 插件调用方式的 html_render 适配层。
-
-    当前各处调用大致为：
-        html = await html_builder_func(...)
-        url  = await html_render_func(
-            html,
-            {},
-            True,
-            {
-                "timeout": 10000,
-                "quality": self.img_quality,
-                "clip": {...},
-            },
-        )
-
-    这里暂时直接返回第一个参数的 HTML 字符串。
-    如后续需要接入截图服务，在这里把 HTML 渲成图片并返回 URL 即可。
-    """
     if not args:
         logger.error("html_render 被调用但没有传入参数")
         return ""
@@ -87,8 +72,27 @@ async def html_render(*args, **kwargs) -> str:
         logger.error(f"html_render 第一个参数不是 str，而是 {type(html)}，args={args!r}")
         return ""
 
-    return html
+    options = {}
+    if len(args) >= 4 and isinstance(args[3], dict):
+        options = args[3]
 
+    timeout_ms = int(options.get("timeout", 10000))
+    quality = int(options.get("quality", 90))
+
+    try:
+        img_bytes: bytes = await html_to_pic(
+            html,
+            type="jpeg",
+            quality=quality,
+            timeout=timeout_ms,
+        )
+    except Exception as e:
+        logger.error(f"调用 html_to_pic 失败: {e}")
+        return ""
+
+    # 直接返回 base64://xxx，让 _send_result 自动识别并构造图片消息
+    b64 = base64.b64encode(img_bytes).decode("ascii")
+    return f"base64://{b64}"
 
 plugin_logic = BattlefieldPluginLogic(
     db_service=db_service,
@@ -266,7 +270,7 @@ async def _send_result(bot: Any, event: Any, result: Any):
             await bot.send(event, "[图片消息，当前适配器未专门适配，已丢弃]")
             return
 
-        # 文本消息（→ 原来的 283 行）
+        # 文本消息（兜底）
         await bot.send(event, str(result))
 
     except Exception as e:
@@ -275,7 +279,8 @@ async def _send_result(bot: Any, event: Any, result: Any):
             f"发送战地结果失败: bot={type(bot)}, "
             f"event={type(event)}, "
             f"result_type={type(result)}, "
-            f"preview={str(result)[:200]!r}"
+            f"preview={str(result)[:200]!r}, "
+            f"error={e!r}"
         )
 
 
