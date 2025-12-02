@@ -86,29 +86,29 @@ async def html_render(*args, **kwargs):
         opts = kwargs
 
     timeout_ms = int(opts.get("timeout", 10000))
-    quality = opts.get("quality", None)
+    # 原 config 里的 quality 先拿出来，但 PNG 下不能用
+    _quality = opts.get("quality", None)
     clip = opts.get("clip") or {}
 
     # 只用宽度，height 交给 full_page 自动撑开
     width = int(clip.get("width", 1280))
 
     try:
+        # ⚠️ 这里 type="png" 时，quality 必须是 None，不能传数字
         img_bytes: bytes = await html_to_pic(
             html=html,
             wait=0,
             type="png",
-            quality=quality,
+            quality=None,  # 关键：强制取消 quality，避免 Page.screenshot 报错
             device_scale_factor=2,
             screenshot_timeout=timeout_ms,
-            # 传给 get_new_page 的参数，用来设定 viewport
             viewport={"width": width, "height": 10},
         )
-        # 直接返回 bytes，后面的 _send_result 会识别 bytes 当图片发
         return img_bytes
     except Exception as e:
         logger.exception(f"战地 html_render 渲图失败: {e}")
-        # 返回一段非空文本作为兜底，避免 QQ 出现 invalid content
         return f"[战地战绩图片渲染失败: {e}]"
+    
 
 plugin_logic = BattlefieldPluginLogic(
     db_service=db_service,
