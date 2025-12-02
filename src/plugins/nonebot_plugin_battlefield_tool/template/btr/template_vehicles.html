@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta name="viewport" content="width=700px,height=10px,initial-scale=1" charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title></title>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        bb: 'var(--bg-color)',
+                        dynamicBg: 'var(--bg-color)',
+                    }
+                }
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        body {
+            background-color: var(--bg-color);
+            color: white;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+            font-weight: 400;
+            width: 700px;
+        }
+
+        h2 {
+            font-size: 1.4em;
+            font-weight: 700;
+            margin: 10px 20px 10px;
+            text-align: center;
+        }
+    </style>
+    <style>
+        :root {
+            --bg-color: {{ background_color }};
+        }
+    </style>
+</head>
+
+<body>
+    {% set bg_opacity_map = {
+        'bf2042': 'bg-opacity-30',
+        'bf6': 'bg-opacity-10',
+    } %}
+    {% set current_bg_opacity_class = bg_opacity_map.get(game, 'bg-opacity-10') %}
+
+    <div class="bg-cover relative" style="background-image: url('{{ banner }}'); height: 310px;">
+        <div class="absolute inset-0 bg-gradient-to-b from-dynamicBg/0 via-dynamicBg/10 to-dynamicBg/40"></div>
+        <div class="relative z-10 flex flex-col items-center justify-center pt-10 pb-10">
+            <img src="{{ stat_entity.avatar }}" alt="avatar" class="rounded-lg w-32 h-32 object-cover border-2 border-gray-700" />
+            <div class="font-bold text-4xl mt-2">{{ stat_entity.user_name }}</div>
+            <div class="flex items-center font-semibold text-gray-200 mt-1">
+                {% if game == 'bf6' %}
+                <img src="{{ stat_entity.rank_img }}" width="25px" class="mr-1" alt="等级IMG"/>
+                {% endif %}
+                等级 {{ stat_entity.level }}
+            </div>
+            <div class="font-semibold text-gray-200 mt-1">游戏时间：{{ stat_entity.hours_played }}</div>
+        </div>
+    </div>
+
+    <h2 class="text-white">载具信息</h2>
+    <div class="flex flex-col gap-4 mx-5">
+        {% from "vehicle_card.html" import vehicle_card %}
+        {% if vehicle_data is not none %}
+        {% for vehicle in vehicle_data %}
+        {{ vehicle_card(vehicle_entity=vehicle, game=game, bg_opacity_class=current_bg_opacity_class) }}
+        {% endfor %}
+        {% else %}
+        <div class="text-center text-slate-400 py-4">暂无载具数据</div>
+        {% endif %}
+    </div>
+
+    <div class="flex flex-col justify-center items-center text-slate-400 py-3">
+        <span>powered by astrbot</span>
+        <span>数据更新时间：{{ update_time }}</span>
+    </div>
+</body>
+
+</html>

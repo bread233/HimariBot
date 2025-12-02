@@ -1,0 +1,38 @@
+{% macro soldier_card(soldier_entity,game, bg_opacity_class) %}
+<div class="flex grid grid-cols-6 gap-2 p-4 rounded-lg bg-gray-800 {{ bg_opacity_class }}">
+    <div class=" col-span-2 row-span-2 flex flex-col justify-center items-center">
+<!--        <img src="{{ soldier_entity.image_url }}" class="object-scale-down" style="height:90px;width:200px;" />-->
+        {% if game == 'bf2042' %}
+        <div class="text-3xl font-bold text-white truncate" style="max-width: 190px;">{{ soldier_entity.soldier_name }}</div>
+        {% endif %}
+        {% if game == 'bf6' %}
+        <img src="{{ soldier_entity.image }}" class="object-scale-down" style="height:45px;width:100px;" />
+        <div class="flex mt-1">{{ soldier_entity.soldier_name }}</div>
+        {% endif %}
+<!--        <div class="flex mt-1">-->
+<!--            {{ soldier_entity.category }}-->
+<!--        </div>-->
+        {% if soldier_entity.kills // 100 > 0 %}
+            <div class="flex mt-1 text-yellow-500">
+                ⭐ x {{ soldier_entity.kills // 100 }}
+            </div>
+        {% endif %}
+    </div>
+    <div>
+        <div class="text-1xl text-yellow-400">使用时间</div>
+        <div class="text-2xl font-bold font-mono">{{ soldier_entity.time_played }}h</div>
+    </div>
+    <div>
+        <div class="text-1xl text-yellow-400">击杀</div>
+        <div class="text-2xl font-bold font-mono">{{ soldier_entity.kills }}</div>
+    </div>
+    <div>
+        <div class="text-1xl text-yellow-400">KPM</div>
+        <div class="text-2xl font-bold font-mono">{{ soldier_entity.kills_per_minute }}</div>
+    </div>
+    <div>
+        <div class="text-1xl text-yellow-400">K/D</div>
+        <div class="text-2xl font-bold font-mono">{{ soldier_entity.kd_ratio }}</div>
+    </div>
+</div>
+{% endmacro %}

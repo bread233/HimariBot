@@ -1,0 +1,62 @@
+{% macro weapon_card(weapon_entity,game, bg_opacity_class) %}
+<div class="flex grid grid-cols-6 gap-2 p-4 rounded-lg bg-gray-800 {{ bg_opacity_class }}">
+    <div class=" col-span-2 row-span-2 flex flex-col justify-center items-center">
+<!--        <img src="{{ weapon_entity.image }}" class="object-scale-down" style="height:90px;width:200px;" />-->
+        {% if game == 'bf2042' %}
+        <div class="text-3xl font-bold text-white truncate" style="max-width: 190px;">{{ weapon_entity.weapon_name }}</div>
+        {% endif %}
+        {% if game == 'bf6' %}
+        <img src="{{ weapon_entity.image }}" class="object-scale-down" style="height:45px;width:100px;" />
+        <div class="flex mt-1">{{ weapon_entity.weapon_name }}</div>
+        {% endif %}
+        <div class="flex mt-1">
+            {{ weapon_entity.category }}
+        </div>
+        {% if weapon_entity.kills // 100 > 0 %}
+            <div class="flex mt-1 text-yellow-500">
+                ⭐ x {{ weapon_entity.kills // 100 }}
+            </div>
+        {% endif %}
+    </div>
+    <div>
+        <div class="text-1xl text-yellow-400">击杀</div>
+        <div class="text-2xl font-bold font-mono">{{ weapon_entity.kills }}</div>
+    </div>
+    <div>
+        <div class="text-1xl text-yellow-400">KPM</div>
+        <div class="text-2xl font-bold font-mono">{{ weapon_entity.kills_per_minute }}</div>
+    </div>
+    <div>
+        <div class="text-1xl text-yellow-400">爆头率</div>
+        <div class="text-2xl font-bold font-mono">{{ weapon_entity.headshot_percentage }}</div>
+    </div>
+    <div>
+        <div class="text-1xl text-yellow-400">命中率</div>
+        <div class="text-2xl font-bold font-mono">{{ weapon_entity.shots_accuracy }}</div>
+    </div>
+    <div>
+        <div class="text-1xl text-yellow-400">使用时间</div>
+        <div class="text-2xl font-bold font-mono">{{ weapon_entity.time_played }}h</div>
+    </div>
+    {% if game == 'bf6' %}
+    <div>
+        <div class="text-1xl text-yellow-400">精通等级</div>
+        <div class="text-2xl font-bold font-mono">{{ weapon_entity.mastery_level }}</div>
+    </div>
+    {% endif %}
+    {% if game == 'bf2042' %}
+    <div>
+        <div class="text-1xl text-yellow-400">腰射击杀</div>
+        <div class="text-2xl font-bold font-mono">{{ weapon_entity.hipfire_kills }}</div>
+    </div>
+    {% endif %}
+    <div>
+        <div class="text-1xl text-yellow-400">爆头击杀</div>
+        <div class="text-2xl font-bold font-mono">{{ weapon_entity.headshot_kills }}</div>
+    </div>
+    <div>
+        <div class="text-1xl text-yellow-400">多重击杀</div>
+        <div class="text-2xl font-bold font-mono">{{ weapon_entity.multi_kills }}</div>
+    </div>
+</div>
+{% endmacro %}
