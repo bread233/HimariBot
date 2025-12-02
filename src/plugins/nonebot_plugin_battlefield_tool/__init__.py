@@ -86,20 +86,18 @@ async def html_render(*args, **kwargs):
         opts = kwargs
 
     timeout_ms = int(opts.get("timeout", 10000))
-    # 原 config 里的 quality 先拿出来，但 PNG 下不能用
-    _quality = opts.get("quality", None)
+    _quality = opts.get("quality", None)  # 目前不用，预留
     clip = opts.get("clip") or {}
 
     # 只用宽度，height 交给 full_page 自动撑开
     width = int(clip.get("width", 1280))
 
     try:
-        # ⚠️ 这里 type="png" 时，quality 必须是 None，不能传数字
         img_bytes: bytes = await html_to_pic(
             html=html,
             wait=0,
             type="png",
-            quality=None,  # 关键：强制取消 quality，避免 Page.screenshot 报错
+            quality=None,  # PNG 不允许传 quality，必须 None
             device_scale_factor=2,
             screenshot_timeout=timeout_ms,
             viewport={"width": width, "height": 10},
@@ -108,7 +106,7 @@ async def html_render(*args, **kwargs):
     except Exception as e:
         logger.exception(f"战地 html_render 渲图失败: {e}")
         return f"[战地战绩图片渲染失败: {e}]"
-    
+
 
 plugin_logic = BattlefieldPluginLogic(
     db_service=db_service,
@@ -323,7 +321,7 @@ def _normalize_args(args: Any) -> str:
 
 
 # ===== bfstat（原 bf_stat） =====
-bf_stat_cmd = on_command("bfstat", rule=to_me(), priority=10, block=True)
+bf_stat_cmd = on_command("bfstat", aliases={"战地战绩"}, rule=to_me(), priority=10, block=True)
 
 
 @bf_stat_cmd.handle()
@@ -354,7 +352,13 @@ async def _(bot, event, args: Any = CommandArg()):
 
 
 # ===== bfweapons / 武器 =====
-bf_weapons_cmd = on_command("bfweapons", aliases={"武器"}, rule=to_me(), priority=10, block=True)
+bf_weapons_cmd = on_command(
+    "bfweapons",
+    aliases={"战地武器"},
+    rule=to_me(),
+    priority=10,
+    block=True,
+)
 
 
 @bf_weapons_cmd.handle()
@@ -383,7 +387,13 @@ async def _(bot, event, args: Any = CommandArg()):
 
 
 # ===== bfvehicles / 载具 =====
-bf_vehicles_cmd = on_command("bfvehicles", aliases={"载具"}, rule=to_me(), priority=10, block=True)
+bf_vehicles_cmd = on_command(
+    "bfvehicles",
+    aliases={"战地载具"},
+    rule=to_me(),
+    priority=10,
+    block=True,
+)
 
 
 @bf_vehicles_cmd.handle()
@@ -412,7 +422,13 @@ async def _(bot, event, args: Any = CommandArg()):
 
 
 # ===== bfsoldiers / 士兵（仅 2042 / 6） =====
-bf_soldiers_cmd = on_command("bfsoldiers", aliases={"士兵"}, rule=to_me(), priority=10, block=True)
+bf_soldiers_cmd = on_command(
+    "bfsoldiers",
+    aliases={"战地士兵"},
+    rule=to_me(),
+    priority=10,
+    block=True,
+)
 
 
 @bf_soldiers_cmd.handle()
@@ -438,7 +454,13 @@ async def _(bot, event, args: Any = CommandArg()):
 
 
 # ===== bfrecent / 战报（仅 bf6） =====
-bf_recent_cmd = on_command("bfrecent", aliases={"最近", "战报"}, rule=to_me(), priority=10, block=True)
+bf_recent_cmd = on_command(
+    "bfrecent",
+    aliases={"战地最近", "战地战报"},
+    rule=to_me(),
+    priority=10,
+    block=True,
+)
 
 
 @bf_recent_cmd.handle()
@@ -473,7 +495,13 @@ async def _(bot, event, args: Any = CommandArg()):
 
 
 # ===== bfservers / 服务器 =====
-bf_servers_cmd = on_command("bfservers", aliases={"服务器"}, rule=to_me(), priority=10, block=True)
+bf_servers_cmd = on_command(
+    "bfservers",
+    aliases={"战地服务器"},
+    rule=to_me(),
+    priority=10,
+    block=True,
+)
 
 
 @bf_servers_cmd.handle()
@@ -506,7 +534,13 @@ async def _(bot, event, args: Any = CommandArg()):
 
 
 # ===== bfbind / 绑定 =====
-bf_bind_cmd = on_command("bfbind", aliases={"绑定"}, rule=to_me(), priority=10, block=True)
+bf_bind_cmd = on_command(
+    "bfbind",
+    aliases={"战地绑定"},
+    rule=to_me(),
+    priority=10,
+    block=True,
+)
 
 
 @bf_bind_cmd.handle()
@@ -556,29 +590,29 @@ bf_help_cmd = on_command("bfhelp", rule=to_me(), priority=10, block=True)
 async def _(bot, event):
     help_msg = f"""战地风云插件使用帮助：
 1. 账号绑定
-命令: /bfbind [name] 或 /绑定 [name]
+命令: /bfbind [name] 或 /战地绑定 [name]
 
 2. 默认查询设置
 命令: /bfinit [游戏代号]
 参数: 游戏代号 {", ".join(plugin_logic.SUPPORTED_GAMES)}
 
 3. 战绩查询
-命令: /bfstat [name],game=[游戏代号]
+命令: /bfstat [name],game=[游戏代号] 或 /战地战绩 [name],game=[游戏代号]
 
 4. 武器统计
-命令: /bfweapons [name],game=[游戏代号] 或 /武器 [name],game=[游戏代号]
+命令: /bfweapons [name],game=[游戏代号] 或 /战地武器 [name],game=[游戏代号]
 
 5. 载具统计
-命令: /bfvehicles [name],game=[游戏代号] 或 /载具 [name],game=[游戏代号]
+命令: /bfvehicles [name],game=[游戏代号] 或 /战地载具 [name],game=[游戏代号]
 
 6. 士兵查询
-命令: /bfsoldiers [name],game=bf2042 或 /士兵 [name],game=bf2042
+命令: /bfsoldiers [name],game=bf2042 或 /战地士兵 [name],game=bf2042
 
 7. 战报查询
-命令: /bfrecent [name],game=bf6 或 /战报 [name],game=bf6
+命令: /bfrecent [name],game=bf6 或 /战地战报 [name],game=bf6
 
 8. 服务器查询
-命令: /bfservers [server_name],game=[游戏代号] 或 /服务器 [server_name],game=[游戏代号]
+命令: /bfservers [server_name],game=[游戏代号] 或 /战地服务器 [server_name],game=[游戏代号]
 
 ※ 所有命令都需要 @机器人 使用
 """
