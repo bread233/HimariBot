@@ -1,4 +1,6 @@
 # nonebot_plugin_battlefield_tool/config.py
+from typing import Optional
+
 from pydantic import BaseModel
 from nonebot import get_driver
 
@@ -11,7 +13,8 @@ class Config(BaseModel):
     battlefield_bf_prompt: str = (
         "请根据以下评判标准和数据从多个方面评价用户的游戏水平，注意要结合人设和上下文，保证对话不冲突..."
     )
-    battlefield_evaluation_provider: str | None = None
+    # 原来是 str | None（Py3.10+ 写法），这里改成 Optional[str]
+    battlefield_evaluation_provider: Optional[str] = None
     battlefield_ssc_token: str = ""
 
 
