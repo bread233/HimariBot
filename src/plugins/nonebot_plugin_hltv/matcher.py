@@ -160,7 +160,7 @@ async def handle_cs2_results(
                     winner = team1 if int(score1) > int(score2) else team2
                     msg += f"{i}. {team1} {score1}-{score2} {team2} {'★' * star_count}\n"
                     msg += f"   胜者: {winner} | 赛事: {evt}\n"
-                await matcher.finish(f"渲染图片可能失败: {e}")
+                #await matcher.finish(f"渲染图片可能失败: {e}")
         else:
             await matcher.finish("当前没有找到比赛结果。\n")
     else:
