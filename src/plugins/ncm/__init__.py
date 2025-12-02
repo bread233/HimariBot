@@ -90,7 +90,7 @@ async def music_set_rule(event: Union[GroupMessageEvent, PrivateMessageEvent]) -
 
 async def music_reply_rule(event: Union[GroupMessageEvent, PrivateMessageEvent]):
     # logger.info(event.get_plaintext())
-    return event.reply and event.get_plaintext().strip() == "下载"
+    return bool(event.reply) and event.get_plaintext().strip() == "下载"
 
 
 # ============Matcher=============
