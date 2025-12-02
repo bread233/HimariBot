@@ -24,14 +24,14 @@ class ApiHandlers:
     def __init__(
         self,
         plugin_logic: BattlefieldPluginLogic,
-        html_render_func,
+        html_render,
         timeout_config: int,
         ssc_token: str,
         session,
         wake_prefix,
     ):
         self.plugin_logic = plugin_logic
-        self.html_render = html_render_func
+        self.html_render = html_render
         self.timeout_config = timeout_config
         self.ssc_token = ssc_token
         self._session = session
