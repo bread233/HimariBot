@@ -40,6 +40,16 @@ class CFarmManager:
         soilPos = g_pJsonManager.m_pSoil["soil"]
 
         userInfo = await g_pDBService.user.getUserInfoByUid(uid)
+        
+        # 既兼容 dict，也兼容老版本的对象（以防后面改实现）
+        if isinstance(userInfo, dict):
+            exp = int(userInfo.get("exp", 0))
+            point = int(userInfo.get("point", 0))
+        else:
+            exp = int(getattr(userInfo, "exp", 0))
+            point = int(getattr(userInfo, "point", 0))
+        logger.info(f"[farm draw] uid={uid} exp={exp}, point={point}")
+
         soilUnlock = int(userInfo["soil"])
 
         x = 0

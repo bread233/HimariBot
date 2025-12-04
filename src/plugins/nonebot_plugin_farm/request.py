@@ -1,5 +1,6 @@
 import json
 import os
+import random
 
 import httpx
 from nonebot import logger
@@ -158,28 +159,130 @@ class CRequestManager:
             logger.warning(f"{name}处理异常", e=e)
             return {}
 
+    # ===== 工具1：从 plant 表里拿所有作物名称 =====
+    @classmethod
+    async def _get_all_plant_names(cls) -> list[str]:
+        try:
+            plants = await g_pDBService.plant.listPlants()
+            return [p["name"] for p in plants if p.get("name")]
+        except Exception as e:
+            logger.warning("获取作物列表失败", e=e)
+            # 兜底：至少保留一组可用的
+            return ["胡萝卜", "土豆", "玉米", "草莓"]
+
+    # ===== 工具2：生成当月随机 continuou 奖励 =====
+    @classmethod
+    async def _generate_random_continuou(cls) -> dict:
+        """
+        每个月随机挑 4 种植物，但保留你原来的奖励数值
+        """
+        plants = await cls._get_all_plant_names()
+        if not plants:
+            plants = ["胡萝卜", "土豆", "玉米", "草莓"]
+
+        # 和你原来的奖励结构一致：天数, 积分, 经验, vipPoint, 种子数量
+        config_list = [
+            ("7",  100,  50, 0, 2),
+            ("14", 150,  80, 1, 2),
+            ("21", 200, 120, 1, 3),
+            ("30", 500, 200, 2, 3),
+        ]
+
+        random.shuffle(plants)
+        continuou: dict[str, dict] = {}
+        idx = 0
+
+        for day, point, exp, vip, count in config_list:
+            plant_name = plants[idx % len(plants)]
+            idx += 1
+            continuou[day] = {
+                "point": point,
+                "exp": exp,
+                "plant": {plant_name: count},
+                "vipPoint": vip,
+            }
+
+        return continuou
+
+    # ===== 工具3：按模板创建/更新 sign_in.json（当前月份 + 随机 continuou） =====
+    @classmethod
+    async def _create_or_update_default_sign_file(cls) -> bool:
+        year_month = g_pToolManager.dateTime().now().strftime("%Y%m")
+
+        default_sign_data = {
+            "date": year_month,
+            "daily": {
+                "1": {"exp": 10, "point": 30},
+                "2": {"exp": 10, "point": 30},
+                "3": {"exp": 12, "point": 35},
+                "4": {"exp": 12, "point": 35},
+                "5": {"exp": 15, "point": 40},
+                "6": {"exp": 15, "point": 40},
+                "7": {"exp": 20, "point": 50},
+                "8": {"exp": 10, "point": 30},
+                "9": {"exp": 10, "point": 30},
+                "10": {"exp": 12, "point": 35},
+                "11": {"exp": 12, "point": 35},
+                "12": {"exp": 15, "point": 40},
+                "13": {"exp": 15, "point": 40},
+                "14": {"exp": 20, "point": 50},
+                "15": {"exp": 12, "point": 36},
+                "16": {"exp": 12, "point": 36},
+                "17": {"exp": 14, "point": 42},
+                "18": {"exp": 14, "point": 42},
+                "19": {"exp": 16, "point": 48},
+                "20": {"exp": 16, "point": 48},
+                "21": {"exp": 20, "point": 55},
+                "22": {"exp": 12, "point": 36},
+                "23": {"exp": 12, "point": 36},
+                "24": {"exp": 14, "point": 42},
+                "25": {"exp": 14, "point": 42},
+                "26": {"exp": 16, "point": 48},
+                "27": {"exp": 16, "point": 48},
+                "28": {"exp": 22, "point": 60},
+                "29": {"exp": 15, "point": 40},
+                "30": {"exp": 30, "point": 88},
+            },
+            "continuou": await cls._generate_random_continuou(),
+        }
+
+        try:
+            os.makedirs(os.path.dirname(g_sSignInPath), exist_ok=True)
+            with open(g_sSignInPath, "w", encoding="utf-8") as f:
+                json.dump(default_sign_data, f, ensure_ascii=False, indent=2)
+
+            logger.success(f"默认签到配置创建/更新成功: {g_sSignInPath}")
+            return True
+        except Exception as e:
+            logger.error("创建/更新默认签到配置失败", e=e)
+            return False
+
     @classmethod
     async def initSignInFile(cls) -> bool:
         if os.path.exists(g_sSignInPath):
+            # 已存在：检查 JSON 和月份
             try:
                 with open(g_sSignInPath, encoding="utf-8") as f:
-                    content = f.read()
-                    sign = json.loads(content)
-
-                date = sign.get("date", "")
-                yearMonth = g_pToolManager.dateTime().now().strftime("%Y%m")
-
-                if date == yearMonth:
-                    logger.debug("真寻农场签到文件检查完毕")
-                    return True
-                else:
-                    logger.warning("真寻农场签到文件检查失败, 即将下载")
-                    return await cls.downloadSignInFile()
+                    sign = json.load(f)
             except json.JSONDecodeError:
-                logger.warning("真寻农场签到文件格式错误, 即将下载")
-                return await cls.downloadSignInFile()
+                logger.warning("签到文件 JSON 格式错误，将重建默认配置")
+                return await cls._create_or_update_default_sign_file()
+
+            year_month = g_pToolManager.dateTime().now().strftime("%Y%m")
+            date = sign.get("date", "")
+
+            if date == year_month:
+                logger.debug("本地签到文件存在且为当月，跳过更新")
+                return True
+
+            logger.info(
+                f"签到文件为旧月份(date={date}, now={year_month})，将刷新为本月默认配置并随机连续奖励"
+            )
+            return await cls._create_or_update_default_sign_file()
         else:
-            return await cls.downloadSignInFile()
+            # 不存在：直接创建
+            logger.warning(f"签到文件不存在 -> 自动创建默认配置: {g_sSignInPath}")
+            return await cls._create_or_update_default_sign_file()
 
     @classmethod
     async def downloadSignInFile(cls) -> bool:

@@ -46,6 +46,7 @@ async def draw_farm_help_img_simple() -> bytes:
 我的农场
 农场详述
 农场签到
+农场本月签到奖励
 
 🛒 商店相关
 种子商店
@@ -170,6 +171,7 @@ diuse_farm = on_alconna(
         Subcommand("stealing", Args["target?", At], help_text="偷菜"),
         Subcommand("change-name", Args["name?", str], help_text="更改农场名"),
         Subcommand("sign-in", help_text="农场签到"),
+        Subcommand("sign-reward", help_text="农场本月签到奖励"),   # ← 新增
         Subcommand("admin-up", Args["num?", int], help_text="农场下阶段"),
     ),
     priority=1,
@@ -598,12 +600,65 @@ async def _(session: Uninfo):
                     message += g_sTranslation["signIn"]["grandTotal2"].format(
                         name=key, num=value
                     )
+    elif status == 2:
+        # 重复签到，只提示「今天已经签过到了」，不显示奖励
+        message = g_sTranslation["signIn"]["repeat"]
     else:
         message = g_sTranslation["signIn"]["error1"]
 
     await MessageUtils.build_message(message).send()
 
     # await MessageUtils.alc_forward_msg([info], session.self_id, BotConfig.self_nickname).send(reply_to=True)
+
+diuse_farm.shortcut(
+    "农场本月签到奖励",
+    command="我的农场",
+    arguments=["sign-reward"],
+    prefix=True,
+)
+
+@diuse_farm.assign("sign-reward")
+async def _(session: Uninfo):
+    uid = str(session.user.id)
+
+    # 需要已经开通农场
+    if not await g_pToolManager.isRegisteredByUid(uid):
+        return
+
+    # 签到系统是否正常
+    if not g_bSignStatus:
+        await MessageUtils.build_message(g_sTranslation["signIn"]["error"]).send()
+        return
+
+    sign_conf = g_pJsonManager.m_pSign or {}
+    continuou = sign_conf.get("continuou", {})
+
+    if not continuou:
+        await MessageUtils.build_message("本月暂未配置连续签到奖励喔~").send(reply_to=True)
+        return
+
+    lines: list[str] = []
+    lines.append("【本月连续签到奖励一览】")
+
+    # 按天数排序输出
+    for day in sorted(continuou.keys(), key=lambda x: int(x)):
+        reward = continuou.get(day, {})
+        point = reward.get("point", 0)
+        exp = reward.get("exp", 0)
+        vip = reward.get("vipPoint", 0)
+        plant = reward.get("plant", {}) or {}
+
+        plant_parts = [f"{name}×{num}" for name, num in plant.items()]
+        plant_text = f"；作物：{'、'.join(plant_parts)}" if plant_parts else ""
+        vip_text = f"，VIP点数+{vip}" if vip > 0 else ""
+
+        lines.append(
+            f"第{day}天：{vip_text}{plant_text}"
+        )
+
+    msg = "\n".join(lines)
+    await MessageUtils.build_message(msg).send(reply_to=True)
+
 
 
 soil_upgrade = on_alconna(

@@ -121,6 +121,7 @@ g_sTranslation = {
         "grandTotal2": "\n🌱 获得{name}种子 * {num} 🌟",
         "error": "❗️ 签到功能异常！",
         "error1": "❌ 签到失败！未知错误 💔",
+        "repeat": "今天已经签过到了喔~",
     },
     "soilInfo": {
         "success": "土地成功升级至{name}，效果为：{text}",

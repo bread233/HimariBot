@@ -128,6 +128,7 @@ class CUserSignDB(CSqlManager):
                 signDate = g_pToolManager.dateTime().date().today().strftime("%Y-%m-%d")
 
             if await cls.hasSigned(uid, signDate):
+                logger.info(f"[farm sign] uid={uid} already signed on {signDate}, skip update.")
                 return 2
 
             todayStr = g_pToolManager.dateTime().date().today().strftime("%Y-%m-%d")
@@ -237,10 +238,20 @@ class CUserSignDB(CSqlManager):
 
             # 向数据库更新
             currentExp = await g_pDBService.user.getUserExpByUid(uid)
-            await g_pDBService.user.updateUserExpByUid(uid, currentExp + exp)
+            ok1 = await g_pDBService.user.updateUserExpByUid(uid, currentExp + exp)
+
 
             currentPoint = await g_pDBService.user.getUserPointByUid(uid)
-            await g_pDBService.user.updateUserPointByUid(uid, currentPoint + point)
+            ok2 = await g_pDBService.user.updateUserPointByUid(uid, currentPoint + point)
+
+            logger.info(
+                f"[farm sign] uid={uid} before: exp={currentExp}, point={currentPoint}, "
+                f"add_exp={exp}, add_point={point}"
+            )
+            logger.info(
+                f"[farm sign] uid={uid} after update: exp={currentExp + exp}, "
+                f"point={currentPoint + point}, ok1={ok1}, ok2={ok2}"
+            )
 
             if vipPoint > 0:
                 currentVipPoint = await g_pDBService.user.getUserVipPointByUid(uid)
@@ -251,6 +262,7 @@ class CUserSignDB(CSqlManager):
             return 1
         except Exception as e:
             logger.warning("执行签到失败", e=e)
+            logger.exception("执行签到失败")
             return 0
 
     @classmethod

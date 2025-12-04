@@ -92,8 +92,8 @@ class CJsonManager:
                 encoding="utf-8",
             ) as file:
                 self.m_pSign = json.load(file)
-
-                return True
+            
+            return True
         except FileNotFoundError:
             logger.warning("sign_in.json 打开失败")
             return False
