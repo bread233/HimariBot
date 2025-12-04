@@ -403,7 +403,7 @@ class CFarmManager:
         if not seedRecords:
             result = await ImageTemplate.table_page(
                 "种子仓库",
-                "播种示例：@小真寻 播种 大白菜 [数量]",
+                "播种示例：播种 大白菜 [数量]",
                 columnNames,
                 dataList,
             )
@@ -436,7 +436,7 @@ class CFarmManager:
 
         result = await ImageTemplate.table_page(
             "种子仓库",
-            "播种示例：@小真寻 播种 大白菜 [数量]",
+            "播种示例：播种 大白菜 [数量]",
             columnNames,
             dataList,
         )
@@ -716,7 +716,7 @@ class CFarmManager:
         if plant is None:
             result = await ImageTemplate.table_page(
                 "作物仓库",
-                "出售示例：@小真寻 出售作物 大白菜 [数量]",
+                "出售示例：出售作物 大白菜 [数量]",
                 column_name,
                 data_list,
             )
@@ -744,7 +744,7 @@ class CFarmManager:
 
         result = await ImageTemplate.table_page(
             "作物仓库",
-            "出售示例：@小真寻 出售作物 大白菜 [数量]",
+            "出售示例：出售作物 大白菜 [数量]",
             column_name,
             data_list,
         )

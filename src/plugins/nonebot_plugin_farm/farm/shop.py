@@ -94,7 +94,7 @@ class CShopManager:
         # 渲染表格并返回图片bytes
         result = await ImageTemplate.table_page(
             title,
-            "购买示例：@小真寻 购买种子 大白菜 5",
+            "购买示例：购买种子 大白菜 5",
             columnName,
             dataList,
         )
