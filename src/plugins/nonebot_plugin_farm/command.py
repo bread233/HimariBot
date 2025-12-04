@@ -29,7 +29,7 @@ from .tool import g_pToolManager
 
 farm_help = on_alconna(
     Alconna("农场帮助"),
-    priority=5,
+    priority=1,
     rule=to_me(),
     block=True,
     use_cmd_start=False,
@@ -71,7 +71,7 @@ async def _():
 
 diuse_register = on_alconna(
     Alconna("开通农场"),
-    priority=5,
+    priority=1,
     rule=to_me(),
     block=True,
     use_cmd_start=False,
@@ -131,7 +131,7 @@ diuse_farm = on_alconna(
         Subcommand("sign-in", help_text="农场签到"),
         Subcommand("admin-up", Args["num?", int], help_text="农场下阶段"),
     ),
-    priority=5,
+    priority=1,
     block=True,
     use_cmd_start=False,
 )
@@ -368,7 +368,7 @@ async def _(session: Uninfo):
 
 reclamation = on_alconna(
     Alconna("开垦"),
-    priority=5,
+    priority=1,
     block=True,
     use_cmd_start=True,
 )
@@ -567,7 +567,7 @@ async def _(session: Uninfo):
 
 soil_upgrade = on_alconna(
     Alconna("土地升级", Args["index", int]),
-    priority=5,
+    priority=1,
     block=True,
     use_cmd_start=True,
 )
