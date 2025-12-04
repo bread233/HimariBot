@@ -22,7 +22,7 @@ authors = ["bread233 <zhangzhenyu353@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = ">=3.10,<4.0"
 apscheduler = "3.10.1"
 aiohttp = "^3.8.5"
 lxml = ">=4.9.3"
@@ -30,7 +30,7 @@ tinydb = "4.7.0"
 aiofile = "3.8.7"
 qrcode = "7.3.1"
 ujson = "^5.8.0"
-aiofiles = "23.1.0"
+aiofiles = ">=24.1.0,<25.0.0"
 nonebot-plugin-hammer-core = "^0.3.2"
 # 使用 GitHub 安装兼容版本的 nepattern
 nonebot-plugin-cesaa = "^0.5.0"
@@ -63,7 +63,7 @@ poetry = "^1.6.1"
 numpy = "<2.0"
 crypto = "^1.4.1"
 bs4 = "^0.0.2"
-pypinyin = "^0.55.0"
+pypinyin = ">=0.53.0,<0.54.0"
 cn2an = "^0.5.23"
 openai = "^1.107.3"
 pyquery = "^2.0.1"
@@ -92,20 +92,21 @@ nonebot-plugin-uninfo = "<0.7"
 tortoise = "^0.1.1"
 tortoise-orm = "^0.25.1"
 uvicorn = ">=0.22.0"
-httpx = {extras = ["http2"], version = "^0.28.1"}
+httpx = { extras = ["http2"], version = "0.27.2" }
 tsugu-api-python = "^1.5.10"
 tsugu = "^6.4.1"
 revchatgpt = "^6.8.6"
 sketchbook = "^0.3.0"
 sketchbook-py = "^0.2.1"
-nonebot-plugin-alconna = "0.46.4"
+nonebot-plugin-alconna = ">=0.54,<0.55"
 nonebot-adapter-qq = "^1.6.6"
 hikari-core = "^1.2.0"
 nonebot-plugin-guild-patch = "^0.2.3"
+zhenxun-utils = "^0.2.2"
+rich = ">=13.9.4,<14.0.0"
 
 [tool.poetry.group.dev.dependencies]
 nonebot2 = {extras = ["fastapi"], version = "^2.4.3"}
-nb-cli = "^1.5.0"
 
 [build-system]
 requires = ["poetry-core"]
