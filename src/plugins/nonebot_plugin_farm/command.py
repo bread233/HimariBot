@@ -185,7 +185,7 @@ async def _(session: Uninfo):
     if not await g_pToolManager.isRegisteredByUid(uid):
         return
 
-    image = await g_pFarmManager.drawFamByUid(uid)
+    image = await g_pFarmManager.drawFarmByUid(uid)
     await MessageUtils.build_message(image).send(reply_to=True)
 
 
