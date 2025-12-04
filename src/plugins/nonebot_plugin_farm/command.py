@@ -37,53 +37,76 @@ farm_help = on_alconna(
 )
 
 async def draw_farm_help_img_simple() -> bytes:
-    """农场帮助：纯文字版图片"""
+    """农场帮助：白底黑字，文字从左上角开始"""
 
-    text = """
-【Q萌农场 指令总览】
+    help_text = """【Q萌农场 指令总览】
 
 🌾 基础操作
-- @Bot 开通农场
-- 我的农场
-- 农场详述
-- 农场签到
+@Bot 开通农场
+我的农场
+农场详述
+农场签到
 
 🛒 商店相关
-- 种子商店
-- 种子商店 关键字 页数
-- 购买种子 名称 数量
+种子商店
+种子商店 关键字 页数
+购买种子 名称 数量
 
 🌱 作物与种子
-- 我的种子
-- 播种 名称 数量
-- 收获
-- 铲除
-- 我的作物
-- 出售作物 名称 数量
-- 偷菜 @对象
+我的种子
+播种 名称 数量
+收获
+铲除
+我的作物
+出售作物 名称 数量
+偷菜 @对象
 
 🏡 农场管理
-- 更改农场名 新名称
-- 开垦
-- 土地升级 地块编号
+更改农场名 新名称
+开垦
+土地升级 地块编号
 
-📌 提示：
-- 只有「农场帮助」和「开通农场」需要 @Bot
-- 其他指令可以直接发送，无需 @
+📌 提示
+只有「农场帮助」和「开通农场」需要 @Bot，
+其他指令可以直接发送。
 """.strip()
 
-    # 直接用文字生成一张图（白底+文字）
-    img = await BuildImage.build_text_image(
-        text,
-        size=26,
-        font_color=(40, 40, 40),
-        # font_name 可以不写，走默认；如果你有全局字体也可以填
-        # font_name="msyh.ttc",
+    # 文字参数
+    font_name = "HYWenHei-85W.ttf"  # 你当前使用的默认字体
+    font_size = 28
+    padding = 40  # 四周留白
+
+    # 估算文本整体尺寸（包含多行）
+    text_width, text_height = BuildImage.get_text_size(
+        help_text, font=font_name, font_size=font_size
     )
+
+    img_width = text_width + padding * 2
+    img_height = text_height + padding * 2
+
+    # 创建白底图片
+    img = BuildImage(
+        width=img_width,
+        height=img_height,
+        color=(255, 255, 255),  # 白底
+        font=font_name,
+        font_size=font_size,
+    )
+
+    # 在左上角（带 padding）绘制黑色文字，不居中
+    await img.text(
+        (padding, padding),
+        help_text,
+        fill=(0, 0, 0),          # 黑字
+        font=font_name,
+        font_size=font_size,
+        center_type=None,        # 一定要 None，避免再次居中
+    )
+
     return img.pic2bytes()
 
 @farm_help.handle()
-async def _():
+async def farmhelp():
     img_bytes = await draw_farm_help_img_simple()
     await MessageUtils.build_message(img_bytes).send(reply_to=True)
 
