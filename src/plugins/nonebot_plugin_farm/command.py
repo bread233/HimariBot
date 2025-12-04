@@ -36,165 +36,56 @@ farm_help = on_alconna(
     use_cmd_start=False,
 )
 
-@farm_help.handle()
-async def _(session: Uninfo):
-    """农场帮助（Q 萌图片版）"""
-    img_bytes = await draw_farm_help_img_qcute()
-    await MessageUtils.build_message(img_bytes).send(reply_to=True)
+async def draw_farm_help_img_simple() -> bytes:
+    """农场帮助：纯文字版图片"""
 
-async def draw_farm_help_img_qcute() -> bytes:
-    """生成 Q 萌风格的农场帮助图片"""
+    text = """
+【Q萌农场 指令总览】
 
-    # 画布：偏竖屏，适合手机看
-    width, height = 1000, 1450
-    img = BuildImage(width=width, height=height, color=(255, 252, 244))  # 奶白底色
+🌾 基础操作
+- @Bot 开通农场
+- 我的农场
+- 农场详述
+- 农场签到
 
-    # 顶部暖色头带
-    await img.rectangle((0, 0, width, 200), (255, 236, 213))
+🛒 商店相关
+- 种子商店
+- 种子商店 关键字 页数
+- 购买种子 名称 数量
 
-    # 标题
-    title = "Himari 农场帮助"
-    title_img = await BuildImage.build_text_image(
-        f"🌾 {title} 🌾", size=52, font_color=(120, 72, 40)
-    )
-    await img.paste(title_img, ((width - title_img.width) // 2, 60))
+🌱 作物与种子
+- 我的种子
+- 播种 名称 数量
+- 收获
+- 铲除
+- 我的作物
+- 出售作物 名称 数量
+- 偷菜 @对象
 
-    # 小 tips
-    tips_img = await BuildImage.build_text_image(
-        "Q 萌牧场 · 从一棵小苗开始的故事 ~",
-        size=30,
-        font_color=(150, 105, 60),
-    )
-    await img.paste(tips_img, ((width - tips_img.width) // 2, 140))
+🏡 农场管理
+- 更改农场名 新名称
+- 开垦
+- 土地升级 地块编号
 
-    # 通用卡片绘制函数
-    async def draw_card(
-        top: int,
-        title: str,
-        icon: str,
-        lines: list[str],
-    ) -> int:
-        """在指定 Y 位置绘制一张圆角卡片，返回下一块卡片的 Y 起点"""
-        left, right = 60, width - 60
-        card_top, card_bottom = top, top + 260
+📌 提示：
+- 只有「农场帮助」和「开通农场」需要 @Bot
+- 其他指令可以直接发送，无需 @
+""".strip()
 
-        # 卡片背景
-        await img.rectangle(
-            (left, card_top, right, card_bottom),
-            (255, 255, 255),
-        )
-        # 简易“描边”
-        await img.rectangle(
-            (left, card_top, right, card_top + 6),
-            (255, 220, 180),
-        )
-
-        # 标题
-        title_img = await BuildImage.build_text_image(
-            f"{icon} {title}",
-            size=36,
-            font_color=(105, 70, 40),
-        )
-        await img.paste(title_img, (left + 26, card_top + 20))
-
-        # 内容文本
-        content = "\n".join(lines)
-        text_img = await BuildImage.build_text_image(
-            content,
-            size=30,
-            font_color=(70, 50, 30),
-            max_width=(right - left - 40),
-        )
-        await img.paste(text_img, (left + 26, card_top + 80))
-
-        return card_bottom + 20
-
-    # 各区域内容（尽量和真实指令保持一致）
-    y = 230
-
-    # 1. 如何开始
-    y = await draw_card(
-        y,
-        "如何开始",
-        "🌱",
-        [
-            "@bot 开通农场   （第一次使用）",
-            "我的农场        （查看农场全图）",
-        ],
-    )
-
-    # 2. 查询类
-    y = await draw_card(
-        y,
-        "查询类",
-        "🔍",
-        [
-            "农场详述        查看每块土地详情",
-            "我的农场币      当前农场币",
-            "我的种子        仓库种子一览",
-            "我的作物        仓库存货一览",
-            "种子商店        查看种子列表",
-            "种子商店 2      查看第 2 页",
-            "种子商店 关键字 [页数]",
-        ],
-    )
-
-    # 3. 购买 / 播种 / 收获
-    y = await draw_card(
-        y,
-        "购买 · 播种 · 收获",
-        "🌾",
-        [
-            "购买种子 名称 数量   例：购买种子 小麦 10",
-            "播种 名称 [数量]      例：播种 小麦 5",
-            "收获                  收割成熟作物",
-            "铲除                  清理枯萎作物",
-        ],
-    )
-
-    # 4. 出售 & 互动
-    y = await draw_card(
-        y,
-        "出售 & 互动",
-        "🤝",
-        [
-            "出售作物              出售所有作物",
-            "出售作物 名称 [数量]  例：出售作物 小麦 10",
-            "偷菜 @目标            每天偷菜次数有限",
-        ],
-    )
-
-    # 5. 管理 & 签到
-    y = await draw_card(
-        y,
-        "管理 & 签到",
-        "🏡",
-        [
-            "更改农场名 新名称",
-            "开垦",
-            "土地升级 地块ID",
-            "农场下阶段 数值     （管理用指令）",
-            "农场签到            每日签到领奖励",
-        ],
-    )
-
-    # 底部提示条
-    footer_text = (
-        "✨ 提示：只有「农场帮助」和「开通农场」需要 @bot，"
-        "其余指令在同一群聊中直接发送即可哦 ~"
-    )
-    footer_img = await BuildImage.build_text_image(
-        footer_text,
+    # 直接用文字生成一张图（白底+文字）
+    img = await BuildImage.build_text_image(
+        text,
         size=26,
-        font_color=(130, 90, 50),
-        max_width=width - 120,
+        font_color=(40, 40, 40),
+        # font_name 可以不写，走默认；如果你有全局字体也可以填
+        # font_name="msyh.ttc",
     )
-    await img.paste(footer_img, (60, height - 120))
-
-    # 整体做个圆角，看起来更 Q 萌
-    img = await img.rounded_corner(40)
-
     return img.pic2bytes()
+
+@farm_help.handle()
+async def _():
+    img_bytes = await draw_farm_help_img_simple()
+    await MessageUtils.build_message(img_bytes).send(reply_to=True)
 
 diuse_register = on_alconna(
     Alconna("开通农场"),
