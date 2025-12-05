@@ -49,6 +49,7 @@ services:
     working_dir: /app
     ports:
       - "8181:8181"  # 宿主 8181 → 容器 8181
+      - "5888:5888"  # 宿主 5888 → 容器 5888
 
     volumes:
       - 宿主机/data:/app/data
@@ -75,6 +76,7 @@ docker run -d \
   --name himaribot \
   --restart=always \
   -p 8181:8181 \
+  -p 5888:5888 \
   -v 宿主机/data:/app/data \
   -v 宿主机/log:/app/log \
   -v 宿主机/.env.dev:/app/.env.dev:ro \

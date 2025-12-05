@@ -13,7 +13,7 @@ services:
 
     ports:
       - "8181:8181"                  # 宿主 8181 → 容器 8181
-
+      - "5888:5888"                  # 宿主 5888 → 容器 5888
     working_dir: /app
 
     volumes:

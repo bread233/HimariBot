@@ -43,6 +43,7 @@ COPY . .
 RUN cp .env.dev.example .env.dev
 
 EXPOSE 8181
+EXPOSE 5888
 
 VOLUME ["/app/data", "/app/log", "/root/.local/share/nonebot2"]
 
