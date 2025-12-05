@@ -566,6 +566,9 @@ async def _(session: Uninfo):
 
     # 如果完成签到
     if status == 1 or status == 2:
+        if status == 2:
+            message += g_sTranslation["signIn"]["repeat"]
+            
         # 获取签到总天数
         signDay = await g_pDBService.userSign.getUserSignCountByDate(
             uid, toDay.strftime("%Y-%m")
