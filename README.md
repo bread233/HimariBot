@@ -92,7 +92,7 @@ docker compose up -d
 ```bash
 docker compose restart
 ```
-#### 📁 数据存储说明
+### 📁 数据存储说明
 ```bash
 容器路径	说明	是否挂载
 /app/data	数据库、插件数据	✔ 推荐
@@ -101,6 +101,64 @@ docker compose restart
 
 挂载后容器升级不会丢数据 🛡
 ```
+
+---
+
+### 🪟 Windows 系统使用说明（无 Docker）
+
+适用于 Windows Server / Windows 10+
+自动构建的 .exe 版本支持直接运行 HimariBot
+
+#### 1️⃣ 下载发布的 Windows 版本
+
+前往 Releases 页面，下载 ZIP 包：
+
+👉 https://github.com/bread233/HimariBot/releases
+
+下载后解压，将会包含：
+```bash
+HimariBot.exe
+.env.dev.example
+data/（首次无，可自行创建）
+log/（首次无，可自行创建）
+```
+
+#### 2️⃣ 配置 .env.dev
+将示例配置复制：
+```go
+copy .env.dev.example .env.dev
+```
+并填入你的：
+| 项目              |        必填       |
+| --------------- | :-------------: |
+| QQ Bot Token    |        ✔        |
+| NapCat 反向 WS 地址 |        ✔        |
+| AppID / Secret  | 若使用 Webhook 时必填 |
+
+#### 3️⃣ 启动机器人
+在解压目录运行：
+```powershell
+.\HimariBot.exe
+```
+看到以下日志即代表连接成功：
+```powershell
+Bot connected: <你的QQ号>
+```
+
+#### 4️⃣ 后台常驻运行（推荐）
+
+Windows Server 可使用以下方式常驻：
+
+任务计划程序 开机自启
+
+使用 NSSM 注册为系统服务
+
+使用 WinSW 作为后台守护进程
+
+如需，我可以为你生成 Windows 服务安装脚本 👌
+
+---
+
 ### 🧩 技术栈
 Python 3.10
 
@@ -108,14 +166,33 @@ NoneBot2
 
 官方 QQ Webhook / OneBot v11
 
-### Docker 容器部署
+Docker（推荐生产环境）
+
+Windows EXE（便携运行）
+
+---
 
 ### ⚠️ 使用声明
 本项目仅供学习交流
 禁止用于违反法律法规及 QQ 协议的行为！
 
+---
+
+### 🏆 鸣谢 NapCatQQ
+感谢 NapCatQQ 提供稳定的 OneBot 协议支持
+使 HimariBot 能高效地与 QQ 进行数据交互
+
+🔗 https://github.com/NapNeko/NapCatQQ
+
+> 开源社区使一切变得更好 💖
+
+
+---
+
 ### ⭐ 支持与反馈
 如果 HimariBot 对你有帮助，请点亮 ⭐ 支持一下！
+
+---
 
 ### GitHub 项目地址
 👉 https://github.com/bread233/HimariBot/tree/a01
