@@ -1,15 +1,16 @@
-from .reward_data_source import *
+from .reward_data_source import reward
 import random
-from ..item_json import Items
-from ..xiuxian_config import USERRANK
-from ..xiuxian2_handle import OtherSet
-
+from ..xiuxian_utils.item_json import Items
+from ..xiuxian_config import convert_rank
+from ..xiuxian_utils.xiuxian2_handle import OtherSet
+from datetime import datetime
 
 def workmake(work_level, exp, user_level):
+    jsondata_ = reward()  # 实例化reward类
     if work_level == '江湖好手':
         work_level = '江湖好手'
     else:
-        work_level = work_level[:3]  # 取境界前3位，补全初期、中期、圆满任务可不取
+        work_level = work_level[:3]  # 取境界前3位
 
     jsondata_ = reward()
     item_s = Items()
@@ -17,42 +18,53 @@ def workmake(work_level, exp, user_level):
     levelpricedata = jsondata_.reward_levelprice_data()
     ansha_data = jsondata_.reward_ansa_data()
     zuoyao_data = jsondata_.reward_zuoyao_data()
+    
     work_json = {}
     work_list = [yaocai_data[work_level], ansha_data[work_level], zuoyao_data[work_level]]
-    i = 1
+    
     for w in work_list:
-        work_name_list = []
-        for k, v in w.items():
-            work_name_list.append(k)
-        work_name = random.choice(work_name_list)
-        work_info = w[work_name]
+        work_info = random.choice(w)
+        work_name = work_info['work_name']
         level_price_data = levelpricedata[work_level][work_info['level']]
         rate, isOut = countrate(exp, level_price_data["needexp"])
+        
         success_msg = work_info['succeed']
         fail_msg = work_info['fail']
+        
         item_type = get_random_item_type()
-        item_id = item_s.get_random_id_list_by_rank_and_item_type(USERRANK[user_level], item_type)
+        if item_type in ["法器", "防具", "辅修功法"]:
+            base_rank = max(convert_rank(user_level)[0] - 22, 16)
+        else:
+            base_rank = max(convert_rank(user_level)[0] - 22, 5)
+        zx_rank = random.randint(base_rank, base_rank + 35)
+        zx_rank = min(zx_rank, 55)
+        if zx_rank == 5 and random.randint(1, 100) != 100:
+            zx_rank = 10
+        item_id = item_s.get_random_id_list_by_rank_and_item_type((zx_rank), item_type)
         if not item_id:
             item_id = 0
         else:
             item_id = random.choice(item_id)
-        work_json[work_name] = [rate, level_price_data["award"], int(level_price_data["time"] * isOut), item_id,
-                                success_msg, fail_msg]
-        i += 1
+        
+        work_json[work_name] = [
+            rate, 
+            level_price_data["award"], 
+            int(level_price_data["time"] * isOut), 
+            item_id,
+            success_msg,
+            fail_msg
+        ]
+    
     return work_json
-
 
 def get_random_item_type():
     type_rate = {
-        "功法": {
-            "type_rate": 500,
-        },
-        "神通": {
-            "type_rate": 50,
-        },
-        "药材": {
-            "type_rate": 500,
-        }
+        "功法": {"type_rate": 57},
+        "神通": {"type_rate": 17},
+        "药材": {"type_rate": 17},
+        "辅修功法": {"type_rate": 1},
+        "法器": {"type_rate": 4},
+        "防具": {"type_rate": 4}
     }
     temp_dict = {}
     for i, v in type_rate.items():
@@ -62,7 +74,6 @@ def get_random_item_type():
             continue
     key = [OtherSet().calculated(temp_dict)]
     return key
-
 
 def countrate(exp, needexp):
     rate = int(exp / needexp * 100)

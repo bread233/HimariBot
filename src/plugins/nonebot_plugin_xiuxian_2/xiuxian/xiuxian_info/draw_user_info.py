@@ -16,7 +16,7 @@ TEXT_PATH = Path() / "data" / "xiuxian" / "info_img"
 first_color = (242, 250, 242)
 second_color = (57, 57, 57)
 
-FONT_ORIGIN_PATH = Path() / "data" / "xiuxian" / "font" / 'font.ttf'
+FONT_ORIGIN_PATH = Path() / "data" / "xiuxian" / "font" / "SourceHanSerifCN-Heavy.otf"
 
 
 def font_origin(size: int) -> ImageFont.FreeTypeFont:
@@ -33,8 +33,7 @@ async def draw_user_info_img(user_id, DETAIL_MAP):
     based_h = 2450
     # 获取背景图
     try:
-        img_url = await get_anime_pic()
-        img = Image.open(BytesIO(await async_request(img_url))).convert("RGBA")
+        img = Image.open(BytesIO(await async_request(await get_anime_pic()))).convert("RGBA")
         # 居中裁剪背景
         img_w, img_h = img.size
         scale = based_w / img_w
@@ -49,12 +48,27 @@ async def draw_user_info_img(user_id, DETAIL_MAP):
             img_h = scaled_h
             crop_t = round((img_h / 2) - (based_h / 2))
             img = img.resize((based_w, img_h)).crop((0, crop_t, based_w, crop_t + based_h))
-        img.resize((based_w, based_h), Image.ANTIALIAS)
+        img.resize((based_w, based_h), Image.Resampling.LANCZOS)
         # 贴一层黑色遮罩
         img.paste(i := Image.new("RGBA", (based_w, based_h), (0, 0, 0, 168)), mask=i)
     except:
-        logger.info("下载随机背景图失败，使用默认背景图")
+        logger.opt(colors=True).info("<red>下载随机背景图失败，使用默认背景图</red>")
         img = Image.open(TEXT_PATH / 'back.png').resize((based_w, based_h)).convert("RGBA")
+    
+    # 使用通用绘制函数
+    return await _draw_user_info_common(img, user_id, DETAIL_MAP)
+
+async def draw_user_info_img_with_default_bg(user_id, DETAIL_MAP):
+    based_w = 1100
+    based_h = 2450
+    # 使用默认背景图
+    img = Image.open(TEXT_PATH / 'back.png').resize((based_w, based_h)).convert("RGBA")
+    
+    # 绘制用户信息
+    return await _draw_user_info_common(img, user_id, DETAIL_MAP)
+
+async def _draw_user_info_common(img: Image.Image, user_id, DETAIL_MAP):
+    """通用的用户信息绘制函数"""
     # 获取用户头像圆框
     user_status = Image.open(TEXT_PATH / 'user_state.png').resize((450, 450)).convert("RGBA")
     temp = await get_avatar_by_user_id_and_save(user_id)
@@ -62,14 +76,13 @@ async def draw_user_info_img(user_id, DETAIL_MAP):
     r, g, b, a = user_status.split()
     # 绘制头像框位置
     img.paste(user_avatar, (100, 100), mask=a)
-    # img_draw = ImageDraw.Draw(img)
-    # h获取信息图片
+    
+    # 绘制QQ信息
     line = Image.open(TEXT_PATH / 'line3.png').resize((400, 60)).convert("RGBA")
     line_draw = ImageDraw.Draw(line)
-    word = f"QQ:{user_id}"
+    word = f"ID:{user_id}"
     w, h = await linewh(line, word)
     line_draw.text((w, h), word, first_color, font_36, 'lm')
-    # 绘制QQ信息
     img.paste(line, (130, 520), line)
 
     DETAIL_baseinfo = {
@@ -78,6 +91,7 @@ async def draw_user_info_img(user_id, DETAIL_MAP):
         '主修功法': DETAIL_MAP['主修功法'],
         '辅修功法': DETAIL_MAP['辅修功法'],
         '副修神通': DETAIL_MAP['副修神通'],
+        "修炼等级": DETAIL_MAP["修炼等级"],
         "攻击力": DETAIL_MAP["攻击力"],
         "法器": DETAIL_MAP["法器"],
         "防具": DETAIL_MAP["防具"]
@@ -113,7 +127,7 @@ async def draw_user_info_img(user_id, DETAIL_MAP):
     w, h = await linewh(sectinfo, sectword)
     sectinfo_draw = ImageDraw.Draw(sectinfo)
     sectinfo_draw.text((w, h), sectword, first_color, font_40, 'lm')
-    img.paste(sectinfo, (100, 1542), sectinfo) #100为距离图像左边界100像素，1542为距离图像上边界1542像素
+    img.paste(sectinfo, (100, 1642), sectinfo)
 
     DETAIL_sectinfo = {
         '所在宗门': DETAIL_MAP['所在宗门'],
@@ -126,13 +140,12 @@ async def draw_user_info_img(user_id, DETAIL_MAP):
     img.convert("RGB")
     res = await convert_img(img)
     
-    paihang = Image.open(
-        TEXT_PATH / 'line2.png').resize((900, 100)).convert("RGBA")
+    paihang = Image.open(TEXT_PATH / 'line2.png').resize((900, 100)).convert("RGBA")
     paihangword = '【排行信息】'
     w, h = await linewh(paihang, paihangword)
     paihang_draw = ImageDraw.Draw(paihang)
     paihang_draw.text((w, h), paihangword, first_color, font_40, 'lm')
-    img.paste(paihang, (100, 1873), paihang)
+    img.paste(paihang, (100, 1973), paihang)
 
     DETAIL_paihang = {}
     DETAIL_paihang['注册位数'] = DETAIL_MAP['注册位数']
@@ -173,7 +186,8 @@ async def _draw_sect_info_line(img: Image.Image, key, value, DETAIL_MAP):
     w, h = await linewh(line, word)
 
     line_draw.text((100, h), word, first_color, font_36, 'lm')
-    img.paste(line, (100, 1647 + list(DETAIL_MAP.keys()).index(key) * 103), line)
+    img.paste(line, (100, 1747 + list(DETAIL_MAP.keys()).index(key) * 103), line)
+
 
 async def _draw_ph_info_line(img: Image.Image, key, value, DETAIL_MAP):
 
@@ -183,7 +197,8 @@ async def _draw_ph_info_line(img: Image.Image, key, value, DETAIL_MAP):
     w, h = await linewh(line, word)
 
     line_draw.text((100, h), word, first_color, font_36, 'lm')
-    img.paste(line, (100, 1978 + list(DETAIL_MAP.keys()).index(key) * 103), line)
+    img.paste(line, (100, 2078 + list(DETAIL_MAP.keys()).index(key) * 103), line)
+
 
 async def img_author(img, bg):
     w, h = img.size
@@ -198,13 +213,17 @@ async def img_author(img, bg):
 async def linewh(line, word):
     lw, lh = line.size
     gs_font_36 = font_origin(36)
-    w, h = gs_font_36.getsize(word)
+    left, top, right, bottom = gs_font_36.getbbox(word)
+    w = right - left  # 计算文本宽度
+    # 仅使用宽度信息计算水平居中位置
     return (lw - w) / 2, lh / 2
+
 
 async def async_request(url, *args, is_text=False, **kwargs):
     async with ClientSession() as c:
         async with c.get(url, *args, **kwargs) as r:
             return (await r.text()) if is_text else (await r.read())
+
 
 async def get_anime_pic():
     r: str = await async_request(
@@ -214,4 +233,4 @@ async def get_anime_pic():
     if response_json["code"] == "200":
         return response_json["imgurl"]
     else:
-        logger.info("API 返回错误码：" + response_json["code"])
+        logger.opt(colors=True).info("<red>API 返回错误码：</red>" + response_json["code"])

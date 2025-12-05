@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <div class="card">
+        <h2>编辑 {{ table_info.name }} 数据</h2>
+        <button type="button" onclick="exportRowData()" class="btn btn-info">导出</button>
+        <button type="button" onclick="triggerFileInput()" class="btn btn-info">导入</button>        
+        <form id="editForm" method="post">
+            {# 按照预设的字段顺序显示 #}
+            {% for field in table_info.fields %}
+                <div class="form-group">
+                    <label for="{{ field }}">{{ field }}</label>
+                    {% if field in primary_key %}
+                        {# 对于复合主键，需要特殊处理 #}
+                        {% if table_name == "impart_cards" %}
+                            {# impart_cards表的复合主键字段设为只读 #}
+                            <input type="text" id="{{ field }}" name="{{ field }}" value="{{ row_data[field] }}" readonly>
+                        {% else %}
+                            {# 其他表的单主键 #}
+                            <input type="text" id="{{ field }}" name="{{ field }}" value="{{ row_data[field] }}" readonly>
+                        {% endif %}
+                    {% else %}
+                        <input type="text" id="{{ field }}" name="{{ field }}" value="{{ row_data[field] }}">
+                    {% endif %}
+                </div>
+            {% endfor %}
+            
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button type="button" onclick="submitForm('update')" class="btn btn-success">保存</button>
+                <button type="button" onclick="confirmDelete()" class="btn btn-danger">删除</button>
+                <a href="{{ url_for('table_view', table_name=table_name) }}" class="btn btn-info">返回</a>
+            </div>
+            
+            <input type="hidden" name="action" id="action" value="">
+            
+            <!-- 隐藏的文件输入框 -->
+            <input type="file" id="importFile" accept=".json" style="display: none;">
+        </form>
+    </div>
+    
+    <script>
+        function submitForm(action) {
+            document.getElementById('action').value = action;
+            
+            // 构建表单数据
+            const formData = new FormData(document.getElementById('editForm'));
+            
+            // 对于impart_cards表，需要特殊处理URL
+            let url = "{{ url_for('row_edit', table_name=table_name, row_id=request.view_args.row_id) }}";
+            
+            {% if table_name == "impart_cards" %}
+                // 对于复合主键，row_id是user_id和card_name的组合
+                // 我们需要确保URL正确
+                const user_id = document.getElementById('user_id').value;
+                const card_name = document.getElementById('card_name').value;
+                const compositeKey = `${user_id}_${card_name}`;
+                
+                // 更新URL
+                url = url.replace('{{ request.view_args.row_id }}', compositeKey);
+            {% endif %}
+            
+            fetch(url, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message);
+                    window.location.href = "{{ url_for('table_view', table_name=table_name) }}";
+                } else {
+                    alert('错误: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('发生错误');
+            });
+        }
+        
+        function confirmDelete() {
+            if (confirm('确定要删除这条记录吗？此操作不可撤销！')) {
+                submitForm('delete');
+            }
+        }
+        
+        // 导出功能
+        function exportRowData() {
+            const form = document.getElementById('editForm');
+            const data = new FormData(form);
+            const jsonData = {};
+            let primaryKeyValues = [];
+
+            // 获取主键字段名和值
+            {% if table_name == "impart_cards" %}
+                // impart_cards表的复合主键字段是 user_id 和 card_name
+                const user_id = document.getElementById('user_id').value;
+                const card_name = document.getElementById('card_name').value;
+                primaryKeyValues = [user_id, card_name];
+            {% else %}
+                const primaryKeyField = 'id';  // 请将 'id' 替换为实际的主键字段名
+                const primaryKeyValue = document.getElementById(primaryKeyField).value;
+                primaryKeyValues = [primaryKeyValue];
+            {% endif %}
+
+            // 构建导出的JSON数据（排除主键字段）
+            {% for field in table_info.fields %}
+                {% if field not in primary_key %}
+                    jsonData['{{ field }}'] = document.getElementById('{{ field }}').value;
+                {% endif %}
+            {% endfor %}
+
+            // 生成文件名：主键值 + 时间戳
+            const timestamp = new Date().getTime();
+            let filename;
+            if (primaryKeyValues.length > 0) {
+                filename = row_data_ + primaryKeyValues.join('_') + '_' + timestamp + '.json';
+            } else {
+                // 如果没有主键值，使用时间戳作为文件名
+                filename = 'row_data_' + timestamp + '.json';
+            }
+
+            const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        
+        // 触发文件输入框点击事件
+        function triggerFileInput() {
+            document.getElementById('importFile').click();
+        }
+        
+        // 处理文件导入
+        document.getElementById('importFile').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const importedData = JSON.parse(e.target.result);
+                        // 填充表单数据（包括主键）
+                        const form = document.getElementById('editForm');
+                        for (const [key, value] of Object.entries(importedData)) {
+                            const input = form.elements[key];
+                            if (input) {
+                                input.value = value;
+                            }
+                        }
+                        alert('数据已成功导入');
+                    } catch (error) {
+                        alert('导入失败: ' + error.message);
+                    }
+                };
+                reader.readAsText(file);
+            }
+        });
+    </script>
+{% endblock %}

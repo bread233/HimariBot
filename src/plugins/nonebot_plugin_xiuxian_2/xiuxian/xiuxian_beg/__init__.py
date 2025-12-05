@@ -1,110 +1,134 @@
 import random
 from datetime import datetime
-from ..lay_out import assign_bot, Cooldown
-from nonebot import require, on_command
+from ..xiuxian_utils.lay_out import assign_bot, Cooldown
+from nonebot import on_command
 from nonebot.adapters.onebot.v11 import (
     Bot,
     GROUP,
     GroupMessageEvent,
+    PrivateMessageEvent,
     MessageSegment
 )
+from nonebot.permission import SUPERUSER
 from nonebot.log import logger
-from ..xiuxian_config import USERRANK
-from ..xiuxian2_handle import XiuxianDateManage
+from ..xiuxian_utils.lay_out import assign_bot, assign_bot_group, Cooldown, CooldownIsolateLevel
+from ..xiuxian_utils.xiuxian2_handle import XiuxianDateManage
 from ..xiuxian_config import XiuConfig
-from ..utils import (
-    check_user,
+from ..xiuxian_utils.item_json import Items
+from ..xiuxian_utils.data_source import jsondata
+from ..xiuxian_utils.utils import (
+    check_user,Txt2Img,
     get_msg_pic,
     CommandObjectID,
+    handle_send
 )
 
-
-# 定时任务
-from src.service.apscheduler import scheduler
-cache_help = {}
+items = Items()
+cache_level_help = {}
+cache_beg_help = {}
 sql_message = XiuxianDateManage()  # sql类
-# 重置奇缘
-@scheduler.scheduled_job("cron", hour=0, minute=0)
-async def xiuxian_beg_():
-    sql_message.beg_remake()
-    logger.info("仙途奇缘重置成功！")
 
 __beg_help__ = f"""
-奇缘帮助信息:
-为了让初入仙途的道友们更顺利地踏上修炼之路，特别开辟了额外的机缘——发送“仙途奇缘”(先去看奇缘帮助)
-便可天降灵石，助君一臂之力。
-若有心人借此谋取不正之利，必将遭遇天道轮回，异象降临，后果自负。
-诸位道友，若不信此言，可自行一试，便知天机不可泄露，天道不容欺。
+仙途奇缘系统帮助
+
+【基本介绍】
+本系统为初入修真界的道友提供额外机缘，包含以下功能：
+1. 仙途奇缘 - 每日获取随机灵石奖励
+2. 新手礼包 - 创建角色24小时内可领取的专属福利
+
+【功能详情】
+═════════════
+1. 仙途奇缘
+- 每日可领取一次随机灵石奖励
+- 限制条件：
+  * 修为不超过{XiuConfig().beg_max_level}
+  * 角色创建不超过{XiuConfig().beg_max_days}天
+  * 未加入宗门或拥有特殊灵根
+- 奖励内容：随机数量的灵石
+
+2. 新手礼包
+- 创建角色24小时内可领取
+- 包含：灵石、功法、装备等基础资源
+- 每位玩家限领一次
+
+【注意事项】
+- 请勿滥用系统，违者可能受到惩罚
+
+【温馨提示】
+修真之路漫长，这些只是起点助力。
+真正的机缘还需道友自行探索！
+═════════════
+当前服务器时间：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 """.strip()
 
-beg_stone = on_command("仙途奇缘", permission=GROUP, priority=7, block=True)
-beg_help = on_command("奇缘帮助", permission=GROUP, priority=7, block=True)
 
-@beg_help.handle(parameterless=[Cooldown(at_sender=True)])
-async def beg_help_(bot: Bot, event: GroupMessageEvent, session_id: int = CommandObjectID()):
+beg_stone = on_command("仙途奇缘", priority=7, block=True)
+beg_help = on_command("仙途奇缘帮助", priority=7, block=True)
+novice = on_command("新手礼包", priority=7, block=True)
+    
+@beg_help.handle(parameterless=[Cooldown(cd_time=1.4)])
+async def beg_help_(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent, session_id: int = CommandObjectID()):
     bot, send_group_id = await assign_bot(bot=bot, event=event)
-    if session_id in cache_help:
-        await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(cache_help[session_id]))
+    if session_id in cache_beg_help:
+        msg = cache_beg_help[session_id]
+        await handle_send(bot, event, msg)
         await beg_help.finish()
     else:
         msg = __beg_help__
-        if XiuConfig().img:
-            pic = await get_msg_pic(msg)
-            cache_help[session_id] = pic
-            await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic))
-        else:
-            await bot.send_group_msg(group_id=int(send_group_id), message=msg)
-        await beg_help.finish()
+        await handle_send(bot, event, msg)
+    await beg_help.finish()
 
-@beg_stone.handle(parameterless=[Cooldown(at_sender=True)])
-async def beg_stone(bot: Bot, event: GroupMessageEvent):
+@beg_stone.handle(parameterless=[Cooldown(cd_time=1.4)])
+async def beg_stone(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent):
     bot, send_group_id = await assign_bot(bot=bot, event=event)
     user_id = event.get_user_id()
     isUser, user_info, _ = check_user(event)
-    user_msg = sql_message.get_user_message(user_id)
-    user_root = user_msg.root_type
-    user_rank = USERRANK[user_info.level]
-    sect = user_info.sect_id
+    user_msg = sql_message.get_user_info_with_id(user_id)
+    user_root = user_msg['root_type']
+    sect = user_info['sect_id']
+    level = user_info['level']
+    list_level_all = list(jsondata.level_data().keys())
 
-    # create_time = datetime.strptime(user_info.create_time, "%Y-%m-%d %H:%M:%S.%f")
-    # now_time = datetime.now()
-    # diff_time = now_time - create_time
-    # diff_days = diff_time.days
-    
-
+    create_time = datetime.strptime(user_info['create_time'], "%Y-%m-%d %H:%M:%S.%f")
+    now_time = datetime.now()
+    diff_time = now_time - create_time
+    diff_days = diff_time.days # 距离创建账号时间的天数
     
     if not isUser:
-        if XiuConfig().img:
-            pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
-            await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(pic))
-        else:
-            await bot.send_group_msg(group_id=int(send_group_id), message=msg)
+        await handle_send(bot, event, msg)
         await beg_stone.finish()
-
-    elif sect != None and user_root == "伪灵根":
+    
+    sql_message.update_last_check_info_time(user_id) # 更新查看修仙信息时间
+    if sect != None and user_root == "伪灵根":
         if XiuConfig().img:
-            pic = await get_msg_pic(f"@{event.sender.nickname}\n" + "道友已有宗门庇佑，又何必来此寻求机缘呢？")
-            await bot.send_group_msg(group_id=event.group_id, message=MessageSegment.image(pic))
+            msg = f"道友已有宗门庇佑，又何必来此寻求机缘呢？"
+            await handle_send(bot, event, msg)
         else:
-            await bot.send_group_msg(group_id=event.group_id, message=msg)
+            await handle_send(bot, event, msg)
 
     elif user_root in {"轮回道果", "真·轮回道果"}:
         if XiuConfig().img:
-            pic = await get_msg_pic(f"@{event.sender.nickname}\n" + "道友已是转生大能，又何必来此寻求机缘呢？")
-            await bot.send_group_msg(group_id=event.group_id, message=MessageSegment.image(pic))
+            msg = f"道友已是轮回大能，又何必来此寻求机缘呢？"
+            await handle_send(bot, event, msg)
         else:
-            await bot.send_group_msg(group_id=event.group_id, message=msg)
-
-    elif user_rank < 37:
-        msg = f"道友已跻身于{user_info.level}层次的修行之人，可徜徉于四海八荒，自寻机缘与造化矣。"
+            await handle_send(bot, event, msg)
+    
+    elif list_level_all.index(level) >= list_level_all.index(XiuConfig().beg_max_level):
+        msg = f"道友已跻身于{user_info['level']}层次的修行之人，可徜徉于四海八荒，自寻机缘与造化矣。"
         if XiuConfig().img:
-            pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
-            await bot.send_group_msg(group_id=event.group_id, message=MessageSegment.image(pic))
+            await handle_send(bot, event, msg)
         else:
-            await bot.send_group_msg(group_id=event.group_id, message=msg)
+            await handle_send(bot, event, msg)
+
+    elif diff_days > XiuConfig().beg_max_days:
+        if XiuConfig().img:
+            msg = f"道友已经过了新手期,不能再来此寻求机缘了。"
+            await handle_send(bot, event, msg)
+        else:
+            await handle_send(bot, event, msg)
 
     else:
-        stone = XiuxianDateManage().get_beg(user_id)
+        stone = sql_message.get_beg(user_id)
         if stone is None:
             msg = '贪心的人是不会有好运的！'
         else:
@@ -128,11 +152,77 @@ async def beg_stone(bot: Bot, event: GroupMessageEvent):
         f"你在一次随机的交易中获得了一个外表不起眼的神秘盒子。当你好奇心驱使下打开它时，发现里面竟是一枚装满灵石的纳戒，收获了 {stone} 枚灵石！",
     ]
 )
-        if XiuConfig().img:
-            pic = await get_msg_pic(f"@{event.sender.nickname}\n" + msg)
-            await bot.send_group_msg(group_id=event.group_id, message=MessageSegment.image(pic))
-        else:
-            await bot.send_group_msg(group_id=event.group_id, message=msg)
+        await handle_send(bot, event, msg)
+        await beg_help.finish()
 
     
+@novice.handle(parameterless=[Cooldown(cd_time=1.4)])
+async def novice(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent):
+    bot, send_group_id = await assign_bot(bot=bot, event=event)
+    isUser, user_info, msg = check_user(event)
+    user_id = event.get_user_id()
+    
+    if not isUser:
+        await handle_send(bot, event, msg)
+        await novice.finish()
+    
+    # 检查是否已领取
+    if sql_message.get_novice(user_id) is None:
+        msg = '您已经领取过新手礼包了！'
+        await handle_send(bot, event, msg)
+        await novice.finish()
+    
+    # 检查是否是新用户
+    create_time = datetime.strptime(user_info['create_time'], "%Y-%m-%d %H:%M:%S.%f")
+    now_time = datetime.now()
+    diff_time = now_time - create_time
+    diff_days = diff_time.days
+    
+    if diff_days > XiuConfig().beg_max_days:  
+        msg = f'新手礼包仅限创建角色{XiuConfig().beg_max_days}天内领取！'
+        await handle_send(bot, event, msg)
+        await novice.finish()
+    
+    # 发放新手礼包
+    num = 1
+    goods_id = "15052"  # 新手礼包物品ID
+    goods_info = items.get_data_by_item_id(goods_id)
+    package_name = goods_info['name']
+    msg_parts = []
+    i = 1
+    while True:
+        buff_key = f'buff_{i}'
+        name_key = f'name_{i}'
+        type_key = f'type_{i}'
+        amount_key = f'amount_{i}'
 
+        if name_key not in goods_info:
+            break
+
+        item_name = goods_info[name_key]
+        item_amount = goods_info.get(amount_key, 1) * num
+        item_type = goods_info.get(type_key)
+        buff_id = goods_info.get(buff_key)
+
+        if item_name == "灵石":
+            key = 1 if item_amount > 0 else 2  # 正数增加，负数减少
+            sql_message.update_ls(user_id, abs(item_amount), key)
+            msg_parts.append(f"获得灵石 {item_amount} 枚\n")
+        else:
+            if item_type in ["辅修功法", "神通", "功法", "身法", "瞳术"]:
+                goods_type_item = "技能"
+            elif item_type in ["法器", "防具"]:
+                goods_type_item = "装备"
+            else:
+                goods_type_item = item_type
+            if buff_id is not None:
+                sql_message.send_back(user_id, buff_id, item_name, goods_type_item, item_amount, 1)
+                msg_parts.append(f"获得 {item_name} x{item_amount}\n")
+        
+        i += 1            
+
+    if buff_id is not None:
+        sql_message.send_back(user_id, buff_id, item_name, goods_type_item, item_amount, 1)
+    msg = f"道友的新手礼包:\n" + "".join(msg_parts)
+    sql_message.save_novice(user_id)
+    await handle_send(bot, event, msg)

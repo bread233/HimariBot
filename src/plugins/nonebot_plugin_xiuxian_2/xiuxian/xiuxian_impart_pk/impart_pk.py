@@ -5,7 +5,6 @@ except ImportError:
 from pathlib import Path
 import os
 
-
 class IMPART_PK(object):
     def __init__(self):
         self.dir_path = Path(__file__).parent
@@ -38,10 +37,9 @@ class IMPART_PK(object):
         try:
             if self.data[user_id]:
                 return True
-        except:
-            self.data[user_id] = {"pk_num": 3,
-                                  "win_num": 0
-                                  }
+        except KeyError:
+            user_number = len(self.data) + 1
+            self.data[user_id] = {"number": user_number, "pk_num": 7, "win_num": 0, "impart_num": 10}
             self.__save()
             return False
 
@@ -55,12 +53,12 @@ class IMPART_PK(object):
         try:
             data_ = self.data[user_id]
             return data_
-        except:
+        except KeyError:
             return None
 
     def update_user_data(self, user_id, type_):
         """
-        匹配用户数据
+        更新用户数据
         :param type_: TRUE or FALSE
         :param user_id:
         """
@@ -74,6 +72,16 @@ class IMPART_PK(object):
             self.data[user_id]["pk_num"] -= 1
             self.__save()
             return True
+            
+    def update_user_impart_lv(self, user_id):
+        """
+        更新用户数据
+        :param user_id:
+        """
+        user_id = str(user_id)
+        self.check_user_impart(user_id)
+        self.data[user_id]["impart_num"] -= 1
+        self.__save()
 
     def all_user_data(self):
         """
@@ -82,7 +90,7 @@ class IMPART_PK(object):
         try:
             dict_ = self.data
             return dict_
-        except:
+        except KeyError:
             return None
 
     def re_data(self):

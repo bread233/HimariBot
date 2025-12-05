@@ -1,6 +1,6 @@
 from typing import List
 import random
-from ..xiuxian2_handle import XIUXIAN_IMPART_BUFF
+from ..xiuxian_utils.xiuxian2_handle import XIUXIAN_IMPART_BUFF
 
 xiuxian_impart = XIUXIAN_IMPART_BUFF()
 
@@ -16,11 +16,11 @@ def random_bullet() -> List[int]:
 
 
 async def impart_pk_check(user_id):
-    if xiuxian_impart.get_user_message(user_id) is None:
+    if xiuxian_impart.get_user_impart_info_with_id(user_id) is None:
         xiuxian_impart._create_user(user_id)
-        return xiuxian_impart.get_user_message(user_id)
+        return xiuxian_impart.get_user_impart_info_with_id(user_id)
     else:
-        return xiuxian_impart.get_user_message(user_id)
+        return xiuxian_impart.get_user_impart_info_with_id(user_id)
 
 
 msg_pass = {
@@ -100,20 +100,24 @@ async def impart_pk_now_msg_to_bot(player_1_name, player_2_name):
     for x in range(len(bullet_list)):
         if x % 2 == 0:
             if bullet_list[x] == 0:
-                msg += f"第{str(x + 1)}回合道友 {player_1_name}行动，出了一招！\n"
+                txt = random.choice(msg_pass[x])
+                msg += f"第{str(x + 1)}回合道友 {player_1_name}行动，{txt}\n"
 
             elif bullet_list[x] == 1:
-                msg += f"第{str(x + 1)}回合道友 {player_1_name}行动，出了一招，但失误了，败了！\n"
+                txt = random.choice(msg_died[x])
+                msg += f"第{str(x + 1)}回合道友 {player_1_name}行动，{txt}\n"
                 win = 2
                 break
             else:
                 pass
         elif x % 2 == 1:
             if bullet_list[x] == 0:
-                msg += f"第{str(x + 1)}回合 {player_2_name}行动，出了一招！\n"
+                txt = random.choice(msg_pass[x])
+                msg += f"第{str(x + 1)}回合 {player_2_name}行动，{txt}\n"
 
             elif bullet_list[x] == 1:
-                msg += f"第{str(x + 1)}回合 {player_2_name}行动，出了一招，但失误了，败了！\n"
+                txt = random.choice(msg_died[x])
+                msg += f"第{str(x + 1)}回合 {player_2_name}行动，{txt}\n"
                 win = 1
                 break
             else:
