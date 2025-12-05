@@ -50,6 +50,8 @@ jobs:
           mkdir package
           copy dist\HimariBot.exe package\
           if exist .env.dev.example copy .env.dev.example package\
+          mkdir package\data
+          if exist resources\data xcopy resources\data package\data /E /I /Y
           powershell -command "Compress-Archive -Path package\* -DestinationPath HimariBot-${{ github.ref_name }}-windows.zip"
           dir
 
