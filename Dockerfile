@@ -44,7 +44,7 @@ COPY . .
 RUN cp .env.dev.example .env.dev
 
 # 8️⃣ 复制默认资源到备份目录（不要直接放 /app/data！）
-COPY resources/data/ /app/resources-default/
+#COPY resources/data/ /app/resources-default/
 
 # 9️⃣ 拷贝入口脚本
 COPY docker-entrypoint.sh /docker-entrypoint.sh

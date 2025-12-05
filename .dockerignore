@@ -3,7 +3,7 @@
 docs/
 tests/
 migrations/
-resources/
+#resources/
 
 *.md
 *.log

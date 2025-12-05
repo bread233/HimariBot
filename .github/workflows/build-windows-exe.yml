@@ -39,15 +39,7 @@ jobs:
 
       - name: Build EXE with PyInstaller
         run: |
-          poetry run pyinstaller ^
-            --onefile ^
-            --name HimariBot ^
-            --hidden-import nonebot.drivers.fastapi ^
-            --hidden-import nonebot.drivers.httpx ^
-            --hidden-import nonebot.drivers.aiohttp ^
-            --hidden-import nonebot.adapters.onebot.v11 ^
-            --hidden-import nonebot.adapters.qq ^
-            bot.py
+          poetry run pyinstaller --onefile --name HimariBot --hidden-import nonebot.drivers.fastapi --hidden-import nonebot.drivers.httpx --hidden-import nonebot.drivers.aiohttp --hidden-import nonebot.adapters.onebot.v11 --hidden-import nonebot.adapters.qq bot.py
           dir dist
 
       - name: Prepare package

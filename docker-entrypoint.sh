@@ -9,8 +9,8 @@ mkdir -p /app/log
 # -r 递归复制
 # -n 不覆盖已有文件
 # 2>/dev/null 静音处理不存在情况
-if [ -d /app/resources-default ]; then
-  cp -rn /app/resources-default/* /app/data/ 2>/dev/null || true
+if [ -d /app/resources/data ]; then
+  cp -rn /app/resources/data/* /app/data/ 2>/dev/null || true
 fi
 
 echo "📁 Resources checked: /app/data"
