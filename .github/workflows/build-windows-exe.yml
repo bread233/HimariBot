@@ -45,9 +45,8 @@ jobs:
 
       - name: Build EXE with PyInstaller
         run: |
-          pyinstaller --onefile --name HimariBot --hidden-import nonebot --hidden-import nonebot.drivers.fastapi --hidden-import nonebot.drivers.httpx --hidden-import nonebot.drivers.aiohttp --hidden-import nonebot.adapters.onebot.v11 --hidden-import nonebot.adapters.qq --hidden-import nonebot.plugins --hidden-import nonebot.plugins.echo --hidden-import nonebot_plugin_alconna --hidden-import nonebot_plugin_uninfo bot.py
+          pyinstaller --onefile --name HimariBot --hidden-import nonebot --hidden-import nonebot.drivers.fastapi --hidden-import nonebot.drivers.httpx --hidden-import nonebot.drivers.aiohttp --hidden-import nonebot.adapters.onebot.v11 --hidden-import nonebot.adapters.qq --collect-all nonebot.plugins --collect-all nonebot_plugin_alconna --collect-all nonebot_plugin_uninfo bot.py
           dir dist
-
 
       - name: Prepare package
         shell: cmd
