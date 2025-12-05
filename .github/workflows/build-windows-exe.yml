@@ -36,7 +36,7 @@ jobs:
           pip install poetry
           poetry export -f requirements.txt --output requirements.txt --only main --without-hashes
           pip install -r requirements.txt
-          pip install "nonebot2[fastapi]"
+          pip install "nonebot2[fastapi]" "nonebot-adapter-onebot"
           pip install pyinstaller
 
       - name: Build EXE with PyInstaller
