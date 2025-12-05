@@ -1,0 +1,87 @@
+{
+    "0": {
+        "title": "宗主",
+        "speeds": 2,
+        "max_count": 1,
+        "max_exp": 2000000000
+    },
+    "1": {
+        "title": "副宗主",
+        "speeds": 1.8,
+        "max_count": 1,
+        "max_exp": 1000000000
+    },
+    "2": {
+        "title": "长老",
+        "speeds": 1.7,
+        "max_count": 3,
+        "max_exp": 700000000
+    },
+    "3": {
+        "title": "护法",
+        "speeds": 1.65,
+        "max_count": 5,
+        "max_exp": 500000000
+    },
+    "4": {
+        "title": "执事",
+        "speeds": 1.6,
+        "max_count": 10,
+        "max_exp": 300000000
+    },
+    "5": {
+        "title": "亲传弟子",
+        "speeds": 1.5,
+        "max_count": 10
+    },
+    "6": {
+        "title": "大师兄",
+        "speeds": 1.7,
+        "max_count": 1
+    },
+    "7": {
+        "title": "大师姐",
+        "speeds": 1.7,
+        "max_count": 1
+    },
+    "8": {
+        "title": "二师兄",
+        "speeds": 1.7,
+        "max_count": 1
+    },
+    "9": {
+        "title": "小师弟",
+        "speeds": 1.7,
+        "max_count": 1
+    },
+    "10": {
+        "title": "小师妹",
+        "speeds": 1.7,
+        "max_count": 1
+    },
+    "11": {
+        "title": "内门弟子",
+        "speeds": 1.4,
+        "max_count": 0
+    },
+    "12": {
+        "title": "外门弟子",
+        "speeds": 1.2,
+        "max_count": 0
+    },
+    "13": {
+        "title": "守山弟子",
+        "speeds": 1.5,
+        "max_count": 5
+    },
+    "14": {
+        "title": "记名弟子",
+        "speeds": 1.1,
+        "max_count": 0
+    },
+    "15": {
+        "title": "杂役",
+        "speeds": 1.1,
+        "max_count": 0
+    }
+}

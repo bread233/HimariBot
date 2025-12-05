@@ -11,7 +11,7 @@ ENV PIP_NO_CACHE_DIR=1 \
 
 WORKDIR /app
 
-# 1. 安装系统依赖
+# 1️⃣ 系统依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
@@ -22,29 +22,37 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpng-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# 2. 升级 pip（你要求的关键新增）
+# 2️⃣ 升级 pip
 RUN pip install --upgrade pip
 
-# 3. 安装 poetry
+# 3️⃣ 安装 poetry
 RUN pip install --no-cache-dir "poetry>=1.8,<2.0"
 
-# 4. 先拷贝依赖文件，加速缓存
+# 4️⃣ 优化构建缓存
 COPY pyproject.toml poetry.lock* ./
 
-# 5. 在镜像里同步 lock + 安装 nonebot
+# 5️⃣ 安装依赖 + NoneBot 驱动
 RUN poetry lock --no-update \
     && poetry install --only main --no-interaction --no-ansi -vvv \
-    && pip install "nonebot2[fastapi]"
+    && pip install "nonebot2[fastapi,httpx]" \
+    && pip install nonebot-adapter-onebot nonebot-adapter-qq
 
-# 6. 拷贝项目代码
+# 6️⃣ 拷贝应用源码
 COPY . .
 
-# 7. 拷贝默认 env 配置
+# 7️⃣ 默认环境变量模板
 RUN cp .env.dev.example .env.dev
+
+# 8️⃣ 复制默认资源到备份目录（不要直接放 /app/data！）
+COPY resources/data/ /app/resources-default/
+
+# 9️⃣ 拷贝入口脚本
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
 EXPOSE 8181
 EXPOSE 5888
 
-VOLUME ["/app/data", "/app/log", "/root/.local/share/nonebot2"]
-
+# 10️⃣ 正确入口：先处理默认资源再启动程序
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["python", "bot.py"]

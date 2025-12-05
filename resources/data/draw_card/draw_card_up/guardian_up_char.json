@@ -1,0 +1,35 @@
+{
+    "char": {
+        "title": "本次up从12月04日开始，至12月18日结束。",
+        "pool_img": "",
+        "start_time": "2025-12-04T00:00:00",
+        "end_time": "2025-12-18T00:00:00",
+        "up_char": []
+    },
+    "arms": {
+        "title": "本次up从12月04日开始，至12月18日结束。",
+        "pool_img": "",
+        "start_time": "2025-12-04T00:00:00",
+        "end_time": "2025-12-18T00:00:00",
+        "up_char": [
+            {
+                "name": "星光王冠",
+                "star": 5,
+                "limited": false,
+                "zoom": 0.0
+            },
+            {
+                "name": "魔力护符",
+                "star": 5,
+                "limited": false,
+                "zoom": 0.0
+            },
+            {
+                "name": "阿施塔特",
+                "star": 5,
+                "limited": false,
+                "zoom": 0.0
+            }
+        ]
+    }
+}

@@ -36,12 +36,12 @@ jobs:
           pip install poetry
           poetry export -f requirements.txt --output requirements.txt --only main --without-hashes
           pip install -r requirements.txt
-          pip install "nonebot2[fastapi]" "nonebot-adapter-onebot" "nonebot-adapter-qq"
+          pip install "nonebot2[fastapi,httpx]" "nonebot-adapter-onebot" "nonebot-adapter-qq"
           pip install pyinstaller
 
       - name: Build EXE with PyInstaller
         run: |
-          pyinstaller --onefile --name HimariBot --hidden-import nonebot.drivers.fastapi --hidden-import nonebot.adapters.onebot.v11 --hidden-import nonebot.adapters.qq bot.py
+          pyinstaller --onefile --name HimariBot --hidden-import nonebot.drivers.fastapi --hidden-import nonebot.drivers.httpx --hidden-import nonebot.adapters.onebot.v11 --hidden-import nonebot.adapters.qq bot.py
           dir dist
 
       - name: Prepare package

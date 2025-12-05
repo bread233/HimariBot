@@ -1,0 +1,50 @@
+{
+    "char": {
+        "title": "「饮羽散红」",
+        "pool_img": "https:\/\/patchwiki.biligame.com\/images\/ys\/a\/a4\/qul6o98telpsqq8lhtm2k2ezpgcegkc.png",
+        "start_time": "2025-08-19T18:00:00",
+        "end_time": "2025-09-09T14:59:00",
+        "up_char": [
+            {
+                "name": "恰斯卡",
+                "star": 4,
+                "limited": false,
+                "zoom": 50.0
+            }
+        ]
+    },
+    "arms": {
+        "title": "「神铸赋形」",
+        "pool_img": "https:\/\/patchwiki.biligame.com\/images\/ys\/b\/b9\/qlxjmvkjsx157mmzzr9c30p616is5vm.png",
+        "start_time": "2025-08-19T18:00:00",
+        "end_time": "2025-09-09T14:59:00",
+        "up_char": [
+            {
+                "name": "冲浪时光",
+                "star": 4,
+                "limited": false,
+                "zoom": 50.0
+            },
+            {
+                "name": "星鹫赤羽",
+                "star": 4,
+                "limited": false,
+                "zoom": 50.0
+            }
+        ]
+    },
+    "char1": {
+        "title": "「鲨鲨逐浪游」",
+        "pool_img": "https:\/\/patchwiki.biligame.com\/images\/ys\/7\/70\/lwvscgoefhoos54xp74z00vphwv384n.png",
+        "start_time": "2025-08-19T18:00:00",
+        "end_time": "2025-09-09T14:59:00",
+        "up_char": [
+            {
+                "name": "玛拉妮",
+                "star": 4,
+                "limited": false,
+                "zoom": 50.0
+            }
+        ]
+    }
+}
