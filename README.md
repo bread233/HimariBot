@@ -102,7 +102,7 @@ docker compose restart
 挂载后容器升级不会丢数据 🛡
 ```
 ### 🧩 技术栈
-Python 3.9
+Python 3.10
 
 NoneBot2
 
