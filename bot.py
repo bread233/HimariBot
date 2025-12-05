@@ -1,14 +1,48 @@
 import os
 import sys
-import nonebot
+import asyncio
+from pathlib import Path
 from datetime import datetime
+
+import nonebot
 from nonebot.adapters.onebot.v11 import Adapter as ONEBOT_V11Adapter
 from nonebot.adapters.qq import Adapter as QQAdapter
-
 from nonebot.log import logger, default_format
 
-# win 环境下 asyncio.loop 配置
-import asyncio
+
+# =========================
+# 运行目录 / data / log 目录
+# =========================
+
+def get_runtime_path() -> Path:
+    """
+    获取程序运行目录：
+    - 普通 Python：当前文件所在目录
+    - PyInstaller EXE：exe 文件所在目录
+    - Docker：/app（根据 Dockerfile/working_dir）
+    """
+    if getattr(sys, "frozen", False):
+        # 打包成 exe 后
+        return Path(sys.executable).resolve().parent
+    # 普通 Python 运行
+    return Path(__file__).resolve().parent
+
+
+BASE_DIR = get_runtime_path()
+
+# 可选：确保当前工作目录就是程序目录（有利于插件用相对路径）
+os.chdir(BASE_DIR)
+
+# 自动创建 data 与 log 目录
+DATA_DIR = BASE_DIR / "data"
+LOG_DIR = BASE_DIR / "log"
+for path in (DATA_DIR, LOG_DIR):
+    path.mkdir(parents=True, exist_ok=True)
+
+
+# =========================
+# Windows 下 asyncio 设置
+# =========================
 
 if (
     sys.version_info[0] == 3
@@ -23,19 +57,18 @@ elif (
 ):
     asyncio.set_event_loop(asyncio.ProactorEventLoop())
 
-# Log file path
-bot_log_path = os.path.abspath(os.path.join(sys.path[0], "log"))
-if not os.path.exists(bot_log_path):
-    os.makedirs(bot_log_path)
 
-# Custom logger
-log_info_name = f'{datetime.now().strftime("%Y%m%d-%H%M%S")}-INFO.log'
-log_error_name = f'{datetime.now().strftime("%Y%m%d-%H%M%S")}-ERROR.log'
-log_info_path = os.path.join(bot_log_path, log_info_name)
-log_error_path = os.path.join(bot_log_path, log_error_name)
+# ==========
+# 日志配置
+# ==========
+
+# 日志文件路径：log/20251205-120000-INFO.log 之类
+log_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+log_info_path = LOG_DIR / f"{log_timestamp}-INFO.log"
+log_error_path = LOG_DIR / f"{log_timestamp}-ERROR.log"
 
 logger.add(
-    log_info_path,
+    str(log_info_path),
     rotation="00:00",
     diagnose=False,
     level="INFO",
@@ -43,7 +76,7 @@ logger.add(
     encoding="utf-8",
 )
 logger.add(
-    log_error_path,
+    str(log_error_path),
     rotation="00:00",
     diagnose=False,
     level="ERROR",
@@ -51,28 +84,37 @@ logger.add(
     encoding="utf-8",
 )
 
-# Add extra debug log file
-# log_debug_name = f'{datetime.today().strftime("%Y%m%d-%H%M%S")}-DEBUG.log'
-# log_debug_path = os.path.join(bot_log_path, log_debug_name)
-# logger.add(log_debug_path, rotation='00:00', diagnose=False, level='DEBUG', format=default_format, encoding='utf-8')
+# 如需 DEBUG 日志可取消注释
+# log_debug_path = LOG_DIR / f"{log_timestamp}-DEBUG.log"
+# logger.add(
+#     str(log_debug_path),
+#     rotation="00:00",
+#     diagnose=False,
+#     level="DEBUG",
+#     format=default_format,
+#     encoding="utf-8",
+# )
 
-# You can pass some keyword args config to init function
 
+# ==========
+# NoneBot 初始化
+# ==========
+
+# 可以在这里传入一些配置：nonebot.init(driver="~fastapi", ...)
 nonebot.init()
 
 driver = nonebot.get_driver()
 driver.register_adapter(ONEBOT_V11Adapter)
 driver.register_adapter(QQAdapter)
 
-# 测试用
+# 测试用内置 echo 插件
 nonebot.load_builtin_plugins("echo")
 
 # 加载插件
 nonebot.load_plugin("nonebot_plugin_alconna")
 nonebot.load_plugin("nonebot_plugin_uninfo")
 nonebot.load_plugins("src/plugins")
-
-#nonebot.load_from_toml("pyproject.toml")
+# nonebot.load_from_toml("pyproject.toml")
 
 if __name__ == "__main__":
     nonebot.run()
