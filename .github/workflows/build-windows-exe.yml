@@ -30,16 +30,22 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install dependencies (from pyproject.toml)
+      - name: Export dependencies to requirements.txt
         run: |
           python -m pip install --upgrade pip
           pip install "poetry>=1.8,<2.0"
-          poetry install --only main --no-interaction --no-ansi
+          poetry lock --no-update
+          poetry export -f requirements.txt --output requirements.txt --without-hashes
+
+      - name: Install dependencies with pip
+        run: |
+          pip install -r requirements.txt
+          pip install "nonebot2[fastapi,httpx]" nonebot-adapter-onebot nonebot-adapter-qq
           pip install pyinstaller
 
       - name: Build EXE with PyInstaller
         run: |
-          poetry run pyinstaller --onefile --name HimariBot --hidden-import nonebot.drivers.fastapi --hidden-import nonebot.drivers.httpx --hidden-import nonebot.drivers.aiohttp --hidden-import nonebot.adapters.onebot.v11 --hidden-import nonebot.adapters.qq bot.py
+          pyinstaller --onefile --name HimariBot --hidden-import nonebot --hidden-import nonebot.drivers.fastapi --hidden-import nonebot.drivers.httpx --hidden-import nonebot.drivers.aiohttp --hidden-import nonebot.adapters.onebot.v11 --hidden-import nonebot.adapters.qq bot.py
           dir dist
 
       - name: Prepare package
@@ -47,7 +53,7 @@ jobs:
         run: |
           mkdir package
           copy dist\HimariBot.exe package\
-          if exist .env.prod.example copy .env.prod.example package\.env.prod
+          if exist .env.prod.example copy .env.prod.example package\.env.prod.example
           mkdir package\data
           if exist resources\data xcopy resources\data package\data /E /I /Y
           powershell -command "Compress-Archive -Path package\* -DestinationPath HimariBot-${{ github.ref_name }}-windows.zip"
