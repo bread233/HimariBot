@@ -41,7 +41,7 @@ jobs:
 
       - name: Build EXE with PyInstaller
         run: |
-          pyinstaller --onefile --name HimariBot bot.py
+          pyinstaller --onefile --name HimariBot --hidden-import nonebot.drivers.fastapi --hidden-import nonebot.adapters.onebot.v11 --hidden-import nonebot.adapters.qq bot.py
           dir dist
 
       - name: Prepare package
