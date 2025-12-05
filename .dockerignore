@@ -1,0 +1,15 @@
+.git/
+.github/
+docs/
+tests/
+migrations/
+resources/
+
+*.md
+*.log
+
+# Windows/IDE garbage
+Thumbs.db
+.DS_Store
+.vscode
+.idea
