@@ -28,8 +28,69 @@ ADMIN_IDS = get_driver().config.superusers
 PORT = XiuConfig().web_port
 HOST = XiuConfig().web_host
 
+def init_level_data_table():
+    """确保 level_data 表存在，并初始化数据"""
+    conn = sqlite3.connect(DATABASE)
+    cur = conn.cursor()
+
+    # 1. 创建表（如果不存在）
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS level_data (
+            level TEXT PRIMARY KEY,
+            power INTEGER DEFAULT 0,
+            spend REAL DEFAULT 1
+        )
+    """)
+
+    # 2. 查看是否已有数据
+    cur.execute("SELECT COUNT(*) FROM level_data")
+    count = cur.fetchone()[0]
+
+    if count == 0:
+        try:
+            level_cfg = jsondata.level_data() or {}
+        except Exception:
+            level_cfg = {}
+
+        levels = convert_rank("江湖好手")[1]
+
+        MAX_SQLITE_INT = 9223372036854775807  # SQLite INTEGER 上限
+
+        for lv in levels:
+            cfg = level_cfg.get(lv, {})
+
+            # 处理 power
+            raw_power = cfg.get("power", 0)
+            try:
+                power = int(raw_power)
+            except (TypeError, ValueError):
+                power = 0
+
+            # 防止溢出
+            if power > MAX_SQLITE_INT:
+                power = MAX_SQLITE_INT
+            if power < -MAX_SQLITE_INT:
+                power = -MAX_SQLITE_INT
+
+            # 处理 spend
+            raw_spend = cfg.get("spend", 1)
+            try:
+                spend = float(raw_spend)
+            except (TypeError, ValueError):
+                spend = 1.0
+
+            cur.execute(
+                "INSERT OR IGNORE INTO level_data (level, power, spend) VALUES (?, ?, ?)",
+                (lv, power, spend)
+            )
+
+    conn.commit()
+    conn.close()
+
 # 境界和灵根预设
 LEVELS = convert_rank('江湖好手')[1]
+
+init_level_data_table()
 
 ROOTS = {
     "1": "混沌灵根",
