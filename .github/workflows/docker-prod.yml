@@ -5,7 +5,15 @@ on:
   push:
     branches:
       - a01                # 仅生产分支触发
-
+    paths-ignore:
+      - 'README.md'
+      - '.github/workflows/**'
+      - 'README*.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - 'docker/docker-compose*.yml'
+      - 'docker-compose*.yml'
+      
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
