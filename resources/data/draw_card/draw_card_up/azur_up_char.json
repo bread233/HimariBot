@@ -1,0 +1,59 @@
+{
+    "char": {
+        "title": "『DATE A LANE』约会大作战联动SP、「新晋指挥官·新服开服庆典活动」、「资深指挥官·新服开服庆典活动」",
+        "pool_img": "",
+        "start_time": "2025-11-19T16:00:00",
+        "end_time": "2025-12-04T10:00:00",
+        "up_char": [
+            {
+                "name": "夜刀神十香",
+                "star": 4,
+                "limited": false,
+                "zoom": 2.0,
+                "type_": "重巡"
+            },
+            {
+                "name": "鸢一折纸",
+                "star": 4,
+                "limited": false,
+                "zoom": 2.0,
+                "type_": "航母"
+            },
+            {
+                "name": "五河琴里",
+                "star": 4,
+                "limited": false,
+                "zoom": 2.0,
+                "type_": "战列"
+            },
+            {
+                "name": "八舞耶倶矢·八舞夕弦",
+                "star": 4,
+                "limited": false,
+                "zoom": 0.5,
+                "type_": "轻巡"
+            },
+            {
+                "name": "四糸乃",
+                "star": 4,
+                "limited": false,
+                "zoom": 0.0,
+                "type_": "轻航"
+            },
+            {
+                "name": "时崎狂三",
+                "star": 4,
+                "limited": false,
+                "zoom": 0.0,
+                "type_": "轻巡"
+            },
+            {
+                "name": "博伊西·META",
+                "star": 6,
+                "limited": false,
+                "zoom": 0.0,
+                "type_": "轻巡"
+            }
+        ]
+    }
+}

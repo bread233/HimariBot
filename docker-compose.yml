@@ -1,0 +1,27 @@
+version: "3.10"
+
+services:
+  himaribot:
+    image: xmb233/himaribot:latest   # 你在 Docker Hub 上的镜像名
+    container_name: himaribot
+    restart: always                  # 自动重启
+
+    # 如果你是自己本机构建镜像，也可以打开下面这一段：
+    # build:
+    #   context: ..
+    #   dockerfile: ./docker/Dockerfile
+
+    ports:
+      - "8181:8181"                  # 宿主 8181 → 容器 8181
+      - "5888:5888"                  # 宿主 5888 → 容器 5888
+    working_dir: /app
+
+    volumes:
+      # 数据目录：容器内 /app/data → 宿主 ../data
+      - ../data:/app/data
+
+      # 日志目录：容器内 /app/log → 宿主 ../log
+      - ../log:/app/log
+
+      # 配置文件：把宿主根目录的 .env.dev 挂到容器 /app/.env.dev（只读即可）
+      - ../.env.dev:/app/.env.dev:ro

@@ -40,8 +40,8 @@ jobs:
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: docker/Dockerfile
+          context: .          # 构建上下文：项目根目录
+          file: Dockerfile   # 使用根目录的 Dockerfile
           push: true
           tags: |
             xmb233/himaribot:${{ env.VERSION }}

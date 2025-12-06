@@ -1,0 +1,34 @@
+{
+    "char": {
+        "title": "如死亦终",
+        "pool_img": "https:\/\/web.hycdn.cn\/announce\/images\/20240403\/eeb73d393f46686cb47acac5f185df72.jpg",
+        "start_time": "2024-04-11T16:00:00",
+        "end_time": "2024-04-25T03:59:00",
+        "up_char": [
+            {
+                "name": "阿斯卡纶",
+                "star": 6,
+                "limited": false,
+                "zoom": 0.5
+            },
+            {
+                "name": "阿罗玛",
+                "star": 5,
+                "limited": false,
+                "zoom": 0.5
+            },
+            {
+                "name": "晓歌",
+                "star": 5,
+                "limited": false,
+                "zoom": 0.5
+            },
+            {
+                "name": "露托",
+                "star": 4,
+                "limited": false,
+                "zoom": 0.2
+            }
+        ]
+    }
+}
