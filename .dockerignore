@@ -1,0 +1,33 @@
+# Git / CI
+.git/
+.github/
+
+# Tests / docs / migrations
+docs/
+tests/
+migrations/
+
+# Python 缓存 / 虚拟环境
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 运行时数据 / 日志
+data/
+log/
+*.log
+*.db
+
+# 如果资源希望用挂载方式提供，就打开这一行
+# 否则先保留不动
+# resources/
+
+# IDE / OS 杂物
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 文档
+README*.md
