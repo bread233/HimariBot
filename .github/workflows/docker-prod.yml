@@ -24,6 +24,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Show workspace size (top dirs)
+        run: |
+          echo "===== du -h --max-depth=2 . | sort -h | tail -n 30 ====="
+          du -h --max-depth=2 . | sort -h | tail -n 30
+
+      - name: Show biggest files
+        run: |
+          echo "===== du -ah . | sort -h | tail -n 50 ====="
+          du -ah . | sort -h | tail -n 50
+
       - name: Set image tag
         id: tag
         run: |
@@ -41,7 +51,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .          # 构建上下文：项目根目录
-          file: Dockerfile   # 使用根目录的 Dockerfile
+          file: Dockerfile    # 使用根目录的 Dockerfile
           push: true
           tags: |
             xmb233/himaribot:${{ env.VERSION }}
