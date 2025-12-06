@@ -20,9 +20,10 @@ version = "0.1.0"
 description = ""
 authors = ["bread233 <zhangzhenyu353@gmail.com>"]
 readme = "README.md"
-packages = [
-  { include = "src" }
-]
+#可能造成多次载入 暂时注释
+#packages = [
+#  { include = "src" }
+#]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<4.0"
