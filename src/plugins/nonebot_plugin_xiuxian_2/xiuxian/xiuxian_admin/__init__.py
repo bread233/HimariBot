@@ -51,7 +51,7 @@ zaohua_xiuxian = on_command('造化力量', permission=SUPERUSER, priority=15, b
 cz = on_command('创造力量', permission=SUPERUSER, priority=15, block=True)
 hmll = on_command("毁灭力量", priority=5, permission=SUPERUSER, block=True)
 restate = on_command("重置状态", permission=SUPERUSER, priority=12, block=True)
-set_xiuxian = on_command("启用修仙功能", aliases={'禁用修仙功能'}, permission=GROUP and (SUPERUSER | GROUP_ADMIN | GROUP_OWNER), priority=5, block=True)
+set_xiuxian = on_command("启用修仙功能", aliases={'禁用修仙功能','开启修仙功能','关闭修仙功能'}, permission=GROUP and (SUPERUSER | GROUP_ADMIN | GROUP_OWNER), priority=5, block=True)
 set_private_chat = on_command("启用私聊功能", aliases={'禁用私聊功能'}, permission=SUPERUSER, priority=5, block=True)
 super_help = on_command("修仙手册", aliases={"修仙管理"}, permission=SUPERUSER, priority=15, block=True)
 xiuxian_updata_level = on_fullmatch('修仙适配', permission=SUPERUSER, priority=15, block=True)
@@ -113,13 +113,7 @@ async def gm_command_(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent, 
             try:
                 if XiuConfig().img:
                     pic = await get_msg_pic(msg)
-                    msg = Message()
-                    msg.append(MessageSegment.image(pic))
-                    await bot.send_group_msg(
-                        group_id=event.group_id,
-                        message=msg
-                    )
-                    #await bot.send_group_msg(group_id=int(group_id), message=MessageSegment.image(pic))
+                    await bot.send_group_msg(group_id=int(group_id), message=MessageSegment.image(pic))
                 else:
                     await bot.send_group_msg(group_id=int(group_id), message=msg)
             except ActionFailed:  # 发送群消息失败
@@ -179,9 +173,7 @@ async def ccll_command_(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent
             try:
                 if XiuConfig().img:
                     pic = await get_msg_pic(msg)
-                    msg = Message()
-                    msg.append(MessageSegment.image(pic))
-                    await bot.send_group_msg(group_id=int(group_id), message=msg)
+                    await bot.send_group_msg(group_id=int(group_id), message=MessageSegment.image(pic))
                 else:
                     await bot.send_group_msg(group_id=int(group_id), message=msg)
             except ActionFailed:  # 发送群消息失败
@@ -565,22 +557,22 @@ async def open_xiuxian_(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent
     group_id = str(event.group_id)
     conf_data = JsonConfig().read_data()
 
-    if "启用" in group_msg:
-        if group_id not in conf_data["group"]:
+    if "启用" or "开启" in group_msg:
+        if group_id in conf_data["group"]:
             msg = "当前群聊修仙模组已启用，请勿重复操作！"
             await handle_send(bot, event, msg)
             await set_xiuxian.finish()
-        JsonConfig().write_data(2, group_id)
+        JsonConfig().write_data(1, group_id)
         msg = "当前群聊修仙基础模组已启用，快发送 我要修仙 加入修仙世界吧！"
         await handle_send(bot, event, msg)
         await set_xiuxian.finish()
 
-    elif "禁用" in group_msg:
-        if group_id in conf_data["group"]:
+    elif "禁用" or "关闭" in group_msg:
+        if group_id not in conf_data["group"]:
             msg = "当前群聊修仙模组已禁用，请勿重复操作！"
             await handle_send(bot, event, msg)
             await set_xiuxian.finish()
-        JsonConfig().write_data(1, group_id)
+        JsonConfig().write_data(2, group_id)
         msg = "当前群聊修仙基础模组已禁用！"
         await handle_send(bot, event, msg)
         await set_xiuxian.finish()

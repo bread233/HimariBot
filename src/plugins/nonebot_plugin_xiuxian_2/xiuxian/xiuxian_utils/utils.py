@@ -762,15 +762,13 @@ async def send_msg_handler(bot, event, *args):
                 img_data = await img.io_draw_to(messages)
             elif XiuConfig().img_send_type == "base64":
                 img_data = img.sync_draw_to(messages)
-            msg = Message()
-            msg.append(MessageSegment.image(img_data))
             if isinstance(event, GroupMessageEvent):
                 await bot.send_group_msg(
-                    group_id=event.group_id, message=msg
+                    group_id=event.group_id, message=MessageSegment.image(img_data)
                 )
             else:
                 await bot.send_private_msg(
-                    user_id=event.user_id, message=msg
+                    user_id=event.user_id, message=MessageSegment.image(img_data)
                 )
         elif len(args) == 1 and isinstance(args[0], list):
             messages = args[0]
@@ -780,15 +778,13 @@ async def send_msg_handler(bot, event, *args):
                 img_data = await img.io_draw_to(messages)
             elif XiuConfig().img_send_type == "base64":
                 img_data = img.sync_draw_to(messages)
-            msg = Message()
-            msg.append(MessageSegment.image(img_data))
             if isinstance(event, GroupMessageEvent):
                 await bot.send_group_msg(
-                    group_id=event.group_id, message=msg
+                    group_id=event.group_id, message=MessageSegment.image(img_data)
                 )
             else:
                 await bot.send_private_msg(
-                    user_id=event.user_id, message=msg
+                    user_id=event.user_id, message=MessageSegment.image(img_data)
                 )
         else:
             raise ValueError("参数数量或类型不匹配")
@@ -847,15 +843,13 @@ async def handle_send(bot, event, msg: str):
         # 处理昵称为空的情况
         pic_msg = f"@{event.sender.nickname}\n{msg}" if event.sender.nickname else msg
         pic = await get_msg_pic(pic_msg)
-        msg = Message()
-        msg.append(MessageSegment.image(pic))
         if is_group:
             await bot.send_group_msg(
-                group_id=event.group_id, message=msg
+                group_id=event.group_id, message=MessageSegment.image(pic)
             )
         else:
             await bot.send_private_msg(
-                user_id=event.user_id, message=msg
+                user_id=event.user_id, message=MessageSegment.image(pic)
             )
     else:
         if is_group:
@@ -910,18 +904,17 @@ async def handle_pic_send(bot, event, imgpath: Union[str, Path, BytesIO] = None)
             pic = base64_str
         else:
             pic = img_data  # 默认使用io方式
-        msg = Message()
-        msg.append(MessageSegment.image(pic))
+            
         # 发送图片消息
         if isinstance(event, GroupMessageEvent):
             await bot.send_group_msg(
                 group_id=event.group_id, 
-                message=msg
+                message=MessageSegment.image(pic)
             )
         else:
             await bot.send_private_msg(
                 user_id=event.user_id, 
-                message=msg
+                message=MessageSegment.image(pic)
             )
             
     except Exception as e:

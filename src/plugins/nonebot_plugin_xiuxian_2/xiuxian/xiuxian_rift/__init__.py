@@ -108,9 +108,7 @@ async def rift_help_(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent, s
     """秘境帮助"""
     bot, send_group_id = await assign_bot(bot=bot, event=event)
     if session_id in cache_help:
-        msg = Message()
-        msg.append(MessageSegment.image(cache_help[session_id]))
-        await bot.send_group_msg(group_id=int(send_group_id), message=msg)
+        await bot.send_group_msg(group_id=int(send_group_id), message=MessageSegment.image(cache_help[session_id]))
         await rift_help.finish()
     else:
         msg = __rift_help__

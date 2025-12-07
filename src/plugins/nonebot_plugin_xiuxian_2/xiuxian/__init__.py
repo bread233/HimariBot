@@ -37,6 +37,8 @@ put_bot = XiuConfig().put_bot
 shield_group = XiuConfig().shield_group
 response_group = XiuConfig().response_group
 shield_private = XiuConfig().shield_private
+enable_group = XiuConfig().enable_group
+
 try:
     put_bot_ = put_bot[0]
 except:
@@ -87,6 +89,11 @@ async def do_something(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent)
                 return  # 私聊不受群聊设置影响
             
             # 群聊处理
+            if str(event.group_id) not in enable_group:
+                raise IgnoredException("为屏蔽群消息,已忽略")
+            else:
+                pass
+            
             if response_group:
                 if str(event.group_id) in shield_group:
                     pass

@@ -182,6 +182,8 @@ def Cooldown(
         else:
             key = CooldownIsolateLevel.GLOBAL.name
         if not is_private and group_id in conf_data["group"]:
+            pass
+        else:
             if (
                     event.sender.role == "admin" or
                     event.sender.role == "owner" or
@@ -195,8 +197,6 @@ def Cooldown(
                 await matcher.finish()
             else:
                 await matcher.finish()
-        else:
-            pass
         
         if is_private:        
             if is_private and not conf_data.get("private_enabled", False):

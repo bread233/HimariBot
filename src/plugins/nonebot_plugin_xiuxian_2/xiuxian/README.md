@@ -28,3 +28,7 @@
 - xiuxian_tower ：通天塔
 - xiuxian_training ：历练
 - xiuxian_work ：悬赏令
+
+---
+
+每次更新需要用上次 admin/__init__.py和 utils/lay_out.py 替换最新 当然还有这个备忘readme
