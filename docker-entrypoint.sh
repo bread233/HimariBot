@@ -6,14 +6,19 @@ mkdir -p /app/data
 mkdir -p /app/log
 
 # 初次运行时，将默认资源拷贝到 data 下
-# -r 递归复制
-# -n 不覆盖已有文件
-# 2>/dev/null 静音处理不存在情况
 if [ -d /app/resources/data ]; then
-  cp -rn /app/resources/data/* /app/data/ 2>/dev/null || true
-fi
+  echo "📁 Checking default resources..."
 
-echo "📁 Resources checked: /app/data"
+  cp -rn /app/resources/data/* /app/data/ 2>/dev/null || true
+
+  echo "📁 Resources copied to /app/data"
+
+  # 如果 copy 成功，再删除 /app/resources
+  # -r 删除整个目录
+  # -f 静默，不报错
+  rm -rf /app/resources
+  echo "🧹 Default resources deleted from image to save space"
+fi
 
 # 启动 NoneBot
 exec "$@"
