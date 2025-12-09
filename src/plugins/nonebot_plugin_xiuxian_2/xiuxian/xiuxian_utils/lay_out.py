@@ -190,10 +190,13 @@ def Cooldown(
                     event.get_user_id() in bot.config.superusers
             ):
                 bot = await assign_bot_group(group_id=group_id)
-                if XiuConfig().at_sender:
-                    await bot.send(event=event, message=MessageSegment.at(event.get_user_id()) + "本群已关闭修仙模组,请联系管理员开启,开启命令为【启用修仙功能】!")
-                else:
-                    await bot.send(event=event, message="本群已关闭修仙模组,请联系管理员开启,开启命令为【启用修仙功能】!")
+                targets = ["我要修仙", "修仙签到", "修仙帮助"]
+                group_msg = str(event.message)
+                if any(s in group_msg for s in targets):
+                    if XiuConfig().at_sender:
+                        await bot.send(event=event, message=MessageSegment.at(event.get_user_id()) + "本群已关闭修仙模组,请联系管理员开启,开启命令为【启用修仙功能】!")
+                    else:
+                        await bot.send(event=event, message="本群已关闭修仙模组,请联系管理员开启,开启命令为【启用修仙功能】!")
                 await matcher.finish()
             else:
                 await matcher.finish()
