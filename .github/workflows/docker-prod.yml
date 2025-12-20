@@ -13,6 +13,7 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
       - 'docker/docker-compose*.yml'
       - 'docker-compose*.yml'
+      - 'resources/**'
       
 jobs:
   build-and-push:
