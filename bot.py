@@ -70,6 +70,7 @@ nonebot.load_builtin_plugins("echo")
 # 加载插件
 nonebot.load_plugin("nonebot_plugin_alconna")
 nonebot.load_plugin("nonebot_plugin_uninfo")
+nonebot.load_plugin("nonebot_plugin_skland")
 nonebot.load_plugins("src/plugins")
 
 #nonebot.load_from_toml("pyproject.toml")
