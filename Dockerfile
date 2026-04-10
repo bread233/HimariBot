@@ -33,6 +33,7 @@ RUN poetry lock --no-update \
     && poetry install --only main --no-interaction --no-ansi -vvv \
     && pip install --no-cache-dir "nonebot2[fastapi,httpx]" \
     && pip install --no-cache-dir nonebot-adapter-onebot nonebot-adapter-qq \
+    && pip install --no-cache-dir --force-reinstall "pydantic==1.10.15" \
     && rm -rf /root/.cache/pip /root/.cache/pypoetry
 
 # 再复制源码
