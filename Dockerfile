@@ -31,9 +31,12 @@ COPY pyproject.toml poetry.lock* ./
 # 安装依赖 + NoneBot 相关
 RUN poetry lock --no-update \
     && poetry install --only main --no-interaction --no-ansi -vvv \
-    && pip install --no-cache-dir "nonebot2[fastapi,httpx]" \
-    && pip install --no-cache-dir nonebot-adapter-onebot nonebot-adapter-qq \
-    && pip install --no-cache-dir --force-reinstall "pydantic==1.10.15" \
+    && pip install --no-cache-dir \
+        "pydantic==1.10.15" \
+        "fastapi==0.95.2" \
+        "nonebot2[fastapi,httpx]<2.3" \
+        nonebot-adapter-onebot \
+        nonebot-adapter-qq \
     && rm -rf /root/.cache/pip /root/.cache/pypoetry
 
 # 再复制源码
