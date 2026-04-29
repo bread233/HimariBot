@@ -72,7 +72,7 @@ class UserBattleBuffDate:  # 辅修功法14
 empty_boss_buff = BossBuff()
 empty_ussr_random_buff = UserRandomBuff()
 
-def Player_fight(user1, user2, type_in, bot_id):
+async def Player_fight(user1, user2, type_in, bot_id):
     """玩家对决"""
     engine = BattleEngine(bot_id)
     

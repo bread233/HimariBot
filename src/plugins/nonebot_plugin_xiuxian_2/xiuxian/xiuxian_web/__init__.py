@@ -5,28 +5,128 @@ import re
 import platform
 import psutil
 import time
+import asyncio
+import secrets
+import random
 from pathlib import Path
+from functools import wraps
 from nonebot.log import logger
 from datetime import datetime
 from nonebot import get_driver
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file
+from nonebot import on_command
+from nonebot.params import CommandArg
+from nonebot.adapters.onebot.v11 import Bot, Message, GroupMessageEvent, PrivateMessageEvent
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file, Blueprint
 from ..xiuxian_utils.item_json import Items
 from ..xiuxian_config import XiuConfig, Xiu_Plugin, convert_rank
 from ..xiuxian_utils.data_source import jsondata
 from ..xiuxian_utils.download_xiuxian_data import UpdateManager
-from ..xiuxian_utils.xiuxian2_handle import config_impart
+from ..xiuxian_utils.xiuxian2_handle import config_impart, XiuxianDateManage, UserBuffDate, OtherSet
+from ..xiuxian_utils.utils import number_to, check_user_type
+from ..xiuxian_work.work_handle import workhandle
+from ..xiuxian_work.reward_data_source import (
+    savef as save_work_file,
+    delete_work_file,
+    has_unaccepted_work,
+)
+from ..xiuxian_utils.player_fight import Player_fight, Boss_fight
+from ..xiuxian_utils.utils import handle_send
+from ..xiuxian_rift.old_rift_info import old_rift_info
+from ..xiuxian_rift.jsondata import save_rift_data, read_rift_data
+from ..xiuxian_rift.riftmake import (
+    Rift, get_rift_type, get_story_type, NONEMSG, get_battle_type,
+    get_dxsj_info, get_boss_battle_info, get_treasure_info
+)
+from ..xiuxian_mixelixir.mixelixirutil import get_mix_elixir_msg, tiaohe, check_mix, make_dict
+from ..xiuxian_boss.makeboss import create_all_bosses, createboss_jj
+from ..xiuxian_boss.bossconfig import get_boss_config
 
 items = Items()
+game_sql = XiuxianDateManage()
 update_manager = UpdateManager()
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'  # 用于会话加密
 
 # 配置
-DATABASE = Path() / "data" / "xiuxian" / "xiuxian.db"
-IMPART_DB = Path() / "data" / "xiuxian" / "xiuxian_impart.db"
+DATA_PATH = Path.cwd() / "data" / "xiuxian"
+DATABASE = DATA_PATH / "xiuxian.db"
+IMPART_DB = DATA_PATH / "xiuxian_impart.db"
+ASSETS_PATH = DATA_PATH
 ADMIN_IDS = get_driver().config.superusers
 PORT = XiuConfig().web_port
 HOST = XiuConfig().web_host
+
+# =========================
+# 资源服务
+# =========================
+
+@app.route('/assets/card/<name>')
+def serve_card_img(name):
+    """服务角色卡图，支持 .webp 和 .png"""
+    if not name or name == 'undefined' or name == 'default' or name == 'null':
+        # 随机返回一个卡图作为默认值
+        cards = list((ASSETS_PATH / "卡图").glob("*.webp"))
+        if not cards: cards = list((ASSETS_PATH / "卡图").glob("*.png"))
+        if cards: 
+            target = cards[secrets.randbelow(len(cards))]
+            return send_file(str(target.absolute()))
+        return "Not Found", 404
+        
+    for ext in ['.webp', '.png']:
+        path = ASSETS_PATH / "卡图" / f"{name}{ext}"
+        if path.exists():
+            return send_file(str(path.absolute()))
+    
+    # 模糊匹配
+    cards = list((ASSETS_PATH / "卡图").glob(f"*{name}*"))
+    if cards: return send_file(str(cards[0].absolute()))
+    
+    # 回退到随机卡图
+    cards = list((ASSETS_PATH / "卡图").glob("*.webp"))
+    if not cards: cards = list((ASSETS_PATH / "卡图").glob("*.png"))
+    if cards:
+        return send_file(str(cards[secrets.randbelow(len(cards))].absolute()))
+    
+    return "Not Found", 404
+
+@app.route('/assets/boss/<name>')
+def serve_boss_img(name):
+    """服务 Boss 图片"""
+    if not name or name == 'undefined' or name == 'null':
+        bosses = list((ASSETS_PATH / "boss_img").glob("*.png"))
+        if bosses:
+            return send_file(str(bosses[secrets.randbelow(len(bosses))].absolute()))
+        return "Not Found", 404
+
+    path = ASSETS_PATH / "boss_img" / f"{name}.png"
+    if path.exists():
+        return send_file(str(path.absolute()))
+    path_c = ASSETS_PATH / "boss_img" / f"{name}_c.png"
+    if path_c.exists():
+        return send_file(str(path_c.absolute()))
+        
+    # 模糊匹配
+    bosses = list((ASSETS_PATH / "boss_img").glob(f"*{name}*"))
+    if bosses:
+        return send_file(str(bosses[0].absolute()))
+        
+    # 回退到随机 Boss 图
+    bosses = list((ASSETS_PATH / "boss_img").glob("*.png"))
+    if bosses:
+        return send_file(str(bosses[secrets.randbelow(len(bosses))].absolute()))
+        
+    return "Not Found", 404
+
+@app.route('/assets/bg')
+def serve_bg():
+    """服务背景图"""
+    # 优先尝试 data/xiuxian/image/background.png
+    path = ASSETS_PATH / "image" / "background.png"
+    if path.exists():
+        return send_file(str(path.absolute()))
+    
+    # 备选路径：如果没有背景图，尝试从卡图中随便找一张，或者返回 404
+    return "Not Found", 404
 
 # 境界和灵根预设
 LEVELS = convert_rank('江湖好手')[1]
@@ -195,7 +295,7 @@ def get_tables():
 def get_database_tables(db_path):
     """动态获取数据库中的所有表及其字段信息，包括主键（备用函数）"""
     tables = {}
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     cursor = conn.cursor()
     
     # 获取所有用户表
@@ -226,7 +326,7 @@ def get_database_tables(db_path):
 
 def get_db_connection(db_path):
     """获取数据库连接"""
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -367,6 +467,1127 @@ def get_user_by_id(user_id):
     if result and len(result) > 0:
         return result[0]
     return None
+
+
+# =========================
+# 玩家网页端（MVP）
+# =========================
+# 说明：这里先在现有 Flask 管理面板中挂载一个玩家端原型，避免额外引入前端构建链。
+# 后续如果要做正式 DMM 风格 SPA，可以把这些 /game/api/* 接口迁移/扩展到独立 service。
+
+WORK_EXPIRE_MINUTES = 30
+TOKEN_EXPIRE_SECONDS = 300
+LOGIN_TOKEN_CACHE = {}  # token -> {user_id, expire_at, used}
+
+# QQ 群内发送「/修仙登录」后，机器人会将一次性网页登录链接私聊给发起人。
+web_login_token_cmd = on_command("修仙登录", priority=5, block=True)
+
+
+def _clean_expired_tokens():
+    now_ts = datetime.now().timestamp()
+    expired = [tk for tk, info in LOGIN_TOKEN_CACHE.items() if info.get("expire_at", 0) < now_ts or info.get("used")]
+    for tk in expired:
+        LOGIN_TOKEN_CACHE.pop(tk, None)
+
+
+def _issue_login_token(user_id: int) -> str:
+    _clean_expired_tokens()
+    token = secrets.token_urlsafe(18)
+    LOGIN_TOKEN_CACHE[token] = {
+        "user_id": int(user_id),
+        "expire_at": datetime.now().timestamp() + TOKEN_EXPIRE_SECONDS,
+        "used": False,
+    }
+    return token
+
+
+def _consume_login_token(token: str):
+    _clean_expired_tokens()
+    info = LOGIN_TOKEN_CACHE.get(token)
+    if not info:
+        return None, "登录令无效或已过期"
+    if info.get("used"):
+        return None, "登录令已使用"
+    info["used"] = True
+    return int(info["user_id"]), ""
+
+
+def get_local_ip():
+    """获取本机 IP，用于生成登录链接"""
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+@web_login_token_cmd.handle()
+async def _(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent, args: Message = CommandArg()):
+    user_id = int(event.get_user_id())
+    user = game_sql.get_user_info_with_id(user_id)
+    if not user:
+        await handle_send(bot, event, "尚未创建修仙角色，请先发送【我要修仙】")
+        await web_login_token_cmd.finish()
+    
+    token = _issue_login_token(user_id)
+    
+    # 自动识别外部访问地址
+    display_host = "xiuxian.superbread.uk"
+    
+    login_url = f"http://{display_host}/game?token={token}"
+    
+    msg = (
+        "【网页一次性登录令】\n"
+        f"道号：{user.get('user_name', user_id)}\n"
+        f"登录令：{token}\n"
+        f"有效期：{TOKEN_EXPIRE_SECONDS // 60} 分钟，仅可使用一次\n\n"
+        f"快捷登录链接：\n{login_url}\n\n"
+        "温馨提示：如果点击链接无法打开，请尝试在网页登录页面手动输入登录令。请勿将此链接泄露给他人。"
+    )
+    
+    try:
+        # 尝试私聊发送
+        await bot.send_private_msg(user_id=user_id, message=msg)
+        if isinstance(event, GroupMessageEvent):
+            await handle_send(bot, event, "【仙途绘卷】网页登录令已通过私聊发送给您，请注意查收。")
+    except Exception as e:
+        logger.error(f"发送网页登录令私聊失败: {e}")
+        if isinstance(event, GroupMessageEvent):
+            await handle_send(bot, event, "私聊发送失败，请先添加机器人好友或允许临时会话后再发送 /修仙登录。")
+        else:
+            # 如果本身就是私聊但发送失败（罕见），则尝试在当前会话回复（虽然通常也是私聊）
+            await handle_send(bot, event, msg)
+    await web_login_token_cmd.finish()
+
+
+def game_login_required(view_func):
+    """玩家端接口登录保护。"""
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        if 'player_id' not in session:
+            return jsonify({"success": False, "error": "未登录", "login_required": True}), 401
+        return view_func(*args, **kwargs)
+    return wrapper
+
+
+def _current_player_id():
+    player_id = session.get('player_id')
+    try:
+        return int(player_id) if player_id is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _ok(**kwargs):
+    data = {"success": True}
+    data.update(kwargs)
+    return jsonify(data)
+
+
+def _err(message, status_code=400, **kwargs):
+    data = {"success": False, "error": message}
+    data.update(kwargs)
+    return jsonify(data), status_code
+
+
+def _display_number(value):
+    try:
+        return number_to(int(value))
+    except Exception:
+        return str(value if value is not None else 0)
+
+
+def _parse_datetime(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    value = str(value)
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _calculate_work_remaining(create_time, work_name=None, user_id=None):
+    """计算悬赏剩余时间，返回 remaining/elapsed/total（分钟）。"""
+    start = _parse_datetime(create_time)
+    if not start:
+        return 0, 0, None
+    elapsed = int((datetime.now() - start).total_seconds() // 60)
+    if work_name and user_id:
+        try:
+            total = int(workhandle().do_work(key=1, name=work_name, user_id=user_id) or 0)
+        except Exception:
+            total = 0
+        return max(total - elapsed, 0), elapsed, total
+    return max(WORK_EXPIRE_MINUTES - elapsed, 0), elapsed, WORK_EXPIRE_MINUTES
+
+
+def _get_player_work_status(user_id):
+    """网页端复用悬赏令状态机。
+
+    返回：
+    0 无悬赏 / 1 进行中 / 2 可结算 / 3 未接取可选 / 4 已过期
+    """
+    user_cd = game_sql.get_user_cd(user_id)
+    if user_cd and user_cd.get('type') == 2:
+        remaining, _, _ = _calculate_work_remaining(user_cd.get('create_time'), user_cd.get('scheduled_time'), user_id)
+        return (1 if remaining > 0 else 2), user_cd
+
+    has_work, work_data = has_unaccepted_work(user_id, expire_minutes=WORK_EXPIRE_MINUTES)
+    if has_work:
+        return 3, work_data
+    if work_data:
+        return 4, work_data
+    return 0, None
+
+
+def _serialize_item(goods_id, fallback=None):
+    try:
+        item = items.get_data_by_item_id(goods_id) if goods_id else None
+    except (KeyError, Exception):
+        item = None
+    fallback = fallback or {}
+    return {
+        "id": goods_id,
+        "name": (item or {}).get('name') or fallback.get('goods_name') or "未知物品",
+        "type": (item or {}).get('type') or fallback.get('goods_type') or "未知",
+        "item_type": (item or {}).get('item_type') or fallback.get('goods_type') or "未知",
+        "level": (item or {}).get('level') or "凡品",
+        "desc": (item or {}).get('desc') or fallback.get('remake') or "暂无描述",
+    }
+
+
+def _serialize_work(status, work_data, user_id):
+    user = game_sql.get_user_info_with_id(user_id) or {}
+    payload = {
+        "status_code": status,
+        "status": "idle",
+        "label": "暂无悬赏",
+        "message": "没有查到悬赏令，请刷新获取新的悬赏。",
+        "refresh_left": user.get('work_num', 0),
+        "tasks": [],
+    }
+
+    if status == 1 and work_data:
+        remaining, elapsed, total = _calculate_work_remaining(work_data.get('create_time'), work_data.get('scheduled_time'), user_id)
+        payload.update({
+            "status": "running",
+            "label": "悬赏执行中",
+            "message": f"悬赏令【{work_data.get('scheduled_time')}】执行中，剩余 {remaining} 分钟。",
+            "current_task": work_data.get('scheduled_time'),
+            "remaining_minutes": remaining,
+            "elapsed_minutes": elapsed,
+            "total_minutes": total,
+        })
+    elif status == 2 and work_data:
+        payload.update({
+            "status": "settle",
+            "label": "悬赏可结算",
+            "message": f"悬赏令【{work_data.get('scheduled_time')}】已完成，可以领取奖励。",
+            "current_task": work_data.get('scheduled_time'),
+            "remaining_minutes": 0,
+        })
+    elif status == 3 and work_data:
+        remaining, elapsed, total = _calculate_work_remaining(work_data.get('refresh_time'))
+        task_items = []
+        for index, (task_name, task_data) in enumerate((work_data.get('tasks') or {}).items(), 1):
+            item_id = task_data.get('item_id', 0)
+            task_items.append({
+                "index": index,
+                "name": task_name,
+                "rate": task_data.get('rate', 0),
+                "award": task_data.get('award', 0),
+                "award_display": _display_number(task_data.get('award', 0)),
+                "time": task_data.get('time', 0),
+                "item": _serialize_item(item_id) if item_id else None,
+            })
+        payload.update({
+            "status": "available",
+            "label": "待接取悬赏",
+            "message": f"请选择一个悬赏接取，悬赏令剩余 {remaining} 分钟。",
+            "remaining_minutes": remaining,
+            "elapsed_minutes": elapsed,
+            "total_minutes": total,
+            "tasks": task_items,
+        })
+    elif status == 4:
+        payload.update({
+            "status": "expired",
+            "label": "悬赏已过期",
+            "message": "悬赏令已过期，请刷新获取新的悬赏。",
+        })
+    return payload
+
+
+def _build_player_profile(user_id):
+    user = game_sql.get_user_real_info(user_id) or game_sql.get_user_info_with_id(user_id)
+    if not user:
+        return None
+
+    try:
+        rank = game_sql.get_exp_rank(user_id)
+        exp_rank = int(rank[0]) if rank else 0
+    except Exception:
+        exp_rank = 0
+    try:
+        stone_rank = int((game_sql.get_stone_rank(user_id) or [0])[0])
+    except Exception:
+        stone_rank = 0
+
+    try:
+        level_rate = game_sql.get_root_rate(user.get('root_type'), user_id)
+        realm_rate = jsondata.level_data()[user.get('level')]["spend"]
+        power = int(user.get('power') or user.get('exp', 0) * level_rate * realm_rate)
+    except Exception:
+        level_rate = 0
+        power = int(user.get('power') or 0)
+
+    sect_name = "无宗门"
+    sect_position = "无"
+    if user.get('sect_id'):
+        try:
+            sect = game_sql.get_sect_info(user.get('sect_id'))
+            sect_name = sect.get('sect_name', sect_name) if sect else sect_name
+            sect_position = jsondata.sect_config_data().get(str(user.get('sect_position')), {}).get('title', sect_position)
+        except Exception:
+            pass
+
+    try:
+        level_list = OtherSet().level
+        now_index = level_list.index(user.get('level'))
+        if now_index >= len(level_list) - 1:
+            next_level = None
+            need_exp = 0
+            breakthrough = "位面至高"
+        else:
+            next_level = level_list[now_index + 1]
+            need_exp = max(int(game_sql.get_level_power(next_level)) - int(user.get('exp', 0)), 0)
+            breakthrough = "可突破" if need_exp == 0 else f"还需 {_display_number(need_exp)} 修为"
+    except Exception:
+        next_level = None
+        need_exp = 0
+        breakthrough = "未知"
+
+    buff = UserBuffDate(user_id)
+    def buff_name(getter):
+        try:
+            data = getter()
+            if data:
+                return f"{data.get('name', '未知')}({data.get('level', '未知')})"
+        except Exception:
+            pass
+        return "无"
+
+    max_stamina = XiuConfig().max_stamina
+    hp = int(user.get('hp') or 0)
+    mp = int(user.get('mp') or 0)
+    exp = int(user.get('exp') or 0)
+    
+    # 确定卡图名称
+    cards = [c.stem for c in (ASSETS_PATH / "卡图").glob("*.webp")]
+    if not cards: cards = [c.stem for c in (ASSETS_PATH / "卡图").glob("*.png")]
+    card_name = cards[int(user_id) % len(cards)] if cards else "default"
+
+    return {
+        "id": int(user.get('user_id')),
+        "name": user.get('user_name') or f"无名氏({user_id})",
+        "card_img": f"/assets/card/{card_name}",
+        "level": user.get('level') or "未知",
+        "next_level": next_level,
+        "breakthrough": breakthrough,
+        "need_exp": need_exp,
+        "root": user.get('root') or "未知",
+        "root_type": user.get('root_type') or "未知",
+        "root_rate": int(level_rate * 100) if isinstance(level_rate, (int, float)) else 0,
+        "sect": sect_name,
+        "sect_position": sect_position,
+        "exp": exp,
+        "exp_display": _display_number(exp),
+        "stone": int(user.get('stone') or 0),
+        "stone_display": _display_number(user.get('stone') or 0),
+        "power": power,
+        "power_display": _display_number(power),
+        "hp": hp,
+        "hp_display": _display_number(hp),
+        "mp": mp,
+        "mp_display": _display_number(mp),
+        "atk": int(user.get('atk') or 0),
+        "atk_display": _display_number(user.get('atk') or 0),
+        "stamina": int(user.get('user_stamina') or 0),
+        "max_stamina": int(max_stamina),
+        "work_num": int(user.get('work_num') or 0),
+        "exp_rank": exp_rank,
+        "stone_rank": stone_rank,
+        "cultivation": {
+            "atk": int(user.get('atkpractice') or 0),
+            "hp": int(user.get('hppractice') or 0),
+            "mp": int(user.get('mppractice') or 0),
+        },
+        "equipment": {
+            "main": buff_name(buff.get_user_main_buff_data),
+            "sub": buff_name(buff.get_user_sub_buff_data),
+            "skill": buff_name(buff.get_user_sec_buff_data),
+            "movement": buff_name(buff.get_user_effect1_buff_data),
+            "eyes": buff_name(buff.get_user_effect2_buff_data),
+            "weapon": buff_name(buff.get_user_weapon_data),
+            "armor": buff_name(buff.get_user_armor_buff_data),
+        }
+    }
+
+
+def _build_backpack(user_id, limit=120):
+    rows = game_sql.get_back_msg(user_id) or []
+    result = []
+    for row in rows[:limit]:
+        goods_id = row.get('goods_id')
+        item = _serialize_item(goods_id, row)
+        result.append({
+            "id": goods_id,
+            "name": row.get('goods_name') or item['name'],
+            "type": row.get('goods_type') or item['type'],
+            "item_type": item['item_type'],
+            "level": item['level'],
+            "desc": item['desc'],
+            "count": int(row.get('goods_num') or 0),
+            "bind_count": int(row.get('bind_num') or 0) if row.get('bind_num') is not None else 0,
+            "state": int(row.get('state') or 0),
+            "equipped": int(row.get('state') or 0) == 1,
+        })
+    result.sort(key=lambda x: (not x['equipped'], x['type'], x['id'] or 0))
+    return result
+
+
+def _build_rankings(limit=20):
+    exp_rows = execute_sql(DATABASE, "SELECT user_id,user_name,level,exp FROM user_xiuxian ORDER BY exp DESC LIMIT ?", (limit,)) or []
+    stone_rows = execute_sql(DATABASE, "SELECT user_id,user_name,level,stone FROM user_xiuxian ORDER BY stone DESC LIMIT ?", (limit,)) or []
+    power_rows = execute_sql(DATABASE, "SELECT user_id,user_name,level,power FROM user_xiuxian ORDER BY power DESC LIMIT ?", (limit,)) or []
+    def _fmt(rows, key):
+        return [{
+            "rank": idx,
+            "user_id": int(r.get("user_id") or 0),
+            "name": r.get("user_name") or f"道友{idx}",
+            "level": r.get("level") or "未知",
+            "value": int(r.get(key) or 0),
+            "value_display": _display_number(r.get(key) or 0),
+        } for idx, r in enumerate(rows, 1)]
+    return {
+        "exp": _fmt(exp_rows, "exp"),
+        "stone": _fmt(stone_rows, "stone"),
+        "power": _fmt(power_rows, "power"),
+    }
+
+
+def _build_sect_info(user_id):
+    user = game_sql.get_user_info_with_id(user_id) or {}
+    sect_id = user.get("sect_id")
+    if not sect_id:
+        return {"joined": False, "message": "尚未加入宗门"}
+    sect = game_sql.get_sect_info(sect_id) or {}
+    members = execute_sql(DATABASE, "SELECT COUNT(*) as c FROM user_xiuxian WHERE sect_id = ?", (sect_id,)) or [{"c": 0}]
+    return {
+        "joined": True,
+        "sect_id": sect_id,
+        "sect_name": sect.get("sect_name") or "未知宗门",
+        "owner": sect.get("sect_owner") or "未知",
+        "level": sect.get("sect_level") or 0,
+        "materials": int(sect.get("sect_materials") or 0),
+        "scale": int(sect.get("sect_scale") or 0),
+        "elixir_room_level": int(sect.get("elixir_room_level") or 0),
+        "members": int((members[0] or {}).get("c") or 0),
+        "position": jsondata.sect_config_data().get(str(user.get("sect_position")), {}).get("title", "弟子"),
+    }
+
+
+def _consume_stamina(user_id, cost=1):
+    user = game_sql.get_user_info_with_id(user_id) or {}
+    stamina = int(user.get('user_stamina') or 0)
+    if stamina < cost:
+        return False, f"体力不足，本次操作需要 {cost} 点体力。"
+    game_sql.update_user_stamina(user_id, cost, 2)
+    return True, ""
+
+
+def _run_async(coro):
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+def _normalize_battle_nodes(nodes, player_id, enemy_name=None, is_boss=False):
+    events = []
+    player_card = None # 延迟获取
+    
+    for idx, node in enumerate(nodes or [], 1):
+        data = node.get('data', {}) if isinstance(node, dict) else {}
+        speaker = str(data.get('name', '战报'))
+        content = str(data.get('content', ''))
+        uin = data.get('uin')
+        side = "system"
+        speaker_img = None
+        
+        try:
+            if int(uin) == int(player_id):
+                side = "player"
+                if not player_card:
+                    p = _build_player_profile(player_id)
+                    player_card = p['card_img'] if p else None
+                speaker_img = player_card
+            elif speaker != "Bot":
+                side = "enemy"
+                if is_boss and enemy_name:
+                    speaker_img = f"/assets/boss/{enemy_name}"
+        except Exception:
+            if speaker != "Bot":
+                side = "enemy"
+                if is_boss and enemy_name:
+                    speaker_img = f"/assets/boss/{enemy_name}"
+
+        event_type = "log"
+        if "回合" in content:
+            event_type = "turn"
+        elif "闪避" in content or "未命中" in content:
+            event_type = "miss"
+        elif "回复" in content or "吸取" in content:
+            event_type = "heal"
+        elif "造成" in content or "伤害" in content:
+            event_type = "attack"
+        elif "胜利" in content:
+            event_type = "result"
+        elif "提升" in content or "获得" in content or "降低" in content:
+            event_type = "buff"
+
+        numbers = [int(x) for x in re.findall(r"\d+", content)]
+        amount = max(numbers) if numbers else 0
+        effect = {
+            "attack": "slash",
+            "miss": "wind",
+            "heal": "heal",
+            "buff": "aura",
+            "turn": "turn",
+            "result": "result",
+        }.get(event_type, "log")
+
+        target_side = "enemy" if side == "player" and event_type == "attack" else "player" if side == "enemy" and event_type == "attack" else side
+
+        events.append({
+            "seq": idx,
+            "side": side,
+            "target_side": target_side,
+            "type": event_type,
+            "effect": effect,
+            "speaker": speaker,
+            "speaker_img": speaker_img,
+            "content": content,
+            "amount": amount,
+            "duration": 1050 if event_type in ("attack", "heal", "buff") else 760,
+        })
+    return events
+
+
+def _build_battle_payload(title, winner, events, player_id, enemy_name=None, is_boss=False):
+    event_count = len(events or [])
+    return {
+        "title": title,
+        "winner": winner,
+        "events": events,
+        "enemy": {
+            "name": enemy_name,
+            "is_boss": is_boss,
+            "img": f"/assets/boss/{enemy_name}" if is_boss and enemy_name else None
+        },
+        "meta": {
+            "event_count": event_count,
+            "player_id": int(player_id),
+            "estimated_seconds": round(event_count * 0.85, 1),
+            "schema_version": 2,
+        }
+    }
+
+
+def _settle_work_for_web(user_id, work_data):
+    user_info = game_sql.get_user_info_with_id(user_id)
+    if not user_info:
+        return None, "用户不存在"
+
+    msg, give_exp, success, item_id, big_success = workhandle().do_work(
+        2,
+        work_list=work_data.get('scheduled_time'),
+        level=user_info.get('level'),
+        exp=user_info.get('exp'),
+        user_id=user_id,
+    )
+    delete_work_file(user_id)
+
+    current_exp = int(user_info.get('exp') or 0)
+    max_exp = int(OtherSet().set_closing_type(user_info.get('level'))) * XiuConfig().closing_exp_upper_limit
+    if big_success:
+        gain_exp = int(give_exp * random.uniform(1.5, 2.5))
+        result_label = "悬赏大成功"
+    elif success:
+        gain_exp = int(give_exp)
+        result_label = "悬赏完成"
+    else:
+        gain_exp = int(give_exp // 2)
+        result_label = "悬赏勉强完成"
+    gain_exp = max(min(gain_exp, int(max_exp - current_exp)), 0)
+
+    if gain_exp:
+        game_sql.update_exp(user_id, gain_exp)
+    game_sql.do_work(user_id, 0)
+
+    reward_item = None
+    if (big_success or success) and item_id:
+        item_info = items.get_data_by_item_id(item_id)
+        if item_info:
+            game_sql.send_back(user_id, item_id, item_info['name'], item_info['type'], 1)
+            reward_item = _serialize_item(item_id)
+
+    return {
+        "title": result_label,
+        "task": work_data.get('scheduled_time'),
+        "message": msg,
+        "gain_exp": gain_exp,
+        "gain_exp_display": _display_number(gain_exp),
+        "success": bool(success),
+        "big_success": bool(big_success),
+        "item": reward_item,
+    }, None
+
+
+@app.route('/game')
+def game_home():
+    # 支持 ?token=xxx 一次性登录
+    token = (request.args.get('token') or '').strip()
+    if token:
+        user_id, err = _consume_login_token(token)
+        if user_id:
+            session['player_id'] = str(user_id)
+            return redirect(url_for('game_home'))
+
+    player = None
+    token_error = None
+    if token:
+        token_error = "登录令无效、已过期或已使用"
+    player_id = _current_player_id()
+    if player_id:
+        player = game_sql.get_user_info_with_id(player_id)
+    return render_template('game.html', player=player, token_error=token_error)
+
+
+@app.route('/game/login', methods=['POST'])
+def game_login():
+    # 强制使用一次性 token 登录，确保安全性
+    token = request.form.get('token', '').strip()
+    if not token:
+        return render_template('game.html', player=None, error="请输入一次性登录令")
+        
+    user_id, err = _consume_login_token(token)
+    if not user_id:
+        return render_template('game.html', player=None, error=err or "登录令无效或已过期")
+        
+    session['player_id'] = str(user_id)
+    return redirect(url_for('game_home'))
+
+
+@app.route('/game/logout')
+def game_logout():
+    session.pop('player_id', None)
+    return redirect(url_for('game_home'))
+
+
+@app.route('/game/api/profile')
+@game_login_required
+def game_api_profile():
+    player_id = _current_player_id()
+    profile = _build_player_profile(player_id)
+    if not profile:
+        return _err("角色不存在", 404)
+    return _ok(profile=profile)
+
+
+@app.route('/game/api/backpack')
+@game_login_required
+def game_api_backpack():
+    player_id = _current_player_id()
+    return _ok(items=_build_backpack(player_id))
+
+
+@app.route('/game/api/rankings')
+@game_login_required
+def game_api_rankings():
+    return _ok(rankings=_build_rankings())
+
+
+@app.route('/game/api/sect')
+@game_login_required
+def game_api_sect():
+    player_id = _current_player_id()
+    return _ok(sect=_build_sect_info(player_id))
+
+
+@app.route('/game/api/rift/explore', methods=['POST'])
+@game_login_required
+def game_api_rift_explore():
+    player_id = _current_player_id()
+    is_type, msg = check_user_type(player_id, 0)
+    if not is_type:
+        return _err(msg or "当前状态无法开始秘境探索")
+        
+    group_rift = old_rift_info.read_rift_info()
+    group_id = "000000"
+    if group_id not in group_rift:
+        # 如果没有秘境，尝试生成一个
+        from ..xiuxian_rift.riftconfig import get_rift_config
+        config = get_rift_config()
+        rift = Rift()
+        rift.name = get_rift_type()
+        rift.rank = config['rift'][rift.name]['rank']
+        rift.time = config['rift'][rift.name]['time']
+        group_rift[group_id] = rift
+        old_rift_info.save_rift(group_rift)
+        
+    rift = group_rift[group_id]
+    user = game_sql.get_user_info_with_id(player_id)
+    
+    # 境界检查
+    user_rank = convert_rank(user["level"])[0]
+    required_rank = convert_rank("感气境中期")[0] - rift.rank
+    if user_rank > required_rank:
+        rank_name_list = convert_rank(user["level"])[1]
+        required_rank_name = rank_name_list[len(rank_name_list) - required_rank - 1]
+        return _err(f"境界不足，无法进入秘境：{rift.name}，需要{required_rank_name}以上。")
+
+    if str(player_id) in [str(x) for x in rift.l_user_id]:
+        return _err("道友已经参加过本次秘境啦。")
+
+    ok, msg = _consume_stamina(player_id, 6)
+    if not ok: return _err(msg)
+
+    rift.l_user_id.append(player_id)
+    rift_data = {"name": rift.name, "time": rift.time, "rank": rift.rank}
+    save_rift_data(player_id, rift_data)
+    game_sql.do_work(player_id, 3, rift_data["time"])
+    old_rift_info.save_rift(group_rift)
+    
+    return _ok(message=f"进入秘境：{rift.name}，预计耗时 {rift.time} 分钟。", rift={
+        "in_rift": True,
+        "name": rift.name,
+        "remaining_minutes": rift.time
+    })
+
+
+@app.route('/game/api/rift/settle', methods=['POST'])
+@game_login_required
+def game_api_rift_settle():
+    player_id = _current_player_id()
+    is_type, msg = check_user_type(player_id, 3)
+    if not is_type:
+        logger.warning(f"Rift settle failed: user_id={player_id}, reason={msg or 'not in rift'}")
+        return _err(msg or "当前不在秘境探索状态")
+        
+    user_cd = game_sql.get_user_cd(player_id)
+    if not user_cd: 
+        logger.warning(f"Rift settle failed: user_id={player_id}, reason=no cd info")
+        return _err("数据异常，未找到 CD 信息")
+    
+    rift_info = read_rift_data(player_id)
+    create_time = _parse_datetime(user_cd['create_time'])
+    elapsed = (datetime.now() - create_time).total_seconds() // 60
+    
+    if elapsed < rift_info.get("time", 0) - 1:
+        msg = f"正在探索中，还需 {int(rift_info['time'] - elapsed)} 分钟。"
+        logger.warning(f"Rift settle failed: user_id={player_id}, reason={msg}")
+        return _err(msg)
+        
+    # 结算逻辑
+    game_sql.do_work(player_id, 0)
+    rift_rank = rift_info["rank"]
+    user_info = game_sql.get_user_info_with_id(player_id)
+    
+    story_type = get_story_type()
+    result_msg = "秘境探索结束。"
+    battle = None
+    
+    if story_type == "无事":
+        result_msg = random.choice(NONEMSG)
+    elif story_type == "战斗":
+        battle_type = get_battle_type()
+        if battle_type == "掉血事件":
+            result_msg = get_dxsj_info("掉血事件", user_info)
+        elif battle_type == "Boss战斗":
+            # 模拟 Boss 战
+            scarecrow = {
+                "name": f"秘境守卫({rift_info['name']})",
+                "气血": max(int(user_info.get('exp') or 100) * 1.5, 500),
+                "攻击": int(user_info.get('atk') or 100) * 0.8,
+                "真元": 0,
+                "会心": 10,
+                "jj": user_info.get('level'),
+            }
+            play_list, winner, _ = _run_async(Boss_fight(player_id, scarecrow, type_in=1, bot_id=0))
+            events = _normalize_battle_nodes(play_list, player_id, enemy_name=scarecrow['name'], is_boss=True)
+            battle = _build_battle_payload(f"秘境战斗：{scarecrow['name']}", winner, events, player_id, enemy_name=scarecrow['name'], is_boss=True)
+            result_msg = f"在秘境中遭遇了 {scarecrow['name']}！"
+    elif story_type == "宝物":
+        result_msg = get_treasure_info(user_info, rift_rank)
+        
+    return _ok(message=result_msg, battle=battle)
+
+
+@app.route('/game/api/rift')
+@game_login_required
+def game_api_rift():
+    player_id = _current_player_id()
+    user_cd = game_sql.get_user_cd(player_id)
+    in_rift = bool(user_cd and user_cd.get('type') == 3)
+    
+    name = "未知秘境"
+    remaining = 0
+    if in_rift:
+        try:
+            rift_info = read_rift_data(player_id)
+            name = rift_info.get('name', name)
+            create_time = _parse_datetime(user_cd['create_time'])
+            if create_time:
+                elapsed = (datetime.now() - create_time).total_seconds() // 60
+                remaining = max(int(rift_info.get('time', 0) - elapsed), 0)
+        except Exception:
+            pass
+            
+    return _ok(rift={
+        "in_rift": in_rift,
+        "name": name,
+        "remaining_minutes": remaining,
+        "message": "检测到秘境探索中，可以结算或在QQ侧使用【秘境结算】。" if in_rift else "当前不在秘境中，点击按钮开始探索。",
+    })
+
+
+@app.route('/game/api/alchemy')
+@game_login_required
+def game_api_alchemy():
+    player_id = _current_player_id()
+    # 先提供可视化所需基础信息，后续再接入完整炼丹流程
+    backpack = _build_backpack(player_id, limit=300)
+    yaocai = [x for x in backpack if x.get('type') in ('药材', '丹药', '炼丹炉', '合成丹药')][:50]
+    return _ok(alchemy={
+        "message": "炼丹网页流程开发中，当前可查看相关材料库存。",
+        "materials": yaocai,
+    })
+
+
+@app.route('/game/api/shop')
+@game_login_required
+def game_api_shop():
+    # 商城一期：先展示部分可售道具（只读）
+    sample_ids = [1999, 2500, 4001, 4002, 6001]
+    goods = []
+    for gid in sample_ids:
+        try:
+            item = items.get_data_by_item_id(gid)
+            if item:
+                goods.append({
+                    "id": gid,
+                    "name": item.get("name", f"物品{gid}"),
+                    "type": item.get("type", "未知"),
+                    "level": item.get("level", "凡品"),
+                    "desc": item.get("desc", "暂无描述"),
+                    "price": 1000,
+                })
+        except Exception:
+            continue
+    return _ok(shop={
+        "message": "商城购买流程开发中，当前展示商品清单。",
+        "goods": goods,
+    })
+
+
+@app.route('/game/api/work/status')
+@game_login_required
+def game_api_work_status():
+    player_id = _current_player_id()
+    status, work_data = _get_player_work_status(player_id)
+    return _ok(work=_serialize_work(status, work_data, player_id))
+
+
+@app.route('/game/api/work/refresh', methods=['POST'])
+@game_login_required
+def game_api_work_refresh():
+    player_id = _current_player_id()
+    force = bool((request.get_json(silent=True) or {}).get('force'))
+    is_type, msg = check_user_type(player_id, 0)
+    if not is_type:
+        return _err(msg or "当前状态无法刷新悬赏")
+
+    status, work_data = _get_player_work_status(player_id)
+    if status in (1, 2):
+        return _ok(work=_serialize_work(status, work_data, player_id), message="已有进行中或可结算的悬赏")
+    if status == 3 and not force:
+        return _ok(work=_serialize_work(status, work_data, player_id), need_confirm=True, message="已有未接取悬赏，确认后会覆盖当前悬赏令")
+
+    user = game_sql.get_user_info_with_id(player_id)
+    refresh_left = game_sql.get_work_num(player_id)
+    if refresh_left <= 0:
+        return _err("今日悬赏令刷新次数已用尽")
+    ok, msg = _consume_stamina(player_id, 1)
+    if not ok:
+        return _err(msg)
+    if force:
+        delete_work_file(player_id)
+    workhandle().do_work(0, level=user.get('level'), exp=user.get('exp'), user_id=player_id)
+    game_sql.update_work_num(player_id, refresh_left - 1)
+    status, work_data = _get_player_work_status(player_id)
+    return _ok(work=_serialize_work(status, work_data, player_id), message="悬赏令已刷新")
+
+
+@app.route('/game/api/work/accept', methods=['POST'])
+@game_login_required
+def game_api_work_accept():
+    player_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    try:
+        index = int(payload.get('index'))
+    except Exception:
+        return _err("请选择正确的悬赏编号")
+
+    is_type, msg = check_user_type(player_id, 0)
+    if not is_type:
+        return _err(msg or "当前状态无法接取悬赏")
+
+    status, work_data = _get_player_work_status(player_id)
+    if status != 3 or not work_data:
+        return _err("没有可接取的悬赏令")
+    tasks = list((work_data.get('tasks') or {}).items())
+    if index < 1 or index > len(tasks):
+        return _err("悬赏编号不存在")
+    ok, msg = _consume_stamina(player_id, 1)
+    if not ok:
+        return _err(msg)
+    task_name, _ = tasks[index - 1]
+    game_sql.do_work(player_id, 2, task_name)
+    work_data['status'] = 2
+    save_work_file(player_id, work_data)
+    status, work_data = _get_player_work_status(player_id)
+    return _ok(work=_serialize_work(status, work_data, player_id), message=f"已接取悬赏【{task_name}】")
+
+
+@app.route('/game/api/work/settle', methods=['POST'])
+@game_login_required
+def game_api_work_settle():
+    player_id = _current_player_id()
+    is_type, msg = check_user_type(player_id, 2)
+    if not is_type:
+        return _err(msg or "当前没有可结算悬赏")
+    status, work_data = _get_player_work_status(player_id)
+    if status == 1:
+        return _ok(work=_serialize_work(status, work_data, player_id), message="悬赏仍在进行中")
+    if status != 2 or not work_data:
+        return _err("没有可结算的悬赏令")
+    ok, msg = _consume_stamina(player_id, 1)
+    if not ok:
+        return _err(msg)
+    reward, error = _settle_work_for_web(player_id, work_data)
+    if error:
+        return _err(error)
+    status, work_data = _get_player_work_status(player_id)
+    return _ok(reward=reward, work=_serialize_work(status, work_data, player_id), profile=_build_player_profile(player_id))
+
+
+@app.route('/game/api/work/reset', methods=['POST'])
+@game_login_required
+def game_api_work_reset():
+    player_id = _current_player_id()
+    delete_work_file(player_id)
+    user_cd = game_sql.get_user_cd(player_id)
+    if user_cd and user_cd.get('type') == 2:
+        game_sql.do_work(player_id, 0)
+    status, work_data = _get_player_work_status(player_id)
+    return _ok(work=_serialize_work(status, work_data, player_id), message="悬赏令已重置")
+
+
+@app.route('/game/api/battle/scarecrow', methods=['POST'])
+@game_login_required
+def game_api_battle_scarecrow():
+    player_id = _current_player_id()
+    user = game_sql.get_user_info_with_id(player_id)
+    if not user:
+        return _err("角色不存在", 404)
+    if not user.get('hp'):
+        game_sql.update_user_hp(player_id)
+        user = game_sql.get_user_info_with_id(player_id)
+
+    scarecrow_hp = max(int(user.get('exp') or 100) * 2, 1000)
+    scarecrow = {
+        "name": "稻草人",
+        "气血": scarecrow_hp,
+        "攻击": 0,
+        "真元": 0,
+        "会心": 0,
+        "jj": user.get('level') or "江湖好手",
+        "is_scarecrow": True,
+    }
+    play_list, winner, _ = _run_async(Boss_fight(player_id, scarecrow, type_in=1, bot_id=0))
+    events = _normalize_battle_nodes(play_list, player_id, enemy_name="稻草人", is_boss=True)
+    return _ok(battle=_build_battle_payload("训练稻草人", winner, events, player_id, enemy_name="稻草人", is_boss=True))
+
+
+@app.route('/game/api/battle/boss/list')
+@game_login_required
+def game_api_battle_boss_list():
+    """获取可挑战的世界 Boss 列表"""
+    player_id = _current_player_id()
+    user = game_sql.get_user_info_with_id(player_id)
+    if not user: return _err("角色不存在")
+    
+    # 获取最高境界
+    level = user.get('level', '江湖好手')
+    
+    # 生成各境界 Boss
+    bosses = create_all_bosses(level)
+    
+    # 转换为前端格式
+    boss_list = []
+    for b in bosses:
+        boss_list.append({
+            "name": b['name'],
+            "jj": b['jj'],
+            "hp": int(b['气血']),
+            "hp_display": _display_number(b['气血']),
+            "atk": int(b['攻击']),
+            "atk_display": _display_number(b['攻击']),
+            "stone": b.get('max_stone', 0),
+            "stone_display": _display_number(b.get('max_stone', 0)),
+            "img": f"/assets/boss/{b['name']}"
+        })
+    
+    # 按境界排序（假设境界列表是有序的，create_all_bosses 应该已经处理好）
+    return _ok(bosses=boss_list)
+
+
+@app.route('/game/api/battle/boss/challenge', methods=['POST'])
+@game_login_required
+def game_api_battle_boss_challenge():
+    """挑战指定的世界 Boss"""
+    player_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    boss_name = payload.get('name')
+    boss_jj = payload.get('jj')
+    
+    if not boss_name or not boss_jj:
+        return _err("参数错误，请选择要挑战的 Boss")
+        
+    # 消耗体力
+    boss_config = get_boss_config()
+    stamina_cost = boss_config.get("讨伐世界Boss体力消耗", 10)
+    ok, msg = _consume_stamina(player_id, stamina_cost)
+    if not ok: return _err(msg)
+    
+    # 构造 Boss 数据
+    boss = createboss_jj(boss_jj, boss_name)
+    if not boss: return _err("Boss 构造失败")
+    
+    # 战斗
+    play_list, winner, _ = _run_async(Boss_fight(player_id, boss, type_in=1, bot_id=0))
+    events = _normalize_battle_nodes(play_list, player_id, enemy_name=boss_name, is_boss=True)
+    
+    # 结算奖励（如果是 MVP 预览，可以先只返回战斗结果，正式环境需要更新数据库）
+    reward_msg = ""
+    if winner == "群友赢了":
+        stone = boss.get('max_stone', 0)
+        game_sql.update_ls(player_id, stone, 1)
+        reward_msg = f" 获得灵石：{_display_number(stone)}"
+        
+    return _ok(
+        battle=_build_battle_payload(f"挑战世界Boss：{boss_name}", winner, events, player_id, enemy_name=boss_name, is_boss=True),
+        message=f"战斗结束！{reward_msg}"
+    )
+
+
+@app.route('/game/api/battle/player', methods=['POST'])
+@game_login_required
+def game_api_battle_player():
+    player_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    target = str(payload.get('target', '')).strip()
+    if not target:
+        return _err("请输入对手 QQ 号或道号")
+    target_user = get_user_by_id(target) if target.isdigit() else get_user_by_name(target)
+    if not target_user:
+        return _err("没有找到对手")
+    target_id = int(target_user['user_id'])
+    if target_id == player_id:
+        return _err("不能和自己切磋")
+    play_list, winner = Player_fight(player_id, target_id, 1, 0)
+    title = f"{(game_sql.get_user_info_with_id(player_id) or {}).get('user_name', player_id)} VS {target_user.get('user_name', target_id)}"
+    events = _normalize_battle_nodes(play_list, player_id)
+    return _ok(battle=_build_battle_payload(title, winner, events, player_id, enemy_name=target_user.get('user_name')))
+
+
+# =========================
+# 独立 SPA + API（骨架）
+# =========================
+api_v1 = Blueprint("xiuxian_api_v1", __name__, url_prefix="/api/v1")
+
+
+def api_session_required(view_func):
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        player_id = _current_player_id()
+        if not player_id:
+            return jsonify({"success": False, "error": "未登录", "code": 40101}), 401
+        return view_func(*args, **kwargs)
+    return wrapper
+
+
+@api_v1.get("/health")
+def api_v1_health():
+    return jsonify({
+        "success": True,
+        "service": "nonebot_plugin_xiuxian_2",
+        "api_version": "v1",
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
+
+@api_v1.get("/auth/session")
+def api_v1_auth_session():
+    player_id = _current_player_id()
+    if not player_id:
+        return jsonify({"success": True, "logged_in": False, "player_id": None})
+    return jsonify({"success": True, "logged_in": True, "player_id": player_id})
+
+
+@api_v1.get("/player/profile")
+@api_session_required
+def api_v1_player_profile():
+    player_id = _current_player_id()
+    profile = _build_player_profile(player_id)
+    if not profile:
+        return jsonify({"success": False, "error": "角色不存在", "code": 40401}), 404
+    return jsonify({"success": True, "profile": profile})
+
+
+@api_v1.get("/rankings")
+def api_v1_rankings():
+    return jsonify({"success": True, "rankings": _build_rankings()})
+
+
+@app.route('/spa')
+@app.route('/spa/<path:_path>')
+def game_spa_entry(_path=None):
+    """SPA 入口路由（history fallback）。"""
+    return render_template('spa_index.html')
+
+
+app.register_blueprint(api_v1)
 
 @app.route('/')
 def home():
