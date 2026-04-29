@@ -1,0 +1,19 @@
+services:
+  himaribot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: himaribot:dev
+    container_name: himaribot-dev
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8181
+      DRIVER: "~fastapi+~httpx"
+    ports:
+      - "8181:8181"
+      - "5888:5888"
+    volumes:
+      - .:/app
+    command: ["python", "bot.py"]
