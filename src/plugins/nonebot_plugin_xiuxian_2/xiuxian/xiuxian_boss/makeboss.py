@@ -92,37 +92,50 @@ def createboss_jj(boss_jj, boss_name=None):
 def create_all_bosses(max_jj: str = None) -> list:
     """
     生成所有可生成境界的 BOSS（每个境界一个）
-    
-    Args:
-        max_jj (str, optional): 最高可生成的境界（如 "祭道境"）。如果为 None，则自动计算当前最高境界。
-    
-    Returns:
-        list: 生成的 BOSS 列表，每个境界一个 BOSS
     """
     
     # 如果没有指定最高境界，则根据当前最高玩家境界计算
     if max_jj is None:
-        top_user_info = sql_message.get_realm_top1_user()
-        top_user_level = top_user_info['level']
-        
-        if len(top_user_level) == 5:
-            max_jj = top_user_level[:3]  # 例如 "祭道境"
-        elif len(top_user_level) == 4:   # 江湖好手
-            max_jj = "感气境"
-        elif len(top_user_level) == 2:   # 至高
-            max_jj = "永恒境"
+        try:
+            top_user_info = sql_message.get_realm_top1_user()
+            if top_user_info:
+                top_user_level = top_user_info.get('level', "感气境")
+                if len(top_user_level) == 5:
+                    max_jj = top_user_level[:3] 
+                elif len(top_user_level) == 4:
+                    max_jj = "感气境"
+                elif len(top_user_level) == 2:
+                    max_jj = "永恒境"
+                else:
+                    max_jj = top_user_level
+            else:
+                max_jj = "筑基境" # 默认保底
+        except Exception:
+            max_jj = "筑基境"
     
     # 获取所有不超过 max_jj 的境界
-    all_jj = [
-        jj for jj in jinjie_list
-        if jinjie_list.index(jj) <= jinjie_list.index(max_jj)
-    ]
+    try:
+        max_idx = jinjie_list.index(max_jj)
+    except ValueError:
+        max_idx = 0
+        for i, jj in enumerate(jinjie_list):
+            if jj in max_jj or max_jj in jj:
+                max_idx = i
+                break
+                
+    all_jj = jinjie_list[:max_idx + 1]
     
     # 生成每个境界的 BOSS
     bosses = []
-    for jj in all_jj:
-        boss = createboss_jj(jj)
-        if boss:
-            bosses.append(boss)
+    # 限制返回境界数量，返回最高境界及以下 5 个境界
+    display_jj = all_jj[-5:] if len(all_jj) > 5 else all_jj
     
-    return bosses
+    for jj in display_jj:
+        # 每个境界生成 2 个不同的 Boss 名字
+        names = random.sample(config["Boss名字"], 2)
+        for name in names:
+            boss = createboss_jj(jj, boss_name=name)
+            if boss:
+                bosses.append(boss)
+    
+    return bosses[::-1] # 降序排列，强的在前

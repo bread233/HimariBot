@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>修仙模拟器 · 仙途绘卷</title>
+    <style>
+        :root {
+            --bg0: #120916;
+            --bg1: #22132f;
+            --panel: rgba(26, 18, 38, 0.86);
+            --panel2: rgba(58, 36, 70, 0.72);
+            --gold: #f7d37a;
+            --gold2: #b87a2b;
+            --red: #f15f79;
+            --blue: #69c7ff;
+            --green: #86f7b2;
+            --purple: #b387ff;
+            --text: #fff4dc;
+            --muted: #c8afcf;
+            --line: rgba(247, 211, 122, 0.32);
+            --shadow: 0 18px 50px rgba(0, 0, 0, 0.42);
+        }
+
+        * { box-sizing: border-box; }
+        html, body { min-height: 100%; }
+        body {
+            margin: 0;
+            color: var(--text);
+            font-family: "Microsoft YaHei", "Hiragino Sans GB", system-ui, sans-serif;
+            background: 
+                linear-gradient(rgba(18, 9, 22, 0.88), rgba(18, 9, 22, 0.88)),
+                url('/assets/bg') center/cover no-repeat fixed;
+            background-color: #120916;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.026) 1px, transparent 1px);
+            background-size: 44px 44px;
+            mask-image: linear-gradient(to bottom, rgba(0,0,0,0.85), transparent 90%);
+        }
+
+        .login-shell {
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+        }
+
+        .login-card {
+            width: min(920px, 100%);
+            min-height: 520px;
+            display: grid;
+            grid-template-columns: 1.15fr 0.85fr;
+            border: 1px solid var(--line);
+            border-radius: 26px;
+            overflow: hidden;
+            background: linear-gradient(135deg, rgba(49, 28, 69, .92), rgba(22, 14, 33, .94));
+            box-shadow: var(--shadow);
+        }
+
+        .login-art {
+            position: relative;
+            padding: 48px;
+            background:
+                radial-gradient(circle at 68% 42%, rgba(255, 205, 111, .24), transparent 28%),
+                linear-gradient(135deg, rgba(156, 76, 184, .24), rgba(255, 255, 255, .02));
+        }
+
+        .login-art h1, .brand-title {
+            margin: 0;
+            font-size: clamp(34px, 5vw, 60px);
+            letter-spacing: .12em;
+            text-shadow: 0 0 24px rgba(247, 211, 122, .45);
+        }
+
+        .login-art p { color: var(--muted); line-height: 1.8; max-width: 480px; }
+        .hero-rune {
+            position: absolute;
+            right: 54px;
+            bottom: 42px;
+            width: 230px;
+            height: 230px;
+            border-radius: 50%;
+            border: 2px solid rgba(247, 211, 122, .45);
+            box-shadow: inset 0 0 45px rgba(247, 211, 122, .18), 0 0 80px rgba(179, 96, 255, .2);
+            animation: spin 18s linear infinite;
+        }
+        .hero-rune::before, .hero-rune::after {
+            content: "";
+            position: absolute;
+            inset: 28px;
+            border: 1px dashed rgba(247, 211, 122, .6);
+            border-radius: 50%;
+        }
+        .hero-rune::after { inset: 76px; border-style: solid; }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .login-form {
+            padding: 48px 42px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 18px;
+            background: rgba(10, 5, 15, .32);
+        }
+        .login-form h2 { margin: 0 0 8px; font-size: 28px; }
+        .hint { color: var(--muted); font-size: 14px; }
+        .error-box {
+            padding: 12px 14px;
+            border: 1px solid rgba(241, 95, 121, .5);
+            color: #ffd4dd;
+            border-radius: 12px;
+            background: rgba(241, 95, 121, .13);
+        }
+
+        input, button {
+            font: inherit;
+        }
+        .input {
+            width: 100%;
+            padding: 14px 16px;
+            border-radius: 14px;
+            border: 1px solid rgba(247, 211, 122, .32);
+            color: var(--text);
+            background: rgba(255, 255, 255, .07);
+            outline: none;
+        }
+        .input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(247, 211, 122, .12); }
+
+        .btn {
+            border: 0;
+            cursor: pointer;
+            color: #2b1500;
+            font-weight: 800;
+            border-radius: 14px;
+            padding: 12px 18px;
+            background: linear-gradient(180deg, #ffe8a8, #e1a33a 58%, #a96920);
+            box-shadow: 0 8px 20px rgba(184, 122, 43, .28), inset 0 1px rgba(255,255,255,.55);
+            transition: transform .16s ease, filter .16s ease;
+        }
+        .btn:hover { transform: translateY(-1px); filter: brightness(1.08); }
+        .btn:active { transform: translateY(1px); }
+        .btn.secondary {
+            color: var(--text);
+            background: linear-gradient(180deg, rgba(133, 91, 168, .94), rgba(73, 42, 101, .98));
+        }
+        .btn.ghost {
+            color: var(--gold);
+            background: rgba(255,255,255,.06);
+            border: 1px solid var(--line);
+            box-shadow: none;
+        }
+        .btn.danger { color: #fff; background: linear-gradient(180deg, #ff8598, #b33a52); }
+        .btn:disabled { opacity: .55; cursor: not-allowed; transform: none; filter: grayscale(.25); }
+
+        .app-shell {
+            width: min(1500px, calc(100% - 32px));
+            margin: 16px auto 36px;
+        }
+        .topbar {
+            position: sticky;
+            top: 12px;
+            z-index: 20;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 16px;
+            align-items: center;
+            padding: 14px 18px;
+            border: 1px solid var(--line);
+            border-radius: 20px;
+            background: rgba(18, 10, 26, .78);
+            backdrop-filter: blur(14px);
+            box-shadow: var(--shadow);
+        }
+        .brand-title { font-size: 24px; letter-spacing: .18em; }
+        .resource-strip { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+        .resource {
+            min-width: 118px;
+            padding: 8px 12px;
+            border: 1px solid rgba(247, 211, 122, .28);
+            border-radius: 999px;
+            background: linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.03));
+            color: var(--muted);
+            font-size: 13px;
+        }
+        .resource strong { display: block; color: var(--text); font-size: 15px; }
+
+        .layout {
+            display: grid;
+            grid-template-columns: 280px 1fr 360px;
+            gap: 16px;
+            margin-top: 16px;
+        }
+        .panel {
+            position: relative;
+            border: 2px solid var(--gold2);
+            border-radius: 22px;
+            background: var(--panel);
+            box-shadow: 0 0 20px rgba(184, 122, 43, 0.2), var(--shadow);
+            overflow: hidden;
+        }
+        .panel::after {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            border: 1px solid rgba(247, 211, 122, 0.15);
+            pointer-events: none;
+            border-radius: 20px;
+            margin: 3px;
+        }
+        .panel-title {
+            margin: 0 0 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            color: var(--gold);
+            letter-spacing: .08em;
+            border-bottom: 1px solid var(--line);
+            padding-bottom: 8px;
+            font-weight: 900;
+            text-shadow: 0 0 10px rgba(247, 211, 122, 0.3);
+        }
+
+        .portrait {
+            height: 430px;
+            border-radius: 18px;
+            border: 3px double var(--gold2);
+            background: 
+                radial-gradient(circle at 50% 25%, rgba(255, 226, 146, 0.2), transparent 40%),
+                var(--panel);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: inset 0 0 40px rgba(0,0,0,0.5);
+        }
+        .portrait img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            mask-image: linear-gradient(to bottom, black 85%, transparent);
+        }
+        .portrait::before {
+            display: none;
+        }
+        .portrait::after {
+            display: none;
+        }
+        .nameplate {
+            margin-top: 12px;
+            padding: 12px;
+            border-radius: 16px;
+            background: rgba(0,0,0,.22);
+            border: 1px solid rgba(247, 211, 122, .22);
+        }
+        .nameplate h2 { margin: 0; font-size: 24px; color: var(--gold); }
+        .nameplate p { margin: 6px 0 0; color: var(--muted); }
+
+        .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+        .tab-btn {
+            color: var(--muted);
+            background: rgba(255,255,255,.06);
+            border: 1px solid rgba(247,211,122,.22);
+            border-radius: 999px;
+            padding: 9px 14px;
+            cursor: pointer;
+        }
+        .tab-btn.active { color: #2b1500; background: linear-gradient(180deg, #ffe8a8, #d69430); font-weight: 800; }
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; animation: fadeIn .25s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+        .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        .stat-card, .item-card, .quest-card, .log-line {
+            border: 1px solid rgba(247,211,122,.20);
+            border-radius: 16px;
+            background: linear-gradient(180deg, rgba(255,255,255,.075), rgba(255,255,255,.025));
+            padding: 13px;
+        }
+        .stat-card span { color: var(--muted); font-size: 13px; }
+        .stat-card strong { display: block; margin-top: 4px; font-size: 20px; color: var(--text); }
+        .bar { height: 10px; border-radius: 999px; overflow: hidden; background: rgba(0,0,0,.34); border: 1px solid rgba(255,255,255,.08); }
+        .bar i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, var(--gold2), var(--gold)); transition: width .35s ease; }
+        .bar.hp i { background: linear-gradient(90deg, #982b45, var(--red)); }
+        .bar.mp i { background: linear-gradient(90deg, #2d75c4, var(--blue)); }
+        .bar.stamina i { background: linear-gradient(90deg, #2d9c5a, var(--green)); }
+
+        .equipment-list { display: grid; gap: 9px; margin-top: 14px; }
+        .equip-row { display: grid; grid-template-columns: 88px 1fr; gap: 8px; color: var(--muted); font-size: 14px; }
+        .equip-row strong { color: var(--text); font-weight: 700; }
+
+        .action-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+        .notice { color: var(--muted); line-height: 1.7; }
+        .quest-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+        .quest-card { min-height: 190px; display: flex; flex-direction: column; gap: 10px; }
+        .quest-card h4 { margin: 0; color: var(--gold); font-size: 18px; }
+        .quest-card p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+        .quest-card .btn { margin-top: auto; width: 100%; justify-content: center; }
+
+        .item-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+        .item-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; max-height: 520px; overflow: auto; padding-right: 4px; }
+        .item-card { min-height: 132px; }
+        .item-card h4 { margin: 0 0 8px; color: var(--gold); }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 3px 8px;
+            font-size: 12px;
+            color: var(--gold);
+            background: rgba(247,211,122,.10);
+            border: 1px solid rgba(247,211,122,.18);
+            margin: 2px 4px 2px 0;
+        }
+
+        .battle-stage {
+            min-height: 360px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            align-items: stretch;
+            border-radius: 18px;
+            border: 1px solid rgba(247,211,122,.22);
+            background:
+                radial-gradient(circle at center, rgba(247,211,122,.14), transparent 34%),
+                linear-gradient(180deg, rgba(43, 24, 57, .72), rgba(8, 5, 12, .72));
+            padding: 16px;
+            position: relative;
+            overflow: hidden;
+        }
+        .fighter {
+            display: grid;
+            place-items: center;
+            border-radius: 16px;
+            background: rgba(0,0,0,0.22);
+            border: 1px solid rgba(255,255,255,0.08);
+            position: relative;
+            overflow: hidden;
+            background-size: cover;
+            background-position: center;
+        }
+        .fighter img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            position: absolute;
+            inset: 0;
+            opacity: 0.9;
+            transition: transform 0.2s;
+        }
+        .fighter::before {
+            content: attr(data-label);
+            color: rgba(255,255,255,0.12);
+            font-size: 60px;
+            font-weight: 900;
+            position: relative;
+            z-index: 1;
+        }
+        .fighter.hit { animation: shake .35s ease; }
+        .fighter.cast { box-shadow: inset 0 0 70px rgba(247,211,122,.28); }
+        .fighter.heal { box-shadow: inset 0 0 90px rgba(134,247,178,.34); }
+        .fighter.aura { box-shadow: inset 0 0 90px rgba(179,135,255,.38); }
+        .fighter.wind { animation: dodge .42s ease; }
+        @keyframes shake {
+            0%,100% { transform: translateX(0); }
+            25% { transform: translateX(-8px); }
+            50% { transform: translateX(8px); }
+            75% { transform: translateX(-4px); }
+        }
+        @keyframes dodge {
+            0%,100% { transform: translateX(0) scale(1); opacity: 1; }
+            45% { transform: translateX(18px) scale(.96); opacity: .55; }
+        }
+        .battle-fx {
+            position: absolute;
+            left: 50%;
+            top: 42%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            font-size: 42px;
+            font-weight: 900;
+            color: var(--gold);
+            text-shadow: 0 0 24px rgba(247,211,122,.8);
+            animation: fxPop .72s ease forwards;
+            z-index: 3;
+        }
+        .battle-fx.heal { color: var(--green); text-shadow: 0 0 24px rgba(134,247,178,.8); }
+        .battle-fx.miss { color: var(--blue); text-shadow: 0 0 24px rgba(105,199,255,.8); }
+        .battle-fx.buff { color: var(--purple); text-shadow: 0 0 24px rgba(179,135,255,.8); }
+        @keyframes fxPop {
+            0% { opacity: 0; transform: translate(-50%, -30%) scale(.6); }
+            20% { opacity: 1; transform: translate(-50%, -50%) scale(1.18); }
+            100% { opacity: 0; transform: translate(-50%, -96%) scale(.92); }
+        }
+        .battle-controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+        .battle-progress { flex:1; min-width: 160px; height:10px; border-radius:999px; background:rgba(0,0,0,.32); overflow:hidden; border:1px solid rgba(247,211,122,.22); }
+        .battle-progress i { display:block; width:0%; height:100%; background:linear-gradient(90deg,var(--gold2),var(--gold)); transition:width .18s ease; }
+        .battle-caption {
+            position: absolute;
+            left: 24px;
+            right: 24px;
+            bottom: 22px;
+            min-height: 72px;
+            padding: 14px 16px;
+            border-radius: 16px;
+            background: rgba(5, 3, 8, .78);
+            border: 1px solid rgba(247,211,122,.30);
+            color: var(--text);
+            line-height: 1.6;
+        }
+        .battle-log { margin-top: 12px; display: grid; gap: 8px; max-height: 260px; overflow: auto; }
+        .log-line { color: var(--muted); font-size: 14px; }
+        .log-line.player { border-color: rgba(105,199,255,.32); }
+        .log-line.enemy { border-color: rgba(241,95,121,.35); }
+        .log-line.system { border-color: rgba(247,211,122,.35); color: var(--gold); }
+
+        .toast {
+            position: fixed;
+            right: 22px;
+            bottom: 22px;
+            z-index: 99;
+            max-width: 420px;
+            padding: 14px 16px;
+            border-radius: 14px;
+            border: 1px solid rgba(247,211,122,.3);
+            background: rgba(15, 8, 20, .92);
+            box-shadow: var(--shadow);
+            color: var(--text);
+            opacity: 0;
+            transform: translateY(16px);
+            transition: .25s ease;
+        }
+        .toast.show { opacity: 1; transform: translateY(0); }
+
+        @media (max-width: 1180px) {
+            .layout { grid-template-columns: 240px 1fr; }
+            .right-panel { grid-column: 1 / -1; }
+            .quest-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 760px) {
+            .login-card { grid-template-columns: 1fr; }
+            .login-art { min-height: 280px; }
+            .layout, .topbar { grid-template-columns: 1fr; }
+            .stat-grid { grid-template-columns: 1fr; }
+            .action-grid { grid-template-columns: 1fr; }
+            .portrait { height: 280px; }
+            .battle-stage { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+{% if not player %}
+    <main class="login-shell">
+        <section class="login-card">
+            <div class="login-art">
+                <h1>仙途绘卷</h1>
+                <p>将 QQ 文字修仙具象化为网页 UI：角色面板、悬赏令、背包、战斗回放。当前为 MVP 原型，后续可继续扩展成完整 DMM 风格页游。</p>
+                <div class="hero-rune"></div>
+            </div>
+            <form class="login-form" action="{{ url_for('game_login') }}" method="post">
+                <h2>进入洞府</h2>
+                <div class="hint">请先在 QQ 里发送【网页登录令】获取一次性 Token（5 分钟内有效，仅可用一次）。</div>
+                {% if error %}<div class="error-box">{{ error }}</div>{% endif %}
+                {% if token_error %}<div class="error-box">{{ token_error }}</div>{% endif %}
+                <input class="input" name="token" placeholder="一次性登录令 Token" autocomplete="off" autofocus>
+                <button class="btn" type="submit">开始游戏</button>
+                <a class="btn ghost" href="{{ url_for('login') }}" style="text-align:center;text-decoration:none;justify-content:center;">管理员入口</a>
+            </form>
+        </section>
+    </main>
+{% else %}
+    <div class="app-shell">
+        <header class="topbar">
+            <div>
+                <div class="brand-title">修仙模拟器 · 仙途绘卷</div>
+                <div class="hint">当前角色：{{ player.user_name or player.user_id }} · <a href="{{ url_for('game_logout') }}" style="color:var(--gold);">退出登录</a></div>
+            </div>
+            <div class="resource-strip">
+                <div class="resource">灵石<strong id="res-stone">--</strong></div>
+                <div class="resource">修为<strong id="res-exp">--</strong></div>
+                <div class="resource">战力<strong id="res-power">--</strong></div>
+                <div class="resource">体力<strong id="res-stamina">--</strong></div>
+            </div>
+        </header>
+
+        <main class="layout">
+            <aside class="panel">
+                <div class="panel-body">
+                    <div class="portrait"></div>
+                    <div class="nameplate">
+                        <h2 id="hero-name">加载中...</h2>
+                        <p id="hero-subtitle">境界 / 宗门</p>
+                    </div>
+                    <div style="margin-top:14px; display:grid; gap:10px;">
+                        <div><span class="hint">气血</span><div class="bar hp"><i id="bar-hp"></i></div></div>
+                        <div><span class="hint">真元</span><div class="bar mp"><i id="bar-mp"></i></div></div>
+                        <div><span class="hint">体力</span><div class="bar stamina"><i id="bar-stamina"></i></div></div>
+                    </div>
+                </div>
+            </aside>
+
+            <section class="panel">
+                <div class="panel-body">
+                    <div class="tabs">
+                        <button class="tab-btn active" data-tab="home">本殿</button>
+                        <button class="tab-btn" data-tab="work">悬赏令</button>
+                        <button class="tab-btn" data-tab="rift">秘境</button>
+                        <button class="tab-btn" data-tab="alchemy">炼丹</button>
+                        <button class="tab-btn" data-tab="sect">宗门</button>
+                        <button class="tab-btn" data-tab="backpack">背包</button>
+                        <button class="tab-btn" data-tab="battle">战斗</button>
+                    </div>
+
+                    <div id="tab-home" class="tab-pane active">
+                        <h3 class="panel-title">角色概览 <span class="badge" id="hero-level">--</span></h3>
+                        <div class="stat-grid">
+                            <div class="stat-card"><span>道号</span><strong id="stat-name">--</strong></div>
+                            <div class="stat-card"><span>境界</span><strong id="stat-level">--</strong></div>
+                            <div class="stat-card"><span>突破</span><strong id="stat-break">--</strong></div>
+                            <div class="stat-card"><span>灵根</span><strong id="stat-root">--</strong></div>
+                            <div class="stat-card"><span>宗门</span><strong id="stat-sect">--</strong></div>
+                            <div class="stat-card"><span>攻击</span><strong id="stat-atk">--</strong></div>
+                            <div class="stat-card"><span>修为排行</span><strong id="stat-exp-rank">--</strong></div>
+                            <div class="stat-card"><span>灵石排行</span><strong id="stat-stone-rank">--</strong></div>
+                            <div class="stat-card"><span>修炼等级</span><strong id="stat-practice">--</strong></div>
+                        </div>
+                    </div>
+
+                    <div id="tab-work" class="tab-pane">
+                        <h3 class="panel-title">悬赏令 <span class="badge" id="work-label">--</span></h3>
+                        <p class="notice" id="work-message">加载中...</p>
+                        <div class="action-grid" style="margin-bottom:14px;">
+                            <button class="btn" id="btn-work-refresh">刷新悬赏</button>
+                            <button class="btn secondary" id="btn-work-settle">结算悬赏</button>
+                            <button class="btn ghost" id="btn-work-status">查看状态</button>
+                            <button class="btn danger" id="btn-work-reset">重置悬赏</button>
+                        </div>
+                        <div class="quest-grid" id="quest-list"></div>
+                    </div>
+
+                    <div id="tab-rift" class="tab-pane">
+                        <h3 class="panel-title">秘境探索 <span class="badge" id="rift-status-badge">空闲</span></h3>
+                        <p class="notice" id="rift-message">加载中...</p>
+                        <div class="action-grid" style="margin-bottom:14px;">
+                            <button class="btn" id="btn-rift-explore">开始探索</button>
+                            <button class="btn secondary" id="btn-rift-settle" disabled>结算秘境</button>
+                        </div>
+                        <div class="card" id="rift-detail" style="display:none; padding:15px; border:1px solid var(--line); border-radius:15px;">
+                            <h4 id="rift-name" style="margin-top:0; color:var(--gold);">--</h4>
+                            <p class="hint">预计剩余时间：<span id="rift-time">--</span> 分钟</p>
+                        </div>
+                    </div>
+
+                    <div id="tab-alchemy" class="tab-pane">
+                        <h3 class="panel-title">炼丹房</h3>
+                        <p class="notice">炼丹功能正在接入，当前可查看药材储备。</p>
+                        <div class="item-list" id="alchemy-materials"></div>
+                    </div>
+
+                    <div id="tab-sect" class="tab-pane">
+                        <h3 class="panel-title">宗门信息 <span class="badge" id="sect-badge">--</span></h3>
+                        <div class="stat-grid" id="sect-info">
+                            <div class="card muted">正在加载宗门信息...</div>
+                        </div>
+                    </div>
+
+                    <div id="tab-backpack" class="tab-pane">
+                        <h3 class="panel-title">背包与装备 <span class="badge" id="backpack-count">0 件</span></h3>
+                        <div class="item-toolbar" id="item-filters"></div>
+                        <div class="item-list" id="item-list"></div>
+                    </div>
+
+                    <div id="tab-battle" class="tab-pane">
+                        <h3 class="panel-title">战斗剧场 <span class="badge" id="battle-title">训练 / 切磋</span></h3>
+                        <div class="action-grid" style="margin-bottom:14px;">
+                            <button class="btn" id="btn-scarecrow">挑战稻草人</button>
+                            <button class="btn secondary" id="btn-world-boss-list">世界 Boss</button>
+                            <div style="display:flex; gap:8px;">
+                                <input class="input" id="target-player" placeholder="对手QQ / 道号">
+                                <button class="btn secondary" id="btn-player-battle">切磋</button>
+                            </div>
+                        </div>
+                        
+                        <!-- World Boss List (Hidden by default) -->
+                        <div id="world-boss-panel" style="display:none; margin-bottom:16px; padding:16px; border:1px solid var(--line); border-radius:18px; background:rgba(0,0,0,0.2);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                                <h4 style="margin:0; color:var(--gold);">讨伐世界 Boss</h4>
+                                <div>
+                                    <button class="btn ghost" style="padding:4px 10px; font-size:12px;" onclick="loadWorldBosses()">刷新</button>
+                                    <button class="btn ghost" style="padding:4px 10px; font-size:12px;" onclick="$('world-boss-panel').style.display='none'">关闭</button>
+                                </div>
+                            </div>
+                            <div class="quest-grid" id="world-boss-list"></div>
+                        </div>
+
+                        <div class="battle-controls">
+                            <button class="btn ghost" id="btn-battle-toggle" disabled>暂停</button>
+                            <button class="btn ghost" id="btn-battle-skip" disabled>跳过</button>
+                            <span class="badge" id="battle-progress-text">0/0</span>
+                            <div class="battle-progress"><i id="battle-progress-bar"></i></div>
+                        </div>
+                        <div class="battle-stage">
+                            <div class="fighter" id="fighter-player" data-label="PLAYER"></div>
+                            <div class="fighter" id="fighter-enemy" data-label="ENEMY"></div>
+                            <div class="battle-caption" id="battle-caption">选择一场战斗开始播放。</div>
+                        </div>
+                        <div class="battle-log" id="battle-log"></div>
+                    </div>
+                </div>
+            </section>
+
+            <aside class="panel right-panel">
+                <div class="panel-body">
+                    <h3 class="panel-title">装备功法</h3>
+                    <div class="equipment-list" id="equipment-list"></div>
+                    <h3 class="panel-title" style="margin-top:22px;">快捷行动</h3>
+                    <div class="action-grid">
+                        <button class="btn ghost" data-jump="work">悬赏令</button>
+                        <button class="btn ghost" data-jump="backpack">查看背包</button>
+                        <button class="btn ghost" data-jump="battle">战斗剧场</button>
+                        <button class="btn ghost" id="btn-reload">刷新数据</button>
+                    </div>
+                    <p class="notice" style="margin-top:18px;">MVP 已接入角色、背包、悬赏令与战斗回放。后续可继续扩展宗门、秘境、炼丹、抽卡与商城。</p>
+                </div>
+            </aside>
+        </main>
+    </div>
+    <div class="toast" id="toast"></div>
+
+    <script>
+        const state = { profile: null, backpack: [], work: null, battleTimer: null, battle: null, battleIndex: 0, battlePaused: false };
+
+        function $(id){ return document.getElementById(id); }
+        function pct(value, max){ return Math.max(0, Math.min(100, max ? (value / max) * 100 : 0)); }
+        function toast(msg){
+            const el = $('toast');
+            el.textContent = msg;
+            el.classList.add('show');
+            clearTimeout(el._timer);
+            el._timer = setTimeout(()=>el.classList.remove('show'), 3200);
+        }
+
+        async function api(path, options={}){
+            const res = await fetch(path, {
+                credentials: 'same-origin',
+                headers: {'Content-Type': 'application/json', ...(options.headers || {})},
+                ...options
+            });
+            let data;
+            try {
+                data = await res.json();
+            } catch(e) {
+                data = {success: false, error: '服务器响应异常'};
+            }
+            if(!data.success){ 
+                const err = new Error(data.error || '请求失败');
+                err.status = res.status;
+                throw err;
+            }
+            return data;
+        }
+
+        function switchTab(name){
+            document.querySelectorAll('.tab-btn').forEach(btn=>btn.classList.toggle('active', btn.dataset.tab === name));
+            document.querySelectorAll('.tab-pane').forEach(pane=>pane.classList.remove('active'));
+            $('tab-' + name).classList.add('active');
+        }
+
+        function renderProfile(profile){
+            state.profile = profile;
+            $('hero-name').textContent = profile.name;
+            $('hero-subtitle').textContent = `${profile.level} · ${profile.sect}`;
+            $('hero-level').textContent = profile.level;
+            
+            // 更新卡图
+            const portrait = document.querySelector('.portrait');
+            portrait.innerHTML = profile.card_img ? `<img src="${profile.card_img}" alt="card">` : '';
+            
+            $('res-stone').textContent = profile.stone_display;
+            $('res-exp').textContent = profile.exp_display;
+            $('res-power').textContent = profile.power_display;
+            $('res-stamina').textContent = `${profile.stamina}/${profile.max_stamina}`;
+            $('bar-hp').style.width = pct(profile.hp, Math.max(profile.exp / 2, profile.hp || 1)) + '%';
+            $('bar-mp').style.width = pct(profile.mp, Math.max(profile.exp, profile.mp || 1)) + '%';
+            $('bar-stamina').style.width = pct(profile.stamina, profile.max_stamina) + '%';
+            $('stat-name').textContent = profile.name;
+            $('stat-level').textContent = profile.level;
+            $('stat-break').textContent = profile.breakthrough;
+            $('stat-root').textContent = `${profile.root_type}+${profile.root_rate}%`;
+            $('stat-sect').textContent = `${profile.sect} / ${profile.sect_position}`;
+            $('stat-atk').textContent = profile.atk_display;
+            $('stat-exp-rank').textContent = profile.exp_rank ? `第 ${profile.exp_rank} 位` : '--';
+            $('stat-stone-rank').textContent = profile.stone_rank ? `第 ${profile.stone_rank} 位` : '--';
+            $('stat-practice').textContent = `攻${profile.cultivation.atk} · 血${profile.cultivation.hp} · 海${profile.cultivation.mp}`;
+
+            const eq = profile.equipment;
+            $('equipment-list').innerHTML = [
+                ['主修', eq.main], ['辅修', eq.sub], ['神通', eq.skill], ['身法', eq.movement],
+                ['瞳术', eq.eyes], ['法器', eq.weapon], ['防具', eq.armor]
+            ].map(([k,v])=>`<div class="equip-row"><span>${k}</span><strong>${v}</strong></div>`).join('');
+        }
+
+        function renderWork(work){
+            state.work = work;
+            $('work-label').textContent = `${work.label} · 刷新 ${work.refresh_left ?? 0}`;
+            $('work-message').textContent = work.message;
+            const list = $('quest-list');
+            list.innerHTML = '';
+            $('btn-work-settle').disabled = work.status !== 'settle';
+            if(work.status !== 'available'){
+                list.innerHTML = `<div class="quest-card"><h4>${work.label}</h4><p>${work.message}</p></div>`;
+                return;
+            }
+            list.innerHTML = work.tasks.map(task => `
+                <div class="quest-card">
+                    <h4>${task.index}. ${task.name}</h4>
+                    <p>成功率：<b>${task.rate}%</b></p>
+                    <p>报酬：${task.award_display} 修为</p>
+                    <p>耗时：${task.time} 分钟</p>
+                    <p>额外：${task.item ? `${task.item.level} · ${task.item.name}` : '无'}</p>
+                    <button class="btn" data-accept="${task.index}">接取悬赏</button>
+                </div>
+            `).join('');
+            document.querySelectorAll('[data-accept]').forEach(btn => btn.addEventListener('click', () => acceptWork(btn.dataset.accept)));
+        }
+
+        function renderBackpack(items){
+            state.backpack = items;
+            $('backpack-count').textContent = `${items.length} 件`;
+            
+            // 顺便更新炼丹房的药材
+            const yaocai = items.filter(x => x.type === '药材');
+            $('alchemy-materials').innerHTML = yaocai.length ? yaocai.map(item => `
+                <div class="item-card">
+                    <h4>${item.name}</h4>
+                    <span class="badge">${item.level}</span>
+                    <p class="hint">库存：${item.count}</p>
+                </div>
+            `).join('') : '<p class="notice">暂无药材。</p>';
+
+            const types = ['全部', ...Array.from(new Set(items.map(x=>x.type || '未知'))).slice(0, 10)];
+            $('item-filters').innerHTML = types.map((t, i)=>`<button class="tab-btn ${i===0?'active':''}" data-filter="${t}">${t}</button>`).join('');
+            document.querySelectorAll('[data-filter]').forEach(btn=>btn.addEventListener('click', ()=>{
+                document.querySelectorAll('[data-filter]').forEach(b=>b.classList.remove('active'));
+                btn.classList.add('active');
+                renderItemList(btn.dataset.filter);
+            }));
+            renderItemList('全部');
+        }
+
+        function renderItemList(filter){
+            const source = filter === '全部' ? state.backpack : state.backpack.filter(x=>x.type === filter);
+            $('item-list').innerHTML = source.length ? source.map(item=>`
+                <div class="item-card">
+                    <h4>${item.name}</h4>
+                    <span class="badge">${item.level}</span><span class="badge">${item.type}</span>${item.equipped ? '<span class="badge">装备中</span>' : ''}
+                    <p class="hint">数量：${item.count}${item.bind_count ? ` / 绑定 ${item.bind_count}` : ''}</p>
+                    <p class="hint">${item.desc || '暂无描述'}</p>
+                </div>
+            `).join('') : '<p class="notice">暂无物品。</p>';
+        }
+
+        async function loadAll(){
+            try{
+                const [profile, work, backpack, rift, sect] = await Promise.all([
+                    api('/game/api/profile'),
+                    api('/game/api/work/status'),
+                    api('/game/api/backpack'),
+                    api('/game/api/rift'),
+                    api('/game/api/sect')
+                ]);
+                renderProfile(profile.profile);
+                renderWork(work.work);
+                renderBackpack(backpack.items);
+                renderRift(rift.rift);
+                renderSect(sect.sect);
+            }catch(err){ toast(err.message); }
+        }
+
+        function renderSect(sect){
+            const el = $('sect-info');
+            if(!sect.joined){
+                $('sect-badge').textContent = '散修';
+                el.innerHTML = `<div class="card muted" style="grid-column: 1/-1">${sect.message}</div>`;
+                return;
+            }
+            $('sect-badge').textContent = sect.sect_name;
+            el.innerHTML = `
+                <div class="stat-card"><span>宗门名称</span><strong>${sect.sect_name}</strong></div>
+                <div class="stat-card"><span>宗主</span><strong>${sect.owner}</strong></div>
+                <div class="stat-card"><span>职位</span><strong>${sect.position}</strong></div>
+                <div class="stat-card"><span>宗门等级</span><strong>${sect.level}</strong></div>
+                <div class="stat-card"><span>建设度</span><strong>${sect.materials}</strong></div>
+                <div class="stat-card"><span>宗门规模</span><strong>${sect.scale}</strong></div>
+                <div class="stat-card"><span>丹房等级</span><strong>${sect.elixir_room_level}</strong></div>
+                <div class="stat-card"><span>成员数量</span><strong>${sect.members}</strong></div>
+            `;
+        }
+
+        function renderRift(rift){
+            state.rift = rift;
+            $('rift-status-badge').textContent = rift.in_rift ? '探索中' : '空闲';
+            $('rift-message').textContent = rift.message;
+            $('btn-rift-explore').disabled = rift.in_rift;
+            $('btn-rift-settle').disabled = !rift.in_rift;
+            
+            if(rift.in_rift){
+                $('rift-detail').style.display = 'block';
+                $('rift-name').textContent = rift.name || '未知秘境';
+                $('rift-time').textContent = rift.remaining_minutes || '0';
+            } else {
+                $('rift-detail').style.display = 'none';
+            }
+        }
+
+        async function exploreRift(){
+            try{
+                const data = await api('/game/api/rift/explore', {method:'POST'});
+                renderRift(data.rift);
+                await loadProfileOnly();
+                toast(data.message);
+            }catch(err){ toast(err.message); }
+        }
+
+        async function settleRift(){
+            try{
+                const data = await api('/game/api/rift/settle', {method:'POST'});
+                if(data.battle) playBattle(data.battle);
+                toast(data.message);
+                await loadRiftOnly();
+                await loadProfileOnly();
+            }catch(err){ toast(err.message); }
+        }
+
+        async function loadRiftOnly(){
+            const data = await api('/game/api/rift');
+            renderRift(data.rift);
+        }
+
+        async function refreshWork(force=false){
+            try{
+                const data = await api('/game/api/work/refresh', {method:'POST', body: JSON.stringify({force})});
+                if(data.need_confirm && !force){
+                    if(confirm('已有未接取悬赏，是否覆盖刷新？')) return refreshWork(true);
+                }
+                renderWork(data.work);
+                await loadProfileOnly();
+                toast(data.message || '悬赏令已刷新');
+            }catch(err){ toast(err.message); }
+        }
+        async function acceptWork(index){
+            try{
+                const data = await api('/game/api/work/accept', {method:'POST', body: JSON.stringify({index})});
+                renderWork(data.work); await loadProfileOnly(); toast(data.message || '已接取悬赏');
+            }catch(err){ toast(err.message); }
+        }
+        async function settleWork(){
+            try{
+                const data = await api('/game/api/work/settle', {method:'POST', body:'{}'});
+                renderWork(data.work); renderProfile(data.profile); toast(`${data.reward.title}：获得 ${data.reward.gain_exp_display} 修为`);
+            }catch(err){ toast(err.message); }
+        }
+        async function resetWork(){
+            if(!confirm('确认重置当前悬赏令？')) return;
+            try{
+                const data = await api('/game/api/work/reset', {method:'POST', body:'{}'});
+                renderWork(data.work); toast(data.message || '已重置');
+            }catch(err){ toast(err.message); }
+        }
+        async function loadProfileOnly(){
+            const data = await api('/game/api/profile');
+            renderProfile(data.profile);
+        }
+        async function loadWorkOnly(){
+            const data = await api('/game/api/work/status'); renderWork(data.work);
+        }
+
+        async function startScarecrow(){
+            try{
+                const data = await api('/game/api/battle/scarecrow', {method:'POST', body:'{}'});
+                playBattle(data.battle);
+            }catch(err){ toast(err.message); }
+        }
+        async function loadWorldBosses(){
+            try {
+                const data = await api('/game/api/battle/boss/list');
+                const list = $('world-boss-list');
+                list.innerHTML = data.bosses.map(boss => `
+                    <div class="quest-card">
+                        <h4>${boss.name}</h4>
+                        <span class="badge">${boss.jj}</span>
+                        <p class="hint">气血: ${boss.hp_display}</p>
+                        <p class="hint">攻击: ${boss.atk_display}</p>
+                        <p class="hint">奖励: ${boss.stone_display} 灵石</p>
+                        <button class="btn" onclick="challengeWorldBoss('${boss.name}', '${boss.jj}')">挑战</button>
+                    </div>
+                `).join('');
+                $('world-boss-panel').style.display = 'block';
+            } catch(err) { toast(err.message); }
+        }
+        async function challengeWorldBoss(name, jj){
+            try {
+                const data = await api('/game/api/battle/boss/challenge', {
+                    method: 'POST',
+                    body: JSON.stringify({ name, jj })
+                });
+                $('world-boss-panel').style.display = 'none';
+                playBattle(data.battle);
+                if(data.message) toast(data.message);
+                await loadProfileOnly();
+            } catch(err) { toast(err.message); }
+        }
+        async function startPlayerBattle(){
+            const target = $('target-player').value.trim();
+            if(!target) return toast('请输入对手 QQ 号或道号');
+            try{
+                const data = await api('/game/api/battle/player', {method:'POST', body: JSON.stringify({target})});
+                playBattle(data.battle);
+            }catch(err){ toast(err.message); }
+        }
+        function playBattle(battle){
+            clearTimeout(state.battleTimer);
+            state.battle = battle;
+            state.battleIndex = 0;
+            state.battlePaused = false;
+            $('btn-battle-toggle').disabled = false;
+            $('btn-battle-skip').disabled = false;
+            $('btn-battle-toggle').textContent = '暂停';
+            $('battle-title').textContent = `${battle.title} · 胜者：${battle.winner} · ${battle.meta?.event_count || battle.events.length}幕`;
+            $('battle-log').innerHTML = '';
+            $('battle-caption').textContent = '战斗开始……';
+            
+            // 初始化图片并添加错误处理
+            if (battle.enemy_img) {
+                $('fighter-enemy').innerHTML = `<img src="${battle.enemy_img}" onerror="this.src='/assets/boss/default'" alt="enemy">`;
+            } else if (battle.enemy && battle.enemy.img) {
+                $('fighter-enemy').innerHTML = `<img src="${battle.enemy.img}" onerror="this.src='/assets/boss/default'" alt="enemy">`;
+            }
+            if (battle.player_img) {
+                $('fighter-player').innerHTML = `<img src="${battle.player_img}" onerror="this.src='/assets/card/default'" alt="player">`;
+            } else if (state.profile && state.profile.card_img) {
+                $('fighter-player').innerHTML = `<img src="${state.profile.card_img}" onerror="this.src='/assets/card/default'" alt="player">`;
+            }
+            
+            updateBattleProgress();
+            scheduleNextBattleEvent(500);
+        }
+        function scheduleNextBattleEvent(delay=850){
+            clearTimeout(state.battleTimer);
+            state.battleTimer = setTimeout(stepBattle, delay);
+        }
+        function stepBattle(){
+            const battle = state.battle;
+            if(!battle || state.battlePaused) return;
+            if(state.battleIndex >= battle.events.length){ finishBattle(); return; }
+            renderBattleEvent(battle.events[state.battleIndex++]);
+            updateBattleProgress();
+            scheduleNextBattleEvent(battle.events[state.battleIndex - 1]?.duration || 850);
+        }
+        function renderBattleEvent(ev){
+            const player = $('fighter-player'), enemy = $('fighter-enemy');
+            player.classList.remove('hit','cast','heal','aura','wind');
+            enemy.classList.remove('hit','cast','heal','aura','wind');
+            $('battle-caption').textContent = `${ev.speaker}：${ev.content}`;
+            
+            // 更新图片并添加错误处理
+            if (ev.speaker_img) {
+                const fighter = ev.side === 'player' ? player : (ev.side === 'enemy' ? enemy : null);
+                if (fighter) {
+                    if (!fighter.querySelector('img') || fighter.querySelector('img').src.indexOf(ev.speaker_img) === -1) {
+                        const fallback = ev.side === 'player' ? '/assets/card/default' : '/assets/boss/default';
+                        fighter.innerHTML = `<img src="${ev.speaker_img}" onerror="this.src='${fallback}'" alt="fighter">`;
+                    }
+                }
+            }
+            
+            const line = document.createElement('div');
+            line.className = `log-line ${ev.side}`;
+            line.textContent = `${String(ev.seq).padStart(2,'0')}｜${ev.speaker}：${ev.content}`;
+            $('battle-log').prepend(line);
+
+            const actor = ev.side === 'player' ? player : (ev.side === 'enemy' ? enemy : null);
+            const target = ev.target_side === 'player' ? player : (ev.target_side === 'enemy' ? enemy : actor);
+            if(actor && ev.type === 'attack') actor.classList.add('cast');
+            if(target){
+                const klass = ev.type === 'attack' ? 'hit' : (ev.type === 'heal' ? 'heal' : (ev.type === 'buff' ? 'aura' : (ev.type === 'miss' ? 'wind' : '')));
+                if(klass) target.classList.add(klass);
+            }
+            spawnBattleFx(ev);
+            setTimeout(()=>{ player.classList.remove('hit','cast','heal','aura','wind'); enemy.classList.remove('hit','cast','heal','aura','wind'); }, 520);
+        }
+        function spawnBattleFx(ev){
+            if(!['attack','heal','miss','buff'].includes(ev.type)) return;
+            const fx = document.createElement('div');
+            fx.className = `battle-fx ${ev.type}`;
+            fx.textContent = ev.type === 'miss' ? 'MISS' : (ev.type === 'heal' ? `+${ev.amount || ''}` : (ev.type === 'buff' ? 'BUFF' : `-${ev.amount || ''}`));
+            document.querySelector('.battle-stage').appendChild(fx);
+            setTimeout(()=>fx.remove(), 760);
+        }
+        function updateBattleProgress(){
+            const total = state.battle?.events?.length || 0;
+            $('battle-progress-text').textContent = `${state.battleIndex}/${total}`;
+            $('battle-progress-bar').style.width = `${total ? (state.battleIndex / total) * 100 : 0}%`;
+        }
+        function finishBattle(){
+            clearTimeout(state.battleTimer);
+            $('battle-caption').textContent = `战斗结束，胜者：${state.battle?.winner || '--'}`;
+            $('btn-battle-toggle').disabled = true;
+            $('btn-battle-skip').disabled = true;
+        }
+        function toggleBattlePause(){
+            if(!state.battle) return;
+            state.battlePaused = !state.battlePaused;
+            $('btn-battle-toggle').textContent = state.battlePaused ? '继续' : '暂停';
+            if(!state.battlePaused) scheduleNextBattleEvent(200);
+        }
+        function skipBattle(){
+            if(!state.battle) return;
+            while(state.battleIndex < state.battle.events.length){ renderBattleEvent(state.battle.events[state.battleIndex++]); }
+            updateBattleProgress();
+            finishBattle();
+        }
+
+        document.querySelectorAll('.tab-btn[data-tab]').forEach(btn=>btn.addEventListener('click', ()=>switchTab(btn.dataset.tab)));
+        document.querySelectorAll('[data-jump]').forEach(btn=>btn.addEventListener('click', ()=>switchTab(btn.dataset.jump)));
+        $('btn-reload').addEventListener('click', loadAll);
+        $('btn-work-refresh').addEventListener('click', ()=>refreshWork(false));
+        $('btn-work-settle').addEventListener('click', settleWork);
+        $('btn-work-status').addEventListener('click', loadWorkOnly);
+        $('btn-work-reset').addEventListener('click', resetWork);
+        $('btn-rift-explore').addEventListener('click', exploreRift);
+        $('btn-rift-settle').addEventListener('click', settleRift);
+        $('btn-scarecrow').addEventListener('click', startScarecrow);
+        $('btn-world-boss-list').addEventListener('click', loadWorldBosses);
+        $('btn-player-battle').addEventListener('click', startPlayerBattle);
+        $('btn-battle-toggle').addEventListener('click', toggleBattlePause);
+        $('btn-battle-skip').addEventListener('click', skipBattle);
+        loadAll();
+    </script>
+{% endif %}
+</body>
+</html>

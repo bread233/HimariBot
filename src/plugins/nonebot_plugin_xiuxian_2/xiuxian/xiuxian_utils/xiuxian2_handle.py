@@ -2096,11 +2096,11 @@ class XIUXIAN_IMPART_BUFF:
             if not self.database_path.exists():
                 self.database_path.mkdir(parents=True)
                 self.database_path /= "xiuxian_impart.db"
-                self.conn = sqlite3.connect(self.database_path)
+                self.conn = sqlite3.connect(self.database_path, check_same_thread=False)
                 # self._create_file()
             else:
                 self.database_path /= "xiuxian_impart.db"
-                self.conn = sqlite3.connect(self.database_path)
+                self.conn = sqlite3.connect(self.database_path, check_same_thread=False)
             logger.opt(colors=True).info(f"<green>xiuxian_impart数据库已连接!</green>")
             self._check_data()
 
