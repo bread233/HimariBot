@@ -12,7 +12,7 @@ from pathlib import Path
 from functools import wraps
 from nonebot.log import logger
 from datetime import datetime
-from nonebot import get_driver
+from nonebot import get_driver, get_bots
 from nonebot import on_command
 from nonebot.params import CommandArg
 from nonebot.adapters.onebot.v11 import Bot, Message, GroupMessageEvent, PrivateMessageEvent
@@ -21,8 +21,9 @@ from ..xiuxian_utils.item_json import Items
 from ..xiuxian_config import XiuConfig, Xiu_Plugin, convert_rank
 from ..xiuxian_utils.data_source import jsondata
 from ..xiuxian_utils.download_xiuxian_data import UpdateManager
-from ..xiuxian_utils.xiuxian2_handle import config_impart, XiuxianDateManage, UserBuffDate, OtherSet
-from ..xiuxian_utils.utils import number_to, check_user_type
+from ..xiuxian_utils.xiuxian2_handle import config_impart, XiuxianDateManage, UserBuffDate, OtherSet, convert_rank, XIUXIAN_IMPART_BUFF
+from ..xiuxian_utils.utils import number_to, check_user_type, update_statistics_value, log_message
+from ..xiuxian_buff.two_exp_cd import two_exp_cd
 from ..xiuxian_work.work_handle import workhandle
 from ..xiuxian_work.reward_data_source import (
     savef as save_work_file,
@@ -44,17 +45,29 @@ from ..xiuxian_boss.bossconfig import get_boss_config
 items = Items()
 game_sql = XiuxianDateManage()
 update_manager = UpdateManager()
+xiuxian_impart = XIUXIAN_IMPART_BUFF()
 app = Flask(__name__)
-app.secret_key = 'your_secret_key_here'  # 用于会话加密
 
 # 配置
 DATA_PATH = Path.cwd() / "data" / "xiuxian"
 DATABASE = DATA_PATH / "xiuxian.db"
 IMPART_DB = DATA_PATH / "xiuxian_impart.db"
 ASSETS_PATH = DATA_PATH
+PLAYERSDATA = DATA_PATH / "players"
 ADMIN_IDS = get_driver().config.superusers
 PORT = XiuConfig().web_port
 HOST = XiuConfig().web_host
+
+# 配置秘钥，确保重启后 Session 依然有效，如果需要强制所有用户重新登录，可以修改此处
+SECRET_KEY_FILE = DATA_PATH / "web_secret.key"
+if not SECRET_KEY_FILE.exists():
+    if not DATA_PATH.exists():
+        DATA_PATH.mkdir(parents=True, exist_ok=True)
+    with open(SECRET_KEY_FILE, "w") as f:
+        f.write(secrets.token_hex(32))
+
+with open(SECRET_KEY_FILE, "r") as f:
+    app.secret_key = f.read().strip()
 
 # =========================
 # 资源服务
@@ -478,16 +491,24 @@ def get_user_by_id(user_id):
 WORK_EXPIRE_MINUTES = 30
 TOKEN_EXPIRE_SECONDS = 300
 LOGIN_TOKEN_CACHE = {}  # token -> {user_id, expire_at, used}
+ADMIN_TOKEN_CACHE = {}  # token -> {admin_id, expire_at, used}
 
 # QQ 群内发送「/修仙登录」后，机器人会将一次性网页登录链接私聊给发起人。
 web_login_token_cmd = on_command("修仙登录", priority=5, block=True)
+# 管理员发送「/修仙后台登录」，生成后台登录链接
+admin_login_token_cmd = on_command("修仙后台登录", priority=5, block=True)
 
 
 def _clean_expired_tokens():
     now_ts = datetime.now().timestamp()
+    # 清理玩家 token
     expired = [tk for tk, info in LOGIN_TOKEN_CACHE.items() if info.get("expire_at", 0) < now_ts or info.get("used")]
     for tk in expired:
         LOGIN_TOKEN_CACHE.pop(tk, None)
+    # 清理管理员 token
+    expired_admin = [tk for tk, info in ADMIN_TOKEN_CACHE.items() if info.get("expire_at", 0) < now_ts or info.get("used")]
+    for tk in expired_admin:
+        ADMIN_TOKEN_CACHE.pop(tk, None)
 
 
 def _issue_login_token(user_id: int) -> str:
@@ -495,6 +516,17 @@ def _issue_login_token(user_id: int) -> str:
     token = secrets.token_urlsafe(18)
     LOGIN_TOKEN_CACHE[token] = {
         "user_id": int(user_id),
+        "expire_at": datetime.now().timestamp() + TOKEN_EXPIRE_SECONDS,
+        "used": False,
+    }
+    return token
+
+
+def _issue_admin_token(admin_id: str) -> str:
+    _clean_expired_tokens()
+    token = "adm_" + secrets.token_urlsafe(24)
+    ADMIN_TOKEN_CACHE[token] = {
+        "admin_id": str(admin_id),
         "expire_at": datetime.now().timestamp() + TOKEN_EXPIRE_SECONDS,
         "used": False,
     }
@@ -510,6 +542,17 @@ def _consume_login_token(token: str):
         return None, "登录令已使用"
     info["used"] = True
     return int(info["user_id"]), ""
+
+
+def _consume_admin_token(token: str):
+    _clean_expired_tokens()
+    info = ADMIN_TOKEN_CACHE.get(token)
+    if not info:
+        return None, "管理员登录令无效或已过期"
+    if info.get("used"):
+        return None, "管理员登录令已使用"
+    info["used"] = True
+    return str(info["admin_id"]), ""
 
 
 def get_local_ip():
@@ -537,7 +580,7 @@ async def _(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent, args: Mess
     # 自动识别外部访问地址
     display_host = "xiuxian.superbread.uk"
     
-    login_url = f"http://{display_host}/game?token={token}"
+    login_url = f"https://{display_host}/game?token={token}"
     
     msg = (
         "【网页一次性登录令】\n"
@@ -561,6 +604,34 @@ async def _(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent, args: Mess
             # 如果本身就是私聊但发送失败（罕见），则尝试在当前会话回复（虽然通常也是私聊）
             await handle_send(bot, event, msg)
     await web_login_token_cmd.finish()
+
+
+@admin_login_token_cmd.handle()
+async def _(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent):
+    user_id = str(event.get_user_id())
+    if user_id not in ADMIN_IDS:
+        await handle_send(bot, event, "权限不足，只有超级管理员可以使用此指令。")
+        await admin_login_token_cmd.finish()
+    
+    token = _issue_admin_token(user_id)
+    
+    display_host = "xiuxian.superbread.uk"
+    login_url = f"https://{display_host}/login?token={token}"
+    
+    msg = (
+        "【管理员后台快捷登录】\n"
+        f"有效期：{TOKEN_EXPIRE_SECONDS // 60} 分钟，仅可使用一次\n\n"
+        f"点击链接直接进入后台：\n{login_url}"
+    )
+    
+    try:
+        await bot.send_private_msg(user_id=int(user_id), message=msg)
+        if isinstance(event, GroupMessageEvent):
+            await handle_send(bot, event, "管理员登录链接已通过私聊发送。")
+    except Exception as e:
+        logger.error(f"发送管理员登录令失败: {e}")
+        await handle_send(bot, event, "私聊发送失败，请确保已添加机器人为好友。")
+    await admin_login_token_cmd.finish()
 
 
 def game_login_required(view_func):
@@ -922,6 +993,295 @@ def _run_async(coro):
         loop.close()
 
 
+def _load_player_user_data(user_id: int):
+    user_dir = PLAYERSDATA / str(user_id)
+    user_file = user_dir / "user_data.json"
+    if not user_file.exists():
+        return {}
+    try:
+        content = user_file.read_text(encoding="utf-8").strip()
+        if not content:
+            return {}
+        return json.loads(content)
+    except Exception:
+        return {}
+
+
+def _save_player_user_data(user_id: int, data: dict):
+    user_dir = PLAYERSDATA / str(user_id)
+    user_dir.mkdir(parents=True, exist_ok=True)
+    user_file = user_dir / "user_data.json"
+    user_file.write_text(json.dumps(data, ensure_ascii=False, indent=4), encoding="utf-8")
+
+
+def _get_dual_protect_status(user_id: int):
+    user_data = _load_player_user_data(user_id)
+    status = user_data.get("two_exp_protect", False)
+    if status in (False, True, "refusal", "friends_only"):
+        return status
+    return False
+
+
+def _get_friend_policy(user_id: int):
+    user_data = _load_player_user_data(user_id)
+    policy = user_data.get("friend_request_policy", "all")
+    return policy if policy in ("all", "refuse") else "all"
+
+
+def _get_relation(viewer_id: int, other_id: int):
+    if int(viewer_id) == int(other_id):
+        return "self"
+    viewer_data = _load_player_user_data(viewer_id)
+    friends = set(int(x) for x in (viewer_data.get("friends") or []) if str(x).isdigit())
+    if int(other_id) in friends:
+        return "friend"
+    incoming = viewer_data.get("friend_requests_in") or {}
+    outgoing = viewer_data.get("friend_requests_out") or {}
+    if str(other_id) in incoming:
+        return "incoming"
+    if str(other_id) in outgoing:
+        return "outgoing"
+    return "none"
+
+
+def _get_any_bot():
+    bots = list(get_bots().values())
+    return bots[0] if bots else None
+
+
+async def _send_private_msg(target_user_id: int, message: str):
+    bot = _get_any_bot()
+    if not bot:
+        return False
+    try:
+        await bot.send_private_msg(user_id=int(target_user_id), message=message)
+        return True
+    except Exception as e:
+        logger.error(f"发送私聊失败: {e}")
+        return False
+
+
+WEB_DUAL_INVITES = {}
+WEB_DUAL_EXPIRE_SECONDS = 600
+TWO_EXP_LIMIT = 3
+
+
+def _issue_web_dual_invite(inviter_id: int, target_id: int, count: int):
+    token = "dual_" + secrets.token_urlsafe(18)
+    WEB_DUAL_INVITES[token] = {
+        "inviter_id": int(inviter_id),
+        "target_id": int(target_id),
+        "count": int(count),
+        "expire_at": datetime.now().timestamp() + WEB_DUAL_EXPIRE_SECONDS,
+        "used": False,
+    }
+    return token
+
+
+def _consume_web_dual_invite(token: str):
+    info = WEB_DUAL_INVITES.get(token)
+    if not info:
+        return None, "邀请无效或已过期"
+    if info.get("used"):
+        return None, "邀请已处理"
+    if info.get("expire_at", 0) < datetime.now().timestamp():
+        return None, "邀请无效或已过期"
+    info["used"] = True
+    return info, ""
+
+
+def _ensure_social_fields(data: dict):
+    data = dict(data or {})
+    if not isinstance(data.get("friends"), list):
+        data["friends"] = []
+    if not isinstance(data.get("friend_requests_in"), dict):
+        data["friend_requests_in"] = {}
+    if not isinstance(data.get("friend_requests_out"), dict):
+        data["friend_requests_out"] = {}
+    policy = data.get("friend_request_policy", "all")
+    data["friend_request_policy"] = policy if policy in ("all", "refuse") else "all"
+    status = data.get("two_exp_protect", False)
+    data["two_exp_protect"] = status if status in (False, True, "refusal", "friends_only") else False
+    return data
+
+
+def _add_friend_pair(user_a: int, user_b: int):
+    a = _ensure_social_fields(_load_player_user_data(user_a))
+    b = _ensure_social_fields(_load_player_user_data(user_b))
+    a_friends = set(int(x) for x in a["friends"] if str(x).isdigit())
+    b_friends = set(int(x) for x in b["friends"] if str(x).isdigit())
+    a_friends.add(int(user_b))
+    b_friends.add(int(user_a))
+    a["friends"] = sorted(a_friends)
+    b["friends"] = sorted(b_friends)
+    a["friend_requests_in"].pop(str(user_b), None)
+    a["friend_requests_out"].pop(str(user_b), None)
+    b["friend_requests_in"].pop(str(user_a), None)
+    b["friend_requests_out"].pop(str(user_a), None)
+    _save_player_user_data(user_a, a)
+    _save_player_user_data(user_b, b)
+
+
+def _remove_friend_request(user_a: int, user_b: int):
+    a = _ensure_social_fields(_load_player_user_data(user_a))
+    b = _ensure_social_fields(_load_player_user_data(user_b))
+    a["friend_requests_in"].pop(str(user_b), None)
+    a["friend_requests_out"].pop(str(user_b), None)
+    b["friend_requests_in"].pop(str(user_a), None)
+    b["friend_requests_out"].pop(str(user_a), None)
+    _save_player_user_data(user_a, a)
+    _save_player_user_data(user_b, b)
+
+
+def _get_two_exp_remaining(user_id: int):
+    used = two_exp_cd.find_user(user_id)
+    impart_data = xiuxian_impart.get_user_impart_info_with_id(user_id)
+    impart_two_exp = impart_data.get("impart_two_exp", 0) if impart_data else 0
+    main_two_data = UserBuffDate(user_id).get_user_main_buff_data()
+    main_two = main_two_data.get("two_buff", 0) if main_two_data else 0
+    return max(0, TWO_EXP_LIMIT + int(impart_two_exp or 0) + int(main_two or 0) - int(used or 0))
+
+
+def _process_two_exp(user_id_1: int, user_id_2: int, is_partner: bool = False):
+    user_1 = game_sql.get_user_real_info(user_id_1)
+    user_2 = game_sql.get_user_real_info(user_id_2)
+    if not user_1 or not user_2:
+        return 0, 0, "无法获取玩家信息，无法进行双修。"
+
+    user_mes_1 = game_sql.get_user_info_with_id(user_id_1)
+    user_mes_2 = game_sql.get_user_info_with_id(user_id_2)
+    level_1 = user_mes_1["level"]
+    level_2 = user_mes_2["level"]
+
+    max_exp_1_limit = int(OtherSet().set_closing_type(level_1)) * XiuConfig().closing_exp_upper_limit
+    max_exp_2_limit = int(OtherSet().set_closing_type(level_2)) * XiuConfig().closing_exp_upper_limit
+
+    remaining_exp_1 = max_exp_1_limit - int(user_mes_1["exp"])
+    remaining_exp_2 = max_exp_2_limit - int(user_mes_2["exp"])
+
+    user_buff_data_1 = UserBuffDate(user_id_1)
+    user_buff_data_2 = UserBuffDate(user_id_2)
+    mainbuffdata_1 = user_buff_data_1.get_user_main_buff_data()
+    mainbuffdata_2 = user_buff_data_2.get_user_main_buff_data()
+
+    mainbuffratebuff_1 = mainbuffdata_1["ratebuff"] if mainbuffdata_1 else 0
+    mainbuffcloexp_1 = mainbuffdata_1["clo_exp"] if mainbuffdata_1 else 0
+    mainbuffratebuff_2 = mainbuffdata_2["ratebuff"] if mainbuffdata_2 else 0
+    mainbuffcloexp_2 = mainbuffdata_2["clo_exp"] if mainbuffdata_2 else 0
+
+    user_blessed_spot_data_1 = user_buff_data_1.BuffInfo["blessed_spot"] * 0.5 if user_buff_data_1.BuffInfo else 0
+    user_blessed_spot_data_2 = user_buff_data_2.BuffInfo["blessed_spot"] * 0.5 if user_buff_data_2.BuffInfo else 0
+
+    exp_base = int((int(user_mes_1["exp"]) + int(user_mes_2["exp"])) * 0.005)
+
+    exp_limit_1 = int(exp_base * (1 + mainbuffratebuff_1) * (1 + mainbuffcloexp_1) * (1 + user_blessed_spot_data_1))
+    exp_limit_2 = int(exp_base * (1 + mainbuffratebuff_2) * (1 + mainbuffcloexp_2) * (1 + user_blessed_spot_data_2))
+
+    user1_rank = convert_rank(user_mes_1["level"])[0]
+    user2_rank = convert_rank(user_mes_2["level"])[0]
+    max_exp_1 = int((int(user_mes_1["exp"]) * 0.001) * min(0.1 * user1_rank, 1))
+    max_exp_2 = int((int(user_mes_2["exp"]) * 0.001) * min(0.1 * user2_rank, 1))
+
+    max_two_exp = 100000000
+    exp_limit_1 = min(exp_limit_1, max_exp_1, remaining_exp_1) if max_exp_1 >= max_two_exp else min(exp_limit_1, remaining_exp_1, max_exp_1_limit * 0.1)
+    exp_limit_2 = min(exp_limit_2, max_exp_2, remaining_exp_2) if max_exp_2 >= max_two_exp else min(exp_limit_2, min(remaining_exp_2, max_exp_2_limit * 0.1))
+
+    if is_partner:
+        if remaining_exp_1 <= 0:
+            exp_limit_1 = 1
+        if remaining_exp_2 <= 0:
+            exp_limit_2 = 1
+        exp_limit_1 = int(exp_limit_1 * 1.2)
+        exp_limit_2 = int(exp_limit_2 * 1.2)
+    else:
+        if remaining_exp_1 <= 0 or remaining_exp_2 <= 0:
+            return 0, 0, "修为已达上限，无法继续双修。"
+
+    is_special = random.randint(1, 100) <= 6
+    if is_special:
+        special_events = [
+            "突然天降异象，七彩祥云笼罩两人，修为大增！",
+            "意外发现一处灵脉，两人共同吸收，修为精进！",
+            "功法意外产生共鸣，引发天地灵气倒灌！",
+            "两人心意相通，功法运转达到完美契合！",
+            "顿悟时刻来临，两人同时进入玄妙境界！",
+        ]
+        event_desc = random.choice(special_events) + "\n💫天降异象，双方各增加突破概率2%。"
+        exp_limit_1 = int(exp_limit_1 * 1.5)
+        exp_limit_2 = int(exp_limit_2 * 1.5)
+        game_sql.update_levelrate(user_id_1, int(user_mes_1["level_up_rate"]) + 2)
+        game_sql.update_levelrate(user_id_2, int(user_mes_2["level_up_rate"]) + 2)
+    else:
+        event_descriptions = [
+            f"月明星稀之夜，{user_1['user_name']}与{user_2['user_name']}在灵山之巅相对而坐，双手相抵，周身灵气环绕如雾。",
+            f"洞府之中，{user_1['user_name']}与{user_2['user_name']}盘膝对坐，真元交融，形成阴阳鱼图案在两人之间流转。",
+            f"瀑布之下，{user_1['user_name']}与{user_2['user_name']}沐浴灵泉，水汽蒸腾间功法共鸣，修为精进。",
+            f"竹林小筑内，{user_1['user_name']}与{user_2['user_name']}共饮灵茶，茶香氤氲中功法相互印证。",
+            f"云端之上，{user_1['user_name']}与{user_2['user_name']}脚踏飞剑，剑气交织间功法互补，修为大涨。",
+        ]
+        event_desc = random.choice(event_descriptions)
+
+    return int(exp_limit_1), int(exp_limit_2), event_desc
+
+
+def _perform_two_exp(user_id_1: int, user_id_2: int, exp_count: int = 1, is_partner: bool = False):
+    user_1 = game_sql.get_user_info_with_id(user_id_1)
+    user_2 = game_sql.get_user_info_with_id(user_id_2)
+    if not user_1 or not user_2:
+        return {"ok": False, "message": "无法获取玩家信息，无法进行双修。"}
+
+    rem_1 = _get_two_exp_remaining(user_id_1)
+    rem_2 = _get_two_exp_remaining(user_id_2)
+    if rem_1 <= 0:
+        return {"ok": False, "message": "你的双修次数不足，无法进行双修！"}
+    if rem_2 <= 0:
+        return {"ok": False, "message": "对方的双修次数不足，无法进行双修！"}
+
+    exp_count = max(int(exp_count or 1), 1)
+    actual_count = min(exp_count, rem_1, rem_2)
+    total_exp_1 = 0
+    total_exp_2 = 0
+    event_descriptions = []
+    used_count = 0
+
+    for _ in range(actual_count):
+        exp_1, exp_2, event_desc = _process_two_exp(user_id_1, user_id_2, is_partner=is_partner)
+        if exp_1 == 0 and exp_2 == 0:
+            break
+        total_exp_1 += exp_1
+        total_exp_2 += exp_2
+        event_descriptions.append(event_desc)
+        used_count += 1
+        two_exp_cd.add_user(user_id_1)
+        two_exp_cd.add_user(user_id_2)
+
+    user_1_info = game_sql.get_user_real_info(user_id_1)
+    user_2_info = game_sql.get_user_real_info(user_id_2)
+
+    if used_count == 0:
+        return {"ok": False, "message": "双修过程中修为已达上限，无法进行双修！"}
+
+    game_sql.update_exp(user_id_1, total_exp_1)
+    game_sql.update_power2(user_id_1)
+    _, result_hp_mp_1 = OtherSet().send_hp_mp(user_id_1, int(user_1_info["exp"] / 10), int(user_1_info["exp"] / 20))
+    game_sql.update_user_attribute(user_id_1, result_hp_mp_1[0], result_hp_mp_1[1], int(result_hp_mp_1[2] / 10))
+
+    game_sql.update_exp(user_id_2, total_exp_2)
+    game_sql.update_power2(user_id_2)
+    _, result_hp_mp_2 = OtherSet().send_hp_mp(user_id_2, int(user_2_info["exp"] / 10), int(user_2_info["exp"] / 20))
+    game_sql.update_user_attribute(user_id_2, result_hp_mp_2[0], result_hp_mp_2[1], int(result_hp_mp_2[2] / 10))
+
+    update_statistics_value(user_id_1, "双修次数", increment=used_count)
+    update_statistics_value(user_id_2, "双修次数", increment=used_count)
+    log_message(user_id_1, f"与{user_2_info['user_name']}进行双修，获得修为{number_to(total_exp_1)}，共{used_count}次")
+    log_message(user_id_2, f"与{user_1_info['user_name']}进行双修，获得修为{number_to(total_exp_2)}，共{used_count}次")
+
+    msg = f"{random.choice(event_descriptions)}\n\n"
+    msg += f"{user_1_info['user_name']}获得修为：{number_to(total_exp_1)}\n"
+    msg += f"{user_2_info['user_name']}获得修为：{number_to(total_exp_2)}"
+    return {"ok": True, "message": msg, "used_count": used_count, "exp_1": total_exp_1, "exp_2": total_exp_2}
+
+
 def _normalize_battle_nodes(nodes, player_id, enemy_name=None, is_boss=False):
     events = []
     player_card = None # 延迟获取
@@ -1125,6 +1485,396 @@ def game_api_backpack():
 @game_login_required
 def game_api_rankings():
     return _ok(rankings=_build_rankings())
+
+
+@app.route('/game/api/settings')
+@game_login_required
+def game_api_settings():
+    user_id = _current_player_id()
+    user = game_sql.get_user_info_with_id(user_id) or {}
+    user_data = _ensure_social_fields(_load_player_user_data(user_id))
+    return _ok(settings={
+        "user_id": int(user_id),
+        "user_name": user.get("user_name") or "",
+        "two_exp_protect": user_data.get("two_exp_protect", False),
+        "friend_request_policy": user_data.get("friend_request_policy", "all"),
+        "friends_count": len(user_data.get("friends") or []),
+        "requests_in_count": len((user_data.get("friend_requests_in") or {}).keys()),
+    })
+
+
+@app.route('/game/api/settings', methods=['POST'])
+@game_login_required
+def game_api_settings_update():
+    user_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+
+    new_name = (payload.get("user_name") or "").strip()
+    two_exp_protect = payload.get("two_exp_protect", None)
+    friend_policy = payload.get("friend_request_policy", None)
+
+    if new_name:
+        if len(new_name) > 12:
+            return _err("道号长度不能超过 12 个字符")
+        if re.search(r"[\s]", new_name):
+            return _err("道号不能包含空格")
+        msg = game_sql.update_user_name(user_id, new_name)
+        if msg and "已存在" in msg:
+            return _err(msg)
+
+    user_data = _ensure_social_fields(_load_player_user_data(user_id))
+    if two_exp_protect in (False, True, "refusal", "friends_only"):
+        user_data["two_exp_protect"] = two_exp_protect
+    if friend_policy in ("all", "refuse"):
+        user_data["friend_request_policy"] = friend_policy
+    _save_player_user_data(user_id, user_data)
+
+    return _ok(message="设置已保存", settings={
+        "user_name": (game_sql.get_user_info_with_id(user_id) or {}).get("user_name") or "",
+        "two_exp_protect": user_data.get("two_exp_protect", False),
+        "friend_request_policy": user_data.get("friend_request_policy", "all"),
+    })
+
+
+
+@app.route('/game/api/players')
+@game_login_required
+def game_api_players():
+    """获取玩家列表"""
+    viewer_id = _current_player_id()
+    page = int(request.args.get('page', 1))
+    limit = int(request.args.get('limit', 12))
+    search = (request.args.get('search', '')).strip()
+    
+    offset = (page - 1) * limit
+    
+    # 获取总数
+    count_sql = "SELECT COUNT(*) as total FROM user_xiuxian WHERE user_name IS NOT NULL"
+    params = []
+    if search:
+        count_sql += " AND user_name LIKE ?"
+        params.append(f"%{search}%")
+    
+    count_res = execute_sql(DATABASE, count_sql, tuple(params))
+    total = count_res[0]['total'] if count_res else 0
+    
+    # 获取玩家列表
+    sql = "SELECT user_id, user_name, level, stone, power, sect_id FROM user_xiuxian WHERE user_name IS NOT NULL"
+    if search:
+        sql += " AND user_name LIKE ?"
+    sql += f" ORDER BY power DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+    
+    rows = execute_sql(DATABASE, sql, tuple(params))
+    
+    players = []
+    for row in rows:
+        relation = _get_relation(viewer_id, int(row["user_id"]))
+        dual_protect = _get_dual_protect_status(int(row["user_id"]))
+        sect_name = "无"
+        if row.get('sect_id'):
+            sect_info = game_sql.get_sect_info(row['sect_id'])
+            if sect_info:
+                sect_name = sect_info['sect_name']
+        
+        # 确定卡图名称
+        cards = [c.stem for c in (ASSETS_PATH / "卡图").glob("*.webp")]
+        if not cards: cards = [c.stem for c in (ASSETS_PATH / "卡图").glob("*.png")]
+        card_name = cards[int(row['user_id']) % len(cards)] if cards else "default"
+
+        players.append({
+            "user_id": int(row['user_id']),
+            "name": row['user_name'],
+            "card_img": f"/assets/card/{card_name}",
+            "level": row['level'],
+            "stone": int(row['stone'] or 0),
+            "stone_display": _display_number(row['stone'] or 0),
+            "power": int(row['power'] or 0),
+            "power_display": _display_number(row['power'] or 0),
+            "sect_name": sect_name,
+            "relation": relation,
+            "dual_protect": dual_protect,
+        })
+    
+    return _ok(
+        players=players,
+        total=total,
+        page=page,
+        limit=limit
+    )
+
+
+@app.route('/game/api/social/friend/request', methods=['POST'])
+@game_login_required
+def game_api_friend_request():
+    user_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    target_id = payload.get("target_id")
+    if not target_id:
+        return _err("未指定目标道友")
+    target_id = int(target_id)
+    if target_id == int(user_id):
+        return _err("无法对自己操作")
+
+    target_user = game_sql.get_user_info_with_id(target_id)
+    if not target_user:
+        return _err("目标道友不存在")
+
+    policy = _get_friend_policy(target_id)
+    if policy == "refuse":
+        return _err("对方已关闭结识申请")
+
+    relation = _get_relation(user_id, target_id)
+    if relation == "friend":
+        return _err("你们已经是好友了")
+    if relation in ("outgoing", "incoming"):
+        return _err("已有待处理的结识申请")
+
+    user_data = _ensure_social_fields(_load_player_user_data(user_id))
+    target_data = _ensure_social_fields(_load_player_user_data(target_id))
+
+    ts = str(datetime.now().timestamp())
+    user_data["friend_requests_out"][str(target_id)] = ts
+    target_data["friend_requests_in"][str(user_id)] = ts
+    _save_player_user_data(user_id, user_data)
+    _save_player_user_data(target_id, target_data)
+
+    inviter_name = (game_sql.get_user_info_with_id(user_id) or {}).get("user_name") or str(user_id)
+    display_host = "xiuxian.superbread.uk"
+    login_token = _issue_login_token(target_id)
+    msg = (
+        "【结识申请】\n"
+        f"道友：{inviter_name} 想与你结识。\n\n"
+        "请打开网页进入【社交】页面处理该申请：\n"
+        f"https://{display_host}/game?token={login_token}\n"
+    )
+    _run_async(_send_private_msg(target_id, msg))
+    return _ok(message="已发送结识申请")
+
+
+@app.route('/game/api/social/friend/respond', methods=['POST'])
+@game_login_required
+def game_api_friend_respond():
+    user_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    from_id = payload.get("from_id")
+    accept = bool(payload.get("accept", False))
+    if not from_id:
+        return _err("未指定申请来源")
+    from_id = int(from_id)
+    if from_id == int(user_id):
+        return _err("参数错误")
+
+    user_data = _ensure_social_fields(_load_player_user_data(user_id))
+    if str(from_id) not in (user_data.get("friend_requests_in") or {}):
+        return _err("没有找到待处理的结识申请")
+
+    if accept:
+        _add_friend_pair(int(user_id), int(from_id))
+        accepter_name = (game_sql.get_user_info_with_id(user_id) or {}).get("user_name") or str(user_id)
+        display_host = "xiuxian.superbread.uk"
+        login_token = _issue_login_token(from_id)
+        msg = (
+            "【结识成功】\n"
+            f"道友：{accepter_name} 已同意与你结识。\n\n"
+            "打开网页即可在【社交】看到好友：\n"
+            f"https://{display_host}/game?token={login_token}\n"
+        )
+        _run_async(_send_private_msg(from_id, msg))
+        return _ok(message="已同意结识")
+
+    _remove_friend_request(int(user_id), int(from_id))
+    return _ok(message="已拒绝结识")
+
+
+@app.route('/game/api/social/friend/requests')
+@game_login_required
+def game_api_friend_requests():
+    user_id = _current_player_id()
+    user_data = _ensure_social_fields(_load_player_user_data(user_id))
+    incoming_ids = [int(k) for k in (user_data.get("friend_requests_in") or {}).keys() if str(k).isdigit()]
+    outgoing_ids = [int(k) for k in (user_data.get("friend_requests_out") or {}).keys() if str(k).isdigit()]
+
+    def pack(ids):
+        items = []
+        for uid in ids[:200]:
+            u = game_sql.get_user_info_with_id(uid)
+            if not u:
+                continue
+            items.append({
+                "user_id": int(uid),
+                "name": u.get("user_name") or str(uid),
+                "level": u.get("level") or "未知",
+            })
+        return items
+
+    return _ok(incoming=pack(incoming_ids), outgoing=pack(outgoing_ids))
+
+
+@app.route('/game/api/social/friends')
+@game_login_required
+def game_api_friends():
+    user_id = _current_player_id()
+    user_data = _ensure_social_fields(_load_player_user_data(user_id))
+    friends = [int(x) for x in (user_data.get("friends") or []) if str(x).isdigit()]
+    results = []
+    for fid in friends[:200]:
+        u = game_sql.get_user_info_with_id(fid)
+        if not u:
+            continue
+        results.append({
+            "user_id": int(fid),
+            "name": u.get("user_name") or str(fid),
+            "level": u.get("level") or "未知",
+            "power": int(u.get("power") or 0),
+            "power_display": _display_number(u.get("power") or 0),
+        })
+    return _ok(friends=results)
+
+
+@app.route('/game/api/social/dual/request', methods=['POST'])
+@game_login_required
+def game_api_dual_request():
+    user_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    target_id = payload.get("target_id")
+    exp_count = int(payload.get("count", 1) or 1)
+    if not target_id:
+        return _err("未指定目标道友")
+    target_id = int(target_id)
+    if target_id == int(user_id):
+        return _err("无法对自己操作")
+
+    target_user = game_sql.get_user_info_with_id(target_id)
+    if not target_user:
+        return _err("目标道友不存在")
+
+    protect = _get_dual_protect_status(target_id)
+    relation = _get_relation(user_id, target_id)
+    if protect == "refusal":
+        return _err("对方已设置拒绝所有双修")
+    if protect == "friends_only" and relation != "friend":
+        return _err("对方只接受好友双修邀请")
+
+    ok, msg = _consume_stamina(user_id, 10)
+    if not ok:
+        return _err(msg)
+
+    exp_count = max(1, min(exp_count, 5))
+
+    if protect is False:
+        result = _perform_two_exp(int(user_id), int(target_id), exp_count, is_partner=False)
+        if not result.get("ok"):
+            return _err(result.get("message") or "双修失败")
+        return _ok(message=result["message"], mode="direct")
+
+    token = _issue_web_dual_invite(int(user_id), int(target_id), exp_count)
+    inviter_name = (game_sql.get_user_info_with_id(user_id) or {}).get("user_name") or str(user_id)
+    display_host = "xiuxian.superbread.uk"
+    login_token = _issue_login_token(target_id)
+    link = f"https://{display_host}/game?token={login_token}&dual={token}"
+    msg = (
+        "【双修邀请】\n"
+        f"道友：{inviter_name} 邀请你双修 {exp_count} 次。\n"
+        f"邀请有效期：{WEB_DUAL_EXPIRE_SECONDS // 60} 分钟\n\n"
+        f"点击链接处理：\n{link}\n"
+    )
+    _run_async(_send_private_msg(target_id, msg))
+    return _ok(message="已发送双修邀请，等待对方回应", mode="invite")
+
+
+@app.route('/game/api/social/dual/respond', methods=['POST'])
+@game_login_required
+def game_api_dual_respond():
+    user_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    token = (payload.get("token") or "").strip()
+    accept = bool(payload.get("accept", False))
+    if not token:
+        return _err("缺少邀请令")
+
+    info, err = _consume_web_dual_invite(token)
+    if not info:
+        return _err(err)
+    if int(info.get("target_id")) != int(user_id):
+        return _err("该邀请不属于你")
+
+    inviter_id = int(info.get("inviter_id"))
+    exp_count = int(info.get("count") or 1)
+    inviter = game_sql.get_user_info_with_id(inviter_id)
+    if not inviter:
+        return _err("发起者不存在")
+
+    if not accept:
+        inviter_name = (game_sql.get_user_info_with_id(user_id) or {}).get("user_name") or str(user_id)
+        _run_async(_send_private_msg(inviter_id, f"【双修邀请】\n道友：{inviter_name} 拒绝了你的双修邀请。"))
+        return _ok(message="已拒绝双修")
+
+    result = _perform_two_exp(inviter_id, int(user_id), exp_count, is_partner=False)
+    if not result.get("ok"):
+        return _err(result.get("message") or "双修失败")
+
+    accepter_name = (game_sql.get_user_info_with_id(user_id) or {}).get("user_name") or str(user_id)
+    _run_async(_send_private_msg(inviter_id, f"【双修完成】\n道友：{accepter_name} 已同意双修。\n\n{result['message']}"))
+    return _ok(message=result["message"])
+
+
+@app.route('/game/api/social/action', methods=['POST'])
+@game_login_required
+def game_api_social_action():
+    """社交动作：切磋、双修、赠送"""
+    user_id = _current_player_id()
+    data = request.json
+    target_id = data.get('target_id')
+    action_type = data.get('action_type') # 'duel', 'gift_stone'
+    amount = int(data.get('amount', 0))
+    
+    if not target_id:
+        return _err("未指定目标道友")
+    
+    if int(user_id) == int(target_id):
+        return _err("道友无法对自己进行此操作")
+
+    user_info = game_sql.get_user_info_with_id(user_id)
+    target_info = game_sql.get_user_info_with_id(target_id)
+    
+    if not target_info:
+        return _err("目标道友不存在")
+
+    if action_type == 'duel':
+        # 切磋逻辑
+        ok, msg = _consume_stamina(user_id, 1)
+        if not ok:
+            return _err(msg)
+            
+        # 注意：Player_fight 是异步函数，需要通过 _run_async 执行
+        result, victor = _run_async(Player_fight(user_id, target_id, 1, "WebUI"))
+        
+        # 记录战绩
+        if victor == user_info['user_name']:
+            update_statistics_value(user_id, "切磋胜利")
+            update_statistics_value(target_id, "切磋失败")
+        elif victor == target_info['user_name']:
+            update_statistics_value(target_id, "切磋胜利")
+            update_statistics_value(user_id, "切磋失败")
+            
+        events = _normalize_battle_nodes(result, user_id, target_info['user_name'], is_boss=False)
+        battle_payload = _build_battle_payload(f"与 {target_info['user_name']} 的切磋", victor, events, user_id, target_info['user_name'], is_boss=False)
+        
+        return _ok(message=f"切磋结束！获胜者：{victor}", battle=battle_payload)
+        
+    elif action_type == 'gift_stone':
+        if amount <= 0:
+            return _err("赠送数量必须大于0")
+        if user_info['stone'] < amount:
+            return _err("灵石不足")
+            
+        game_sql.update_ls(user_id, amount, 2) # 扣除
+        game_sql.update_ls(target_id, amount, 1) # 增加
+        
+        return _ok(message=f"成功赠送 {amount} 灵石给 {target_info['user_name']}")
+
+    return _err("未知的社交动作")
 
 
 @app.route('/game/api/sect')
@@ -1413,6 +2163,326 @@ def game_api_work_reset():
     return _ok(work=_serialize_work(status, work_data, player_id), message="悬赏令已重置")
 
 
+# =========================
+# 闭关系统 API
+# =========================
+
+@app.route('/game/api/retreat/status')
+@game_login_required
+def game_api_retreat_status():
+    player_id = _current_player_id()
+    user_cd = game_sql.get_user_cd(player_id)
+    in_retreat = bool(user_cd and user_cd.get('type') == 1)
+    
+    if not in_retreat:
+        return _ok(retreat={"in_retreat": False})
+    
+    user_info = game_sql.get_user_info_with_id(player_id)
+    level = user_info['level']
+    
+    # 计算当前收益
+    now_time = datetime.now()
+    in_closing_time = _parse_datetime(user_cd['create_time'])
+    if not in_closing_time:
+        return _err("闭关数据异常")
+        
+    exp_time = int((now_time - in_closing_time).total_seconds() // 60)
+    
+    # 逻辑参考 xiuxian_buff
+    level_rate = game_sql.get_root_rate(user_info['root_type'], player_id)
+    realm_rate = jsondata.level_data()[level]["spend"]
+    user_buff_data = UserBuffDate(player_id)
+    user_blessed_spot_data = user_buff_data.BuffInfo['blessed_spot'] * 0.5
+    mainbuffdata = user_buff_data.get_user_main_buff_data()
+    
+    mainbuffratebuff = mainbuffdata['ratebuff'] if mainbuffdata else 0
+    mainbuffcloexp = mainbuffdata['clo_exp'] if mainbuffdata else 0
+    
+    # 计算效率
+    efficiency = (level_rate * realm_rate * (1 + mainbuffratebuff) * (1 + mainbuffcloexp) * (1 + user_blessed_spot_data))
+    exp_per_min = XiuConfig().closing_exp * efficiency
+    current_exp = int(exp_time * exp_per_min)
+    
+    # 上限检查
+    max_exp_limit = int(OtherSet().set_closing_type(level)) * XiuConfig().closing_exp_upper_limit
+    user_get_exp_max = max(0, int(max_exp_limit) - int(user_info['exp']))
+    
+    return _ok(retreat={
+        "in_retreat": True,
+        "start_time": user_cd['create_time'],
+        "elapsed_minutes": exp_time,
+        "exp_per_min": round(exp_per_min, 2),
+        "current_exp": current_exp,
+        "max_exp": user_get_exp_max,
+        "is_max": current_exp >= user_get_exp_max and user_get_exp_max > 0
+    })
+
+@app.route('/game/api/retreat/start', methods=['POST'])
+@game_login_required
+def game_api_retreat_start():
+    player_id = _current_player_id()
+    user_info = game_sql.get_user_info_with_id(player_id)
+    
+    if user_info['root_type'] == '伪灵根':
+        return _err("凡人无法闭关！")
+        
+    is_type, msg = check_user_type(player_id, 0)
+    if not is_type:
+        return _err(msg or "当前状态无法开始闭关")
+        
+    game_sql.in_closing(player_id, 1)
+    return _ok(message="已进入闭关状态，如需出关请点击结算。")
+
+@app.route('/game/api/retreat/stop', methods=['POST'])
+@game_login_required
+def game_api_retreat_stop():
+    player_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    use_stone = bool(payload.get('use_stone'))
+    
+    is_type, msg = check_user_type(player_id, 1)
+    if not is_type:
+        return _err(msg or "当前不在闭关状态")
+        
+    user_info = game_sql.get_user_info_with_id(player_id)
+    user_cd = game_sql.get_user_cd(player_id)
+    level = user_info['level']
+    use_exp = user_info['exp']
+    
+    now_time = datetime.now()
+    in_closing_time = _parse_datetime(user_cd['create_time'])
+    exp_time = int((now_time - in_closing_time).total_seconds() // 60)
+    
+    # 收益计算逻辑 (完全复刻 xiuxian_buff)
+    level_rate = game_sql.get_root_rate(user_info['root_type'], player_id)
+    realm_rate = jsondata.level_data()[level]["spend"]
+    user_buff_data = UserBuffDate(player_id)
+    user_blessed_spot_data = user_buff_data.BuffInfo['blessed_spot'] * 0.5
+    mainbuffdata = user_buff_data.get_user_main_buff_data()
+    mainbuffratebuff = mainbuffdata['ratebuff'] if mainbuffdata else 0
+    mainbuffcloexp = mainbuffdata['clo_exp'] if mainbuffdata else 0
+    
+    exp = int(
+        (exp_time * XiuConfig().closing_exp) * 
+        ((level_rate * realm_rate * (1 + mainbuffratebuff) * (1 + mainbuffcloexp) * (1 + user_blessed_spot_data)))
+    )
+    
+    max_exp_limit = int(OtherSet().set_closing_type(level)) * XiuConfig().closing_exp_upper_limit
+    user_get_exp_max = max(0, int(max_exp_limit) - int(use_exp))
+    
+    final_exp = exp
+    stone_consumed = 0
+    
+    if final_exp >= user_get_exp_max and user_get_exp_max > 0:
+        final_exp = user_get_exp_max
+        msg = f"闭关结束，本次闭关到达上限，共增加修为：{number_to(final_exp)}"
+    else:
+        if use_stone:
+            user_stone = user_info['stone']
+            if user_stone <= 0:
+                msg = f"灵石不足，无法加速。本次闭关增加修为：{number_to(final_exp)}"
+            elif final_exp <= user_stone:
+                stone_consumed = final_exp
+                final_exp = final_exp * 2
+                game_sql.update_ls(player_id, stone_consumed, 2)
+                msg = f"闭关结束，消耗 {number_to(stone_consumed)} 灵石加速，增加修为：{number_to(final_exp)}"
+            else:
+                stone_consumed = user_stone
+                final_exp = final_exp + stone_consumed
+                game_sql.update_ls(player_id, stone_consumed, 2)
+                msg = f"闭关结束，消耗全部 {number_to(stone_consumed)} 灵石加速，增加修为：{number_to(final_exp)}"
+        else:
+            msg = f"闭关结束，共增加修为：{number_to(final_exp)}"
+
+    # 更新数据
+    game_sql.in_closing(player_id, 0)
+    game_sql.update_exp(player_id, final_exp)
+    game_sql.update_power2(player_id)
+    
+    # 状态恢复
+    result_msg, result_hp_mp = OtherSet().send_hp_mp(player_id, int(use_exp / 10 * exp_time), int(use_exp / 20 * exp_time))
+    game_sql.update_user_attribute(player_id, result_hp_mp[0], result_hp_mp[1], int(result_hp_mp[2] / 10))
+    update_statistics_value(player_id, "闭关时长", increment=exp_time)
+    
+    return _ok(message=msg + result_msg[0] + result_msg[1], profile=_build_player_profile(player_id))
+
+
+# =========================
+# 突破系统 API
+# =========================
+
+@app.route('/game/api/breakthrough/status')
+@game_login_required
+def game_api_breakthrough_status():
+    player_id = _current_player_id()
+    user_info = game_sql.get_user_info_with_id(player_id)
+    if not user_info:
+        return _err("角色不存在")
+
+    level_name = user_info['level']
+    levels = convert_rank('江湖好手')[1]
+    now_index = levels.index(level_name)
+    
+    if now_index >= len(levels) - 1:
+        return _ok(can_breakthrough=False, reason="已达到最高境界")
+
+    next_level = levels[now_index + 1]
+    need_exp = game_sql.get_level_power(next_level)
+    user_exp = user_info['exp']
+    
+    # 检查是否需要渡劫
+    is_tribulation = level_name.endswith('圆满') and now_index >= levels.index(XiuConfig().tribulation_min_level)
+    
+    # 检查CD
+    cd_status = {"ready": True, "remaining_minutes": 0}
+    level_cd = user_info.get('level_up_cd')
+    if level_cd:
+        time_now = datetime.now()
+        cd_seconds = OtherSet().date_diff(time_now, level_cd)
+        limit_seconds = XiuConfig().level_up_cd * 60
+        if cd_seconds < limit_seconds:
+            cd_status = {
+                "ready": False,
+                "remaining_minutes": int((limit_seconds - cd_seconds) // 60) + 1
+            }
+
+    # 概率计算
+    base_rate = jsondata.level_rate_data().get(level_name, 0)
+    bonus_rate = int(user_info.get('level_up_rate') or 0)
+    main_rate_buff = UserBuffDate(player_id).get_user_main_buff_data()
+    buff_rate = main_rate_buff['number'] if main_rate_buff else 0
+    total_rate = base_rate + bonus_rate + buff_rate
+
+    # 检查丹药
+    pills = {
+        "dr": 0,   # 渡厄丹 1999
+        "drjd": 0  # 渡厄金丹 1998
+    }
+    user_backs = game_sql.get_back_msg(player_id) or []
+    for back in user_backs:
+        gid = int(back.get('goods_id') or 0)
+        if gid == 1999: pills["dr"] = back.get('goods_num') or 0
+        elif gid == 1998: pills["drjd"] = back.get('goods_num') or 0
+
+    return _ok(
+        current_level=level_name,
+        next_level=next_level,
+        user_exp=user_exp,
+        need_exp=need_exp,
+        is_tribulation=is_tribulation,
+        cd_status=cd_status,
+        rates={
+            "base": base_rate,
+            "bonus": bonus_rate,
+            "buff": buff_rate,
+            "total": min(total_rate, 100)
+        },
+        pills=pills,
+        can_breakthrough=(user_exp >= need_exp and cd_status["ready"] and not is_tribulation)
+    )
+
+
+@app.route('/game/api/breakthrough/perform', methods=['POST'])
+@game_login_required
+def game_api_breakthrough_perform():
+    player_id = _current_player_id()
+    data = request.json or {}
+    mode = data.get('mode', 'direct') # direct, dr, drjd
+    
+    user_info = game_sql.get_user_info_with_id(player_id)
+    if not user_info: return _err("角色不存在")
+    
+    # 基本检查
+    level_name = user_info['level']
+    levels = convert_rank('江湖好手')[1]
+    now_index = levels.index(level_name)
+    if now_index >= len(levels) - 1: return _err("已达到最高境界")
+    
+    next_level = levels[now_index + 1]
+    need_exp = game_sql.get_level_power(next_level)
+    user_exp = user_info['exp']
+    if user_exp < need_exp: return _err("修为不足")
+    
+    level_cd = user_info.get('level_up_cd')
+    if level_cd:
+        time_now = datetime.now()
+        cd_seconds = OtherSet().date_diff(time_now, level_cd)
+        if cd_seconds < XiuConfig().level_up_cd * 60:
+            return _err("突破冷却中")
+            
+    if level_name.endswith('圆满') and now_index >= levels.index(XiuConfig().tribulation_min_level):
+        return _err("当前境界需要渡劫，Web版暂不支持渡劫，请使用机器人指令")
+
+    # 检查丹药
+    if mode == 'dr':
+        back = execute_sql(DATABASE, "SELECT goods_num FROM back WHERE user_id=? AND goods_id=1999", (player_id,))
+        if not back or back[0].get('goods_num', 0) <= 0:
+            return _err("背包中没有渡厄丹")
+    elif mode == 'drjd':
+        back = execute_sql(DATABASE, "SELECT goods_num FROM back WHERE user_id=? AND goods_id=1998", (player_id,))
+        if not back or back[0].get('goods_num', 0) <= 0:
+            return _err("背包中没有渡厄金丹")
+
+    # 概率计算
+    base_rate = jsondata.level_rate_data().get(level_name, 0)
+    bonus_rate = int(user_info.get('level_up_rate') or 0)
+    main_buff = UserBuffDate(player_id).get_user_main_buff_data()
+    buff_rate = main_buff['number'] if main_buff else 0
+    total_rate = base_rate + bonus_rate + buff_rate
+    
+    # 随机结果
+    is_success = random.randint(0, 100) < total_rate
+    
+    if is_success:
+        # 成功逻辑
+        game_sql.updata_level(player_id, next_level)
+        game_sql.update_power2(player_id)
+        game_sql.updata_level_cd(player_id)
+        game_sql.update_levelrate(player_id, 0)
+        game_sql.update_user_hp(player_id)
+        update_statistics_value(player_id, "突破成功")
+        
+        gain_exp = 0
+        if mode == 'drjd':
+            gain_exp = int(user_exp * 0.1)
+            game_sql.update_exp(player_id, gain_exp)
+            game_sql.update_back_j(player_id, 1998, use_key=1)
+            msg = f"恭喜道友突破至 {next_level} 成功！使用了渡厄金丹，修为增加了一成！"
+        else:
+            msg = f"恭喜道友突破至 {next_level} 成功！"
+            
+        return _ok(success=True, message=msg, new_level=next_level, gain_exp=gain_exp)
+    else:
+        # 失败逻辑
+        game_sql.updata_level_cd(player_id)
+        update_rate = max(1, int(base_rate * XiuConfig().level_up_probability))
+        game_sql.update_levelrate(player_id, bonus_rate + update_rate)
+        update_statistics_value(player_id, "突破失败")
+        
+        lost_exp = 0
+        if mode == 'dr':
+            game_sql.update_back_j(player_id, 1999, use_key=1)
+            msg = f"突破失败！幸好有渡厄丹护持，未损修为。下次成功率增加 {update_rate}%。"
+        elif mode == 'drjd':
+            game_sql.update_back_j(player_id, 1998, use_key=1)
+            gain_exp = int(user_exp * 0.1)
+            game_sql.update_exp(player_id, gain_exp)
+            msg = f"突破失败！使用了渡厄金丹，修为增加了一成，下次成功率增加 {update_rate}%。"
+        else:
+            percentage = random.randint(XiuConfig().level_punishment_floor, XiuConfig().level_punishment_limit)
+            exp_buff = main_buff['exp_buff'] if main_buff else 0
+            lost_exp = int(user_exp * (percentage / 100) * (1 - exp_buff))
+            game_sql.update_j_exp(player_id, lost_exp)
+            
+            now_hp = max(1, (user_info.get('hp') or 100) - (lost_exp / 2))
+            now_mp = max(1, (user_info.get('mp') or 100) - lost_exp)
+            game_sql.update_user_hp_mp(player_id, now_hp, now_mp)
+            
+            msg = f"突破失败！境界受损，修为减少了 {number_to(lost_exp)}。下次成功率增加 {update_rate}%。"
+            
+        return _ok(success=False, message=msg, lost_exp=lost_exp, bonus_rate=update_rate)
+
+
 @app.route('/game/api/battle/scarecrow', methods=['POST'])
 @game_login_required
 def game_api_battle_scarecrow():
@@ -1525,7 +2595,7 @@ def game_api_battle_player():
     target_id = int(target_user['user_id'])
     if target_id == player_id:
         return _err("不能和自己切磋")
-    play_list, winner = Player_fight(player_id, target_id, 1, 0)
+    play_list, winner = _run_async(Player_fight(player_id, target_id, 1, 0))
     title = f"{(game_sql.get_user_info_with_id(player_id) or {}).get('user_name', player_id)} VS {target_user.get('user_name', target_id)}"
     events = _normalize_battle_nodes(play_list, player_id)
     return _ok(battle=_build_battle_payload(title, winner, events, player_id, enemy_name=target_user.get('user_name')))
@@ -1595,15 +2665,19 @@ def home():
         return redirect(url_for('login'))
     return render_template('home.html', admin_id=session['admin_id'])
 
-@app.route('/login', methods=['GET', 'POST'])
+@app.route('/login')
 def login():
-    if request.method == 'POST':
-        admin_id = request.form.get('admin_id')
-        if admin_id in ADMIN_IDS:
+    # 仅支持 URL 参数直接登录，不再支持表单提交
+    token_arg = request.args.get('token', '').strip()
+    if token_arg:
+        admin_id, err = _consume_admin_token(token_arg)
+        if admin_id:
             session['admin_id'] = admin_id
             return redirect(url_for('home'))
         else:
-            return render_template('login.html', error="无效的管理员ID")
+            return render_template('login.html', error=err or "登录令无效或已过期")
+    
+    # 直接访问 /login 时，显示引导信息
     return render_template('login.html')
 
 @app.route('/logout')
