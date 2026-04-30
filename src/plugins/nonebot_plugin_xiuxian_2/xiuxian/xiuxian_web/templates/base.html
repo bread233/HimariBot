@@ -572,6 +572,7 @@
             <div class="logo-text">修仙管理面板</div>
         </div>
         
+{% if session.admin_id %}
         <button class="menu-toggle" id="menuToggle">
             <i class="fas fa-bars"></i>
         </button>
@@ -586,6 +587,7 @@
         <li><a href="{{ url_for('logout') }}"><i class="fas fa-sign-out-alt"></i> <span>退出</span></a></li>
     </ul>
 </nav>
+{% endif %}
     </header>
     
     <div class="container">

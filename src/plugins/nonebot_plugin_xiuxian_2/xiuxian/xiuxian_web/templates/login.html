@@ -2,27 +2,31 @@
 
 {% block content %}
 
-<div class="card" style="max-width: 400px; margin: 50px auto;">
-
-<h2>管理员登录</h2>
-
-{% if error %}
-    <div class="error">{{ error }}</div>
-{% endif %}
-
-<form method="POST" action="{{ url_for('login') }}">
-    <div class="form-group">
-        <label for="admin_id">管理员ID</label>
-        <input type="text" id="admin_id" name="admin_id" required>
-    </div>
+<div class="card animate-in" style="max-width: 500px; margin: 80px auto; text-align: center; padding: 40px; background: rgba(255, 255, 255, 0.95);">
+    <h2 style="color: var(--accent-color); margin-bottom: 25px;">
+        <i class="fas fa-lock-open" style="margin-right: 10px;"></i>管理员后台
+    </h2>
     
-    <div class="form-actions">
-        <button type="submit" class="btn btn-primary">
-            <i class="fas fa-sign-in-alt"></i> 登录
-        </button>
-    </div>
-</form>
+    {% if error %}
+        <div style="background: rgba(244, 67, 54, 0.1); border-left: 4px solid var(--error-color); color: var(--error-color); padding: 15px; border-radius: 4px; margin-bottom: 25px; text-align: left;">
+            <i class="fas fa-exclamation-circle"></i> {{ error }}
+        </div>
+    {% endif %}
 
+    <div style="color: var(--text-color); line-height: 1.8; margin-bottom: 30px; font-size: 1.05rem;">
+        <p style="font-weight: 500; color: var(--light-text); margin-bottom: 15px;">出于安全考虑，后台已禁用页面手动登录。</p>
+        <div style="background: rgba(102, 179, 255, 0.05); border: 1px dashed var(--accent-color); padding: 20px; border-radius: 8px;">
+            <p style="margin-bottom: 10px;">请在 QQ 群内发送指令获取入口：</p>
+            <p><code style="background: var(--text-color); color: #fff; padding: 8px 15px; border-radius: 4px; font-size: 1.2rem; font-family: monospace;">/修仙后台登录</code></p>
+        </div>
+        <p style="margin-top: 15px; font-size: 0.95rem;">机器人将通过私聊发送一次性快捷登录链接。</p>
+    </div>
+
+    <div style="border-top: 1px solid var(--secondary-color); padding-top: 20px; margin-top: 20px;">
+        <p style="font-size: 0.85rem; color: var(--light-text);">
+            <i class="fas fa-shield-alt"></i> 权限提示：仅限超级管理员访问
+        </p>
+    </div>
 </div>
 
 {% endblock %}

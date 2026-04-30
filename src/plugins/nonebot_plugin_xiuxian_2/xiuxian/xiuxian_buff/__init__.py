@@ -526,6 +526,18 @@ async def two_exp_invite_(bot: Bot, event: GroupMessageEvent | PrivateMessageEve
         msg = "对方已设置拒绝所有双修邀请，无法进行双修！"
         await handle_send(bot, event, msg)
         await two_exp_invite.finish()
+    if protection_status == "friends_only":
+        friends = set()
+        for x in (user_data.get("friends") or []):
+            try:
+                friends.add(int(x))
+            except Exception:
+                continue
+        if int(user_id) not in friends:
+            msg = "对方只接受好友双修邀请，无法进行双修！"
+            await handle_send(bot, event, msg)
+            await two_exp_invite.finish()
+        protection_status = True
     if protection_status:
         # 对方开启保护，需要发送邀请
         # 检查邀请是否已存在（再次确认，防止并发）
@@ -888,18 +900,22 @@ async def two_exp_protect_(bot: Bot, event: GroupMessageEvent | PrivateMessageEv
     elif arg in ['拒绝', 'refusal']:
         user_data['two_exp_protect'] = "refusal"
         msg = "双修保护已设置为拒绝！其他玩家无法与你双修。"
+    elif arg in ['好友', '仅好友', 'friends', 'friends_only']:
+        user_data['two_exp_protect'] = "friends_only"
+        msg = "双修保护已设置为仅好友！只有好友可以向你发送双修邀请。"
     elif arg in ['状态', 'status']:
         status_map = {
             True: "已开启 (需要邀请)",
             False: "已关闭 (允许直接双修)", 
-            "refusal": "已拒绝 (拒绝所有双修)"
+            "refusal": "已拒绝 (拒绝所有双修)",
+            "friends_only": "仅好友 (需要邀请)"
         }
         current_status_display = status_map.get(current_status, "已关闭 (允许直接双修)")
         msg = f"双修保护状态：{current_status_display}"
         await handle_send(bot, event, msg)
         await two_exp_protect.finish()
     else:
-        msg = "请使用：双修保护 开启/关闭/拒绝/状态"
+        msg = "请使用：双修保护 开启/关闭/拒绝/好友/状态"
         await handle_send(bot, event, msg)
         await two_exp_protect.finish()
     
