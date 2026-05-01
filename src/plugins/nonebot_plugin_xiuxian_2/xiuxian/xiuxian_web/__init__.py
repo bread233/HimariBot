@@ -41,6 +41,7 @@ from ..xiuxian_rift.riftmake import (
 from ..xiuxian_mixelixir.mixelixirutil import get_mix_elixir_msg, tiaohe, check_mix, make_dict
 from ..xiuxian_boss.makeboss import create_all_bosses, createboss_jj
 from ..xiuxian_boss.bossconfig import get_boss_config
+from ..xiuxian_impart.impart_uitls import get_impart_card_display_info
 
 items = Items()
 game_sql = XiuxianDateManage()
@@ -725,7 +726,7 @@ def _serialize_item(goods_id, fallback=None):
     except (KeyError, Exception):
         item = None
     fallback = fallback or {}
-    return {
+    res = {
         "id": goods_id,
         "name": (item or {}).get('name') or fallback.get('goods_name') or "未知物品",
         "type": (item or {}).get('type') or fallback.get('goods_type') or "未知",
@@ -733,6 +734,10 @@ def _serialize_item(goods_id, fallback=None):
         "level": (item or {}).get('level') or "凡品",
         "desc": (item or {}).get('desc') or fallback.get('remake') or "暂无描述",
     }
+    if item:
+        res["buff_type"] = item.get("buff_type")
+        res["buff"] = item.get("buff")
+    return res
 
 
 def _serialize_work(status, work_data, user_id):
@@ -930,6 +935,8 @@ def _build_backpack(user_id, limit=120):
             "bind_count": int(row.get('bind_num') or 0) if row.get('bind_num') is not None else 0,
             "state": int(row.get('state') or 0),
             "equipped": int(row.get('state') or 0) == 1,
+            "buff_type": item.get("buff_type"),
+            "buff": item.get("buff"),
         })
     result.sort(key=lambda x: (not x['equipped'], x['type'], x['id'] or 0))
     return result
@@ -2033,6 +2040,230 @@ def game_api_alchemy():
         "materials": yaocai,
     })
 
+
+@app.route('/game/api/item/use_pill', methods=['POST'])
+@game_login_required
+def game_api_use_pill():
+    player_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        item_id = int(payload.get("item_id"))
+    except (TypeError, ValueError):
+        return _err("参数错误：item_id 无效")
+
+    try:
+        quantity = int(payload.get("quantity", 1))
+    except (TypeError, ValueError):
+        return _err("参数错误：quantity 无效")
+
+    if quantity != 1:
+        return _err("第一版丹药使用只支持数量为 1")
+
+    try:
+        item_data = items.get_data_by_item_id(item_id)
+    except Exception:
+        item_data = None
+
+    if not item_data:
+        return _err("物品不存在", 404)
+
+    item_name = item_data.get("name") or f"物品{item_id}"
+    buff_type = item_data.get("buff_type")
+
+    if buff_type != "hp":
+        return _err("当前只支持气血恢复类丹药")
+
+    try:
+        buff = float(item_data.get("buff") or 0)
+    except (TypeError, ValueError):
+        return _err("丹药恢复效果异常")
+
+    if buff <= 0:
+        return _err("丹药恢复效果异常")
+
+    # 检查背包数量
+    owned_count = 0
+    try:
+        back_item = game_sql.get_item_by_good_id_and_user_id(player_id, item_id)
+        if back_item:
+            owned_count = int(back_item.get("goods_num") or 0)
+    except Exception:
+        back_item = None
+
+    if owned_count <= 0:
+        try:
+            for row in game_sql.get_back_msg(player_id) or []:
+                if int(row.get("goods_id") or 0) == item_id:
+                    owned_count = int(row.get("goods_num") or 0)
+                    break
+        except Exception:
+            owned_count = 0
+
+    if owned_count < 1:
+        return _err(f"背包中没有可使用的【{item_name}】")
+
+    user = game_sql.get_user_real_info(player_id) or game_sql.get_user_info_with_id(player_id)
+    if not user:
+        return _err("角色不存在", 404)
+
+    current_hp = int(user.get("hp") or 0)
+    current_mp = int(user.get("mp") or 0)
+    exp = int(user.get("exp") or 0)
+    max_hp = int(exp / 2)
+
+    if max_hp <= 0:
+        return _err("角色气血上限异常")
+
+    if current_hp >= max_hp:
+        return _err("当前气血已满")
+
+    recover_hp = int(max_hp * buff)
+    if recover_hp <= 0:
+        return _err("丹药恢复效果异常")
+
+    new_hp = min(current_hp + recover_hp, max_hp)
+    actual_recover_hp = new_hp - current_hp
+
+    if actual_recover_hp <= 0:
+        return _err("当前气血已满")
+
+    game_sql.update_user_hp_mp(player_id, new_hp, current_mp)
+    game_sql.update_back_j(player_id, item_id, num=1, use_key=1)
+
+    return _ok(
+        message=f"已使用{item_name}，恢复气血{actual_recover_hp}点",
+        data={
+            "item_id": item_id,
+            "item_name": item_name,
+            "quantity": 1,
+            "buff_type": buff_type,
+            "buff": buff,
+            "recover_hp": actual_recover_hp,
+            "current_hp": current_hp,
+            "new_hp": new_hp,
+            "max_hp": max_hp,
+        }
+    )
+
+@app.route('/game/api/impart/wish', methods=['POST'])
+@game_login_required
+def game_api_impart_wish():
+    player_id = _current_player_id()
+    payload = request.get_json(silent=True)
+    if not payload:
+        return jsonify({
+            "success": False,
+            "ok": False,
+            "error": "\u8bf7\u6c42\u53c2\u6570\u4e0d\u80fd\u4e3a\u7a7a",
+            "message": "\u8bf7\u6c42\u53c2\u6570\u4e0d\u80fd\u4e3a\u7a7a"
+        })
+
+    wish_times_raw = payload.get("wish_times")
+    if wish_times_raw is None:
+        return jsonify({
+            "success": False,
+            "ok": False,
+            "error": "wish_times \u4e0d\u80fd\u4e3a\u7a7a",
+            "message": "wish_times \u4e0d\u80fd\u4e3a\u7a7a"
+        })
+
+    try:
+        wish_times = int(wish_times_raw)
+    except (TypeError, ValueError):
+        return jsonify({
+            "success": False,
+            "ok": False,
+            "error": "wish_times \u5fc5\u987b\u662f\u6574\u6570",
+            "message": "wish_times \u5fc5\u987b\u662f\u6574\u6570"
+        })
+
+    if wish_times not in (1, 10):
+        return jsonify({
+            "success": False,
+            "ok": False,
+            "error": "wish_times \u53ea\u5141\u8bb8 1 \u6216 10",
+            "message": "wish_times \u53ea\u5141\u8bb8 1 \u6216 10"
+        })
+
+    try:
+        from ..xiuxian_impart import perform_impart_crystal_wish
+        result = _run_async(perform_impart_crystal_wish(player_id, wish_times))
+    except Exception as e:
+        logger.exception(f"Impart crystal wish failed: user_id={player_id}, error={e}")
+        return jsonify({
+            "success": False,
+            "ok": False,
+            "error": "\u4f20\u627f\u7948\u613f\u5931\u8d25",
+            "message": "\u4f20\u627f\u7948\u613f\u5931\u8d25"
+        })
+
+    if isinstance(result, dict):
+        result.setdefault("success", bool(result.get("ok", True)))
+        if not result.get("success"):
+            result.setdefault("error", result.get("message") or "\u4f20\u627f\u7948\u613f\u5931\u8d25")
+        elif result.get("success"):
+            card_counts = result.get("card_counts") or {}
+            new_cards = result.get("new_cards") or []
+            draw_slots = result.get("draw_slots") or []
+
+            if draw_slots:
+                result["draw_results"] = []
+                for slot in draw_slots:
+                    if not slot.get("hit"):
+                        result["draw_results"].append(
+                            {
+                                "empty": True,
+                                "name": "未获得",
+                                "rarity": "blue",
+                                "is_new": False,
+                                "effect": "",
+                                "current_count": 0,
+                                "stars": "",
+                                "guaranteed": False,
+                            }
+                        )
+                        continue
+
+                    card_name = slot.get("name")
+                    count = int(card_counts.get(card_name, 0) or 0)
+                    detail = get_impart_card_display_info(card_name, count)
+                    result["draw_results"].append(
+                        {
+                            "empty": False,
+                            "name": card_name,
+                            "rarity": detail["rarity"],
+                            "is_new": card_name in new_cards,
+                            "effect": detail["effect"],
+                            "current_count": detail["current_count"],
+                            "stars": detail["stars"],
+                            "guaranteed": bool(slot.get("guaranteed")),
+                        }
+                    )
+            else:
+                drawn_cards = result.get("drawn_cards", [])
+                result["draw_results"] = [
+                    {
+                        "name": card_name,
+                        "rarity": detail["rarity"],
+                        "is_new": card_name in new_cards,
+                        "effect": detail["effect"],
+                        "current_count": detail["current_count"],
+                        "stars": detail["stars"],
+                    }
+                    for card_name in drawn_cards
+                    for count in [int(card_counts.get(card_name, 0) or 0)]
+                    for detail in [get_impart_card_display_info(card_name, count)]
+                ]
+    else:
+        result = {
+            "success": False,
+            "ok": False,
+            "error": "\u4f20\u627f\u7948\u613f\u5931\u8d25",
+            "message": "\u4f20\u627f\u7948\u613f\u5931\u8d25"
+        }
+
+    return jsonify(result)
 
 @app.route('/game/api/shop')
 @game_login_required

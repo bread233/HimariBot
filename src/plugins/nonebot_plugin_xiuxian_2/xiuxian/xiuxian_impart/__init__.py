@@ -155,8 +155,8 @@ async def impart_draw_(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent,
     times = int(msg_text) if msg_text and 0 < int(msg_text) else 1
 
     # 检查思恋结晶是否足够
-    times = times * 10
-    required_crystals = times
+    times_val = times * 10
+    required_crystals = times_val
     if impart_data_draw["stone_num"] < required_crystals:
         await handle_send(bot, event, f"思恋结晶数量不足，需要{required_crystals}颗!")
         return
@@ -225,7 +225,7 @@ async def impart_draw_(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent,
     xiuxian_impart.update_impart_wish(current_wish, user_id)
     await update_user_impart_data(user_id, total_seclusion_time)
     impart_data_draw = await impart_check(user_id)
-    update_statistics_value(user_id, "传承祈愿", increment=times)
+    update_statistics_value(user_id, "传承祈愿", increment=times_val)
 
     # 计算实际抽卡概率
     actual_wish = current_wish % 90  # 显示当前概率计数（0-89）
@@ -237,7 +237,7 @@ async def impart_draw_(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent,
         f"重复卡片({total_duplicates}张)：{', '.join(duplicate_cards_info) if duplicate_cards_info else '无'}{more_duplicates_msg}\n"
         f"触发保底次数：{guaranteed_pulls}次\n"
         f"当前抽卡概率：{actual_wish}/90次\n"
-        f"消耗思恋结晶：{times}颗\n"        
+        f"消耗思恋结晶：{times_val}颗\n"        
         f"剩余思恋结晶：{impart_data_draw['stone_num']}颗"
     )
 
@@ -435,7 +435,6 @@ async def use_love_sand(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent
     if impart_data_draw is None:
         await handle_send(bot, event, "发生未知错误！")
         return
-    
     current_stones = impart_data_draw["stone_num"]
     
     # 使用思恋流沙，随机获得思恋结晶
@@ -594,3 +593,87 @@ async def impart_img_(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent, 
         msg = "没有找到此卡图！"
         await handle_send(bot, event, msg)
         await impart_img.finish()
+
+async def perform_impart_crystal_wish(user_id: int, wish_times: int) -> dict:
+    if wish_times not in [1, 10]:
+        return {"ok": False, "message": "wish_times 只允许 1 或 10"}
+
+    impart_data_draw = await impart_check(user_id)
+    if impart_data_draw is None:
+        return {"ok": False, "message": "发生未知错误！"}
+
+    required_crystals = wish_times * 10
+    if impart_data_draw["stone_num"] < required_crystals:
+        return {"ok": False, "message": f"思恋结晶数量不足，需要{required_crystals}颗!"}
+
+    img_list = impart_data_json.data_all_keys()
+    if not img_list:
+        return {"ok": False, "message": "请检查卡图数据完整！"}
+
+    current_wish = impart_data_draw["wish"]
+    drawn_cards = []
+    draw_slots = []
+    total_seclusion_time = 0
+    guaranteed_pulls = 0
+
+    for _ in range(wish_times):
+        current_wish += 10
+        if current_wish >= 89:
+            reap_img = random.choice(img_list)
+            drawn_cards.append(reap_img)
+            draw_slots.append({
+                "hit": True,
+                "name": reap_img,
+                "guaranteed": True,
+            })
+            guaranteed_pulls += 1
+            total_seclusion_time += 1200
+            current_wish = 0
+        else:
+            if get_rank(user_id):
+                reap_img = random.choice(img_list)
+                drawn_cards.append(reap_img)
+                draw_slots.append({
+                    "hit": True,
+                    "name": reap_img,
+                    "guaranteed": False,
+                })
+                total_seclusion_time += 1200
+                current_wish = 0
+            else:
+                draw_slots.append({
+                    "hit": False,
+                    "name": None,
+                    "guaranteed": False,
+                })
+                total_seclusion_time += 660
+
+    new_cards, card_counts = impart_data_json.data_person_add_batch(user_id, drawn_cards)
+    total_new_cards = len(new_cards)
+    total_duplicates = len(drawn_cards) - total_new_cards
+
+    # 严格保持原逻辑顺序
+    xiuxian_impart.update_stone_num(required_crystals, user_id, 2)
+    xiuxian_impart.update_impart_wish(current_wish, user_id)
+    await update_user_impart_data(user_id, total_seclusion_time // 10)
+    update_statistics_value(user_id, "传承祈愿", increment=required_crystals)
+
+    # 获取最新数据用于返回
+    impart_data_draw = await impart_check(user_id)
+
+    return {
+        "ok": True,
+        "message": "祈愿成功",
+         "wish_times": wish_times,
+         "cost": required_crystals,
+         "currency_left": impart_data_draw["stone_num"],
+         "wish": impart_data_draw["wish"],
+         "drawn_cards": drawn_cards,
+         "draw_slots": draw_slots,
+        "new_cards": new_cards,
+        "card_counts": card_counts,
+        "total_new_cards": total_new_cards,
+        "total_duplicates": total_duplicates,
+        "guaranteed_pulls": guaranteed_pulls,
+        "total_seclusion_time": total_seclusion_time // 10
+    }
