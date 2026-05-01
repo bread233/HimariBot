@@ -41,13 +41,21 @@ from ..xiuxian_rift.riftmake import (
 from ..xiuxian_mixelixir.mixelixirutil import get_mix_elixir_msg, tiaohe, check_mix, make_dict
 from ..xiuxian_boss.makeboss import create_all_bosses, createboss_jj
 from ..xiuxian_boss.bossconfig import get_boss_config
+from ..xiuxian_boss.boss_limit import boss_limit
 from ..xiuxian_impart.impart_uitls import get_impart_card_display_info
+from ..xiuxian_impart.impart_data import impart_data_json
+from ..xiuxian_back.back_util import (
+    check_equipment_can_use,
+    get_use_equipment_sql,
+    get_no_use_equipment_sql,
+)
 
 items = Items()
 game_sql = XiuxianDateManage()
 update_manager = UpdateManager()
 xiuxian_impart = XIUXIAN_IMPART_BUFF()
 app = Flask(__name__)
+app.config["SESSION_PERMANENT"] = False
 
 # 配置
 DATA_PATH = Path.cwd() / "data" / "xiuxian"
@@ -457,7 +465,7 @@ def get_table_data(db_path, table_name, page=1, per_page=10, search_field=None, 
     
     total_result = execute_sql(db_path, count_sql, count_params)
     total = total_result[0]['COUNT(*)'] if total_result else 0
-    
+
     return {
         "data": data,
         "total": total,
@@ -493,6 +501,9 @@ WORK_EXPIRE_MINUTES = 30
 TOKEN_EXPIRE_SECONDS = 300
 LOGIN_TOKEN_CACHE = {}  # token -> {user_id, expire_at, used}
 ADMIN_TOKEN_CACHE = {}  # token -> {admin_id, expire_at, used}
+WORLD_BOSS_INTEGRAL_BASE = 15000
+WORLD_BOSS_DAILY_INTEGRAL_LIMIT = 30000
+WORLD_BOSS_DAILY_STONE_LIMIT = 300000000
 
 # QQ 群内发送「/修仙登录」后，机器人会将一次性网页登录链接私聊给发起人。
 web_login_token_cmd = on_command("修仙登录", priority=5, block=True)
@@ -871,6 +882,42 @@ def _build_player_profile(user_id):
     if not cards: cards = [c.stem for c in (ASSETS_PATH / "卡图").glob("*.png")]
     card_name = cards[int(user_id) % len(cards)] if cards else "default"
 
+    equipment = {
+        "main": buff_name(buff.get_user_main_buff_data),
+        "sub": buff_name(buff.get_user_sub_buff_data),
+        "skill": buff_name(buff.get_user_sec_buff_data),
+        "movement": buff_name(buff.get_user_effect1_buff_data),
+        "eyes": buff_name(buff.get_user_effect2_buff_data),
+        "weapon": buff_name(buff.get_user_weapon_data),
+        "armor": buff_name(buff.get_user_armor_buff_data),
+    }
+
+    try:
+        equip_rows = execute_sql(
+            DATABASE,
+            "SELECT goods_id, goods_name, goods_type, state FROM back WHERE user_id = ? AND state = 1",
+            (user_id,),
+        ) or []
+        for row in equip_rows:
+            goods_type = str(row.get("goods_type") or "")
+            if goods_type not in ("法器", "防具"):
+                continue
+            goods_id = row.get("goods_id")
+            item = _serialize_item(goods_id, fallback=row)
+            item_obj = {
+                "name": item.get("name"),
+                "type": item.get("type"),
+                "level": item.get("level"),
+                "buff_type": item.get("buff_type"),
+                "buff": item.get("buff"),
+            }
+            if goods_type == "法器":
+                equipment["weapon"] = item_obj
+            elif goods_type == "防具":
+                equipment["armor"] = item_obj
+    except Exception:
+        pass
+
     return {
         "id": int(user.get('user_id')),
         "name": user.get('user_name') or f"无名氏({user_id})",
@@ -906,15 +953,7 @@ def _build_player_profile(user_id):
             "hp": int(user.get('hppractice') or 0),
             "mp": int(user.get('mppractice') or 0),
         },
-        "equipment": {
-            "main": buff_name(buff.get_user_main_buff_data),
-            "sub": buff_name(buff.get_user_sub_buff_data),
-            "skill": buff_name(buff.get_user_sec_buff_data),
-            "movement": buff_name(buff.get_user_effect1_buff_data),
-            "eyes": buff_name(buff.get_user_effect2_buff_data),
-            "weapon": buff_name(buff.get_user_weapon_data),
-            "armor": buff_name(buff.get_user_armor_buff_data),
-        }
+        "equipment": equipment
     }
 
 
@@ -940,6 +979,12 @@ def _build_backpack(user_id, limit=120):
         })
     result.sort(key=lambda x: (not x['equipped'], x['type'], x['id'] or 0))
     return result
+
+
+def _is_equipment_item(item: dict) -> bool:
+    item_type = str(item.get("item_type") or "")
+    goods_type = str(item.get("type") or "")
+    return item_type in ("法器", "防具") or goods_type in ("装备", "法器", "防具")
 
 
 def _build_rankings(limit=20):
@@ -1019,6 +1064,166 @@ def _save_player_user_data(user_id: int, data: dict):
     user_dir.mkdir(parents=True, exist_ok=True)
     user_file = user_dir / "user_data.json"
     user_file.write_text(json.dumps(data, ensure_ascii=False, indent=4), encoding="utf-8")
+
+
+def _get_user_boss_fight_info(user_id: int):
+    """读取世界 BOSS 永久积分信息，兼容 QQ 端 boss_fight_info.json。"""
+    user_dir = PLAYERSDATA / str(user_id)
+    user_dir.mkdir(parents=True, exist_ok=True)
+    info_file = user_dir / "boss_fight_info.json"
+    data = {"boss_integral": 0}
+
+    if info_file.exists():
+        try:
+            raw = info_file.read_text(encoding="utf-8").strip()
+            if raw:
+                loaded = json.loads(raw)
+                if isinstance(loaded, dict):
+                    data.update(loaded)
+        except Exception as e:
+            logger.warning(f"Read boss_fight_info failed: user_id={user_id}, error={e}")
+
+    try:
+        data["boss_integral"] = max(int(data.get("boss_integral") or 0), 0)
+    except Exception:
+        data["boss_integral"] = 0
+    return data
+
+
+def _save_user_boss_fight_info(user_id: int, data: dict):
+    """保存世界 BOSS 永久积分信息。"""
+    user_dir = PLAYERSDATA / str(user_id)
+    user_dir.mkdir(parents=True, exist_ok=True)
+    info_file = user_dir / "boss_fight_info.json"
+    info_file.write_text(json.dumps(data, ensure_ascii=False, indent=4), encoding="utf-8")
+
+
+def _calc_world_boss_rank_penalty(user_rank: int, boss_rank: int) -> tuple[float, str]:
+    """复用 QQ 端世界 BOSS 的境界收益衰减/加成。"""
+    rank_penalty = 1.0
+    bonus_msg = ""
+
+    if user_rank < boss_rank:
+        rank_diff = boss_rank - user_rank
+        if rank_diff == 1:
+            rank_penalty = 0.95
+        elif rank_diff == 2:
+            rank_penalty = 0.9
+        elif rank_diff == 3:
+            rank_penalty = 0.8
+        else:
+            rank_penalty = 0.5
+    elif user_rank > boss_rank:
+        points_bonus = int(30 * (user_rank - boss_rank))
+        bonus_msg = f"境界加成：+{points_bonus}%积分"
+
+    return rank_penalty, bonus_msg
+
+
+def _calc_world_boss_web_reward(user_id: int, user_info: dict, boss: dict, winner: str, events: list[dict]):
+    """计算并写入网页端世界 BOSS 奖励。
+
+    当前 Web 世界 BOSS 是一次性挑战，沿用既有网页逻辑：只有胜利才结算奖励；
+    在原有灵石奖励基础上补齐 QQ 端世界积分的持久化与每日限制。
+    """
+    reward = {
+        "stone": 0,
+        "stone_display": _display_number(0),
+        "boss_integral": 0,
+        "daily_integral": 0,
+        "daily_integral_limit": WORLD_BOSS_DAILY_INTEGRAL_LIMIT,
+        "total_boss_integral": 0,
+        "rank_bonus_message": "",
+        "limit_messages": [],
+    }
+
+    boss_info = _get_user_boss_fight_info(user_id)
+    reward["total_boss_integral"] = int(boss_info.get("boss_integral") or 0)
+
+    if winner != "群友赢了":
+        return reward
+
+    boss_all_hp = int(boss.get("总血量") or boss.get("气血") or 0)
+    if boss_all_hp <= 0 and events:
+        boss_all_hp = max(int(e.get("enemy_max_hp") or 0) for e in events)
+
+    final_enemy_hp = 0
+    if events:
+        final_enemy_hp = int(events[-1].get("enemy_hp") or 0)
+    total_damage = max(boss_all_hp - final_enemy_hp, 0) if boss_all_hp > 0 else 0
+    damage_ratio = min(total_damage / boss_all_hp, 0.20) if boss_all_hp > 0 else 0
+
+    try:
+        boss_rank = convert_rank(boss.get("jj") if boss.get("jj") == "零" else f"{boss.get('jj')}中期")[0]
+    except Exception:
+        boss_rank = 0
+    try:
+        user_rank = convert_rank(user_info.get("level"))[0]
+    except Exception:
+        user_rank = 0
+
+    rank_penalty, rank_bonus_message = _calc_world_boss_rank_penalty(user_rank, boss_rank)
+    reward["rank_bonus_message"] = rank_bonus_message
+
+    today_integral = boss_limit.get_integral(user_id)
+    today_stone = boss_limit.get_stone(user_id)
+
+    stone = int(boss.get("max_stone") or 0)
+    stone = max(stone, 0)
+    if stone > 0 and today_stone < WORLD_BOSS_DAILY_STONE_LIMIT:
+        stone = min(stone, WORLD_BOSS_DAILY_STONE_LIMIT - today_stone)
+    elif stone > 0:
+        stone = 0
+        reward["limit_messages"].append("今日灵石已达上限")
+
+    boss_integral = 0
+    if today_integral >= WORLD_BOSS_DAILY_INTEGRAL_LIMIT:
+        reward["limit_messages"].append("今日世界积分已达上限")
+    else:
+        boss_integral = max(int(damage_ratio * WORLD_BOSS_INTEGRAL_BASE), 1) if damage_ratio > 0 else 0
+        boss_integral = int(boss_integral * rank_penalty)
+        if rank_penalty == 1.0 and user_rank > boss_rank:
+            boss_integral = int(boss_integral * (1 + (0.3 * (user_rank - boss_rank))))
+
+        try:
+            sub_buff = UserBuffDate(user_id).get_user_sub_buff_data()
+            integral_buff = sub_buff.get("integral", 0) if sub_buff else 0
+            boss_integral = int(boss_integral * (1 + integral_buff))
+        except Exception:
+            pass
+
+        boss_integral = max(boss_integral, 0)
+        boss_integral = min(boss_integral, WORLD_BOSS_DAILY_INTEGRAL_LIMIT - today_integral)
+
+    if stone > 0:
+        game_sql.update_ls(user_id, stone, 1)
+        boss_limit.update_stone(user_id, stone)
+
+    if boss_integral > 0:
+        boss_info["boss_integral"] = int(boss_info.get("boss_integral") or 0) + boss_integral
+        _save_user_boss_fight_info(user_id, boss_info)
+        boss_limit.update_integral(user_id, boss_integral)
+
+    reward.update({
+        "stone": stone,
+        "stone_display": _display_number(stone),
+        "boss_integral": boss_integral,
+        "daily_integral": boss_limit.get_integral(user_id),
+        "total_boss_integral": int(boss_info.get("boss_integral") or 0),
+    })
+    return reward
+
+
+def _format_world_boss_reward_message(reward: dict) -> str:
+    parts = []
+    if int(reward.get("stone") or 0) > 0:
+        parts.append(f"获得灵石：{reward.get('stone_display') or _display_number(reward.get('stone') or 0)}")
+    if int(reward.get("boss_integral") or 0) > 0:
+        parts.append(f"获得世界积分：{int(reward.get('boss_integral') or 0)}点")
+    if reward.get("rank_bonus_message"):
+        parts.append(str(reward.get("rank_bonus_message")))
+    parts.extend(reward.get("limit_messages") or [])
+    return "，".join(parts) if parts else "未获得奖励"
 
 
 def _get_dual_protect_status(user_id: int):
@@ -1291,49 +1496,242 @@ def _perform_two_exp(user_id_1: int, user_id_2: int, exp_count: int = 1, is_part
 
 def _normalize_battle_nodes(nodes, player_id, enemy_name=None, is_boss=False):
     events = []
-    player_card = None # 延迟获取
-    
-    for idx, node in enumerate(nodes or [], 1):
+    player_card = None  # 延迟获取
+    player_info = game_sql.get_user_info_with_id(player_id) or {}
+    player_name = str(player_info.get("user_name") or "")
+
+    # 先给一个数据库兜底值；战斗内真实 HP 以战报 speaker/content 解析结果为准。
+    player_hp = int(player_info.get("hp") or 0)
+    player_max_hp = int((player_info.get("exp") or 0) / 2) if player_info.get("exp") else max(player_hp, 0)
+    enemy_hp = 0
+    enemy_max_hp = 0
+
+    def _parse_cn_number(value):
+        raw = str(value or "").strip().replace(" ", "")
+        if not raw:
+            return 0
+        m = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)([万亿]?)", raw)
+        if not m:
+            return 0
+        base = float(m.group(1))
+        unit = m.group(2)
+        if unit == "万":
+            base *= 10000
+        elif unit == "亿":
+            base *= 100000000
+        return int(base)
+
+    def _clean_hp_owner(owner: str):
+        owner = str(owner or "").strip()
+        owner = re.sub(r"[\s☆★—\-]+", "", owner)
+        owner = owner.replace("当前", "").replace("剩余", "")
+        # 避免把整句战报都当成名字，只保留冒号/逗号后最靠近“血量”的短名称。
+        for sep in ("：", ":", "，", ",", "！", "!", "。"):
+            if sep in owner:
+                owner = owner.split(sep)[-1]
+        return owner.strip()
+
+    def _detect_side_by_identity(owner: str, speaker: str = "", side: str = "system", text: str = ""):
+        owner = _clean_hp_owner(owner)
+        speaker = str(speaker or "")
+        text = str(text or "")
+        player_keys = [str(player_id), player_name, "群友", "玩家"]
+        enemy_keys = [str(enemy_name or "")]
+
+        # owner 是最靠近“当前血量/剩余血量”的名称，优先级最高。
+        if any(k and k in owner for k in player_keys):
+            return "player"
+        if any(k and k in owner for k in enemy_keys):
+            return "enemy"
+
+        # 其次看血量文本本身；不要让 speaker 覆盖 content 里的“敌人剩余血量”。
+        if any(k and k in text for k in player_keys) and not any(k and k in text for k in enemy_keys):
+            return "player"
+        if any(k and k in text for k in enemy_keys) and not any(k and k in text for k in player_keys):
+            return "enemy"
+
+        # 最后才用 speaker/uin 兜底，主要用于 owner 为空的“当前血量 x/y”。
+        if any(k and k in speaker for k in player_keys):
+            return "player"
+        if any(k and k in speaker for k in enemy_keys):
+            return "enemy"
+
+        if side in ("player", "enemy"):
+            return side
+        return None
+
+    def _node_side_and_text(node):
         data = node.get('data', {}) if isinstance(node, dict) else {}
         speaker = str(data.get('name', '战报'))
         content = str(data.get('content', ''))
         uin = data.get('uin')
         side = "system"
-        speaker_img = None
-        
         try:
             if int(uin) == int(player_id):
                 side = "player"
-                if not player_card:
-                    p = _build_player_profile(player_id)
-                    player_card = p['card_img'] if p else None
-                speaker_img = player_card
             elif speaker != "Bot":
                 side = "enemy"
-                if is_boss and enemy_name:
-                    speaker_img = f"/assets/boss/{enemy_name}"
         except Exception:
             if speaker != "Bot":
                 side = "enemy"
-                if is_boss and enemy_name:
-                    speaker_img = f"/assets/boss/{enemy_name}"
+        return data, speaker, content, side
 
-        event_type = "log"
+    def _extract_hp_pairs(text: str, speaker: str = "", side: str = "system"):
+        """解析“当前血量/气血/HP：cur / max”，返回 side/hp/max 快照。"""
+        s = str(text or "")
+        num_pat = r"([0-9]+(?:\.[0-9]+)?\s*[万亿]?)"
+        # owner 允许为空；用非贪婪捕获，避免把“当前”吞进名字。
+        pattern = re.compile(
+            rf"([^\n：:/]{{0,40}}?)\s*[，,]?\s*(?:当前\s*)?(?:气血|血量|HP|hp)\s*[：: ]\s*{num_pat}\s*/\s*{num_pat}"
+        )
+        result = []
+        for owner, cur, max_v in pattern.findall(s):
+            cur_v = _parse_cn_number(cur)
+            max_hp_v = _parse_cn_number(max_v)
+            if cur_v <= 0 or max_hp_v <= 0:
+                continue
+            detected_side = _detect_side_by_identity(owner, speaker=speaker, side=side, text=s)
+            result.append({
+                "side": detected_side,
+                "hp": cur_v,
+                "max_hp": max_hp_v,
+                "owner": _clean_hp_owner(owner),
+            })
+        return result
+
+    def _extract_remaining_hp(text: str, speaker: str = "", side: str = "system"):
+        """解析“xxx剩余血量cur / xxx当前血量cur”这种没有 max 的状态行。"""
+        s = str(text or "")
+        num_pat = r"([0-9]+(?:\.[0-9]+)?\s*[万亿]?)"
+        pattern = re.compile(
+            rf"([^\n：:/]{{0,40}}?)\s*(?:剩余|当前)\s*(?:气血|血量|HP|hp)\s*[：: ]*\s*{num_pat}"
+        )
+        result = []
+        for owner, cur in pattern.findall(s):
+            cur_v = _parse_cn_number(cur)
+            if cur_v <= 0:
+                continue
+            detected_side = _detect_side_by_identity(owner, speaker=speaker, side=side, text=s)
+            result.append({
+                "side": detected_side,
+                "hp": cur_v,
+                "owner": _clean_hp_owner(owner),
+            })
+        return result
+
+    def _apply_hp_pair_snapshot(snapshot):
+        nonlocal player_hp, player_max_hp, enemy_hp, enemy_max_hp
+        side = snapshot.get("side")
+        hp = int(snapshot.get("hp") or 0)
+        max_hp = int(snapshot.get("max_hp") or 0)
+        if side == "player":
+            if max_hp > 0:
+                player_max_hp = max_hp
+            if hp > 0:
+                player_hp = hp
+        elif side == "enemy":
+            if max_hp > 0:
+                enemy_max_hp = max_hp
+            if hp > 0:
+                enemy_hp = hp
+
+    def _apply_remaining_hp_snapshot(snapshot, fallback_side=None):
+        nonlocal player_hp, enemy_hp
+        side = snapshot.get("side") or fallback_side
+        hp = int(snapshot.get("hp") or 0)
+        if hp <= 0:
+            return
+        if side == "player":
+            player_hp = hp
+        elif side == "enemy":
+            enemy_hp = hp
+
+    # 预扫描：只补齐最大血量。
+    # 注意：不要用后续战报里的“当前血量/剩余血量”初始化当前 HP，
+    # 否则第一刀会在已经扣过血的数值上再次扣血，造成血条先掉过头再回弹。
+    for node in nodes or []:
+        _, speaker, content, side = _node_side_and_text(node)
+        for text in (speaker, content):
+            for hp_info in _extract_hp_pairs(text, speaker=speaker, side=side):
+                detected_side = hp_info.get("side")
+                max_hp_v = int(hp_info.get("max_hp") or 0)
+                if detected_side == "player" and max_hp_v > 0:
+                    player_max_hp = max(player_max_hp, max_hp_v)
+                elif detected_side == "enemy" and max_hp_v > 0:
+                    enemy_max_hp = max(enemy_max_hp, max_hp_v)
+
+    if player_max_hp > 0 and player_hp <= 0:
+        player_hp = player_max_hp
+    if enemy_max_hp > 0 and enemy_hp <= 0:
+        enemy_hp = enemy_max_hp
+
+    for idx, node in enumerate(nodes or [], 1):
+        data, speaker, content, side = _node_side_and_text(node)
+        speaker_img = None
+
+        if side == "player":
+            if not player_card:
+                p = _build_player_profile(player_id)
+                player_card = p['card_img'] if p else None
+            speaker_img = player_card
+        elif side == "enemy" and is_boss and enemy_name:
+            speaker_img = f"/assets/boss/{enemy_name}"
+
+        event_type = "info"
+        legacy_type = "log"
         if "回合" in content:
-            event_type = "turn"
+            event_type = "round"
+            legacy_type = "turn"
         elif "闪避" in content or "未命中" in content:
             event_type = "miss"
-        elif "回复" in content or "吸取" in content:
+            legacy_type = "miss"
+        elif "回复" in content or "恢复" in content or "治疗" in content or "吸取" in content:
             event_type = "heal"
+            legacy_type = "heal"
         elif "造成" in content or "伤害" in content:
             event_type = "attack"
-        elif "胜利" in content:
-            event_type = "result"
+            legacy_type = "attack"
+        elif "胜利" in content or "赢了" in content or "战斗结束" in content:
+            event_type = "end"
+            legacy_type = "result"
         elif "提升" in content or "获得" in content or "降低" in content:
-            event_type = "buff"
+            event_type = "info"
+            legacy_type = "buff"
 
-        numbers = [int(x) for x in re.findall(r"\d+", content)]
-        amount = max(numbers) if numbers else 0
+        num_pat = r"([0-9]+(?:\.[0-9]+)?\s*[万亿]?)"
+        damage = 0
+        heal = 0
+
+        damage_matchers = [
+            rf"造成了\s*{num_pat}\s*伤害",
+            rf"造成\s*{num_pat}\s*伤害",
+            rf"受到\s*{num_pat}\s*伤害",
+        ]
+        for pat in damage_matchers:
+            m = re.search(pat, content)
+            if m:
+                damage = _parse_cn_number(m.group(1))
+                break
+
+        heal_matchers = [
+            rf"回复\s*{num_pat}",
+            rf"恢复\s*{num_pat}",
+            rf"治疗\s*{num_pat}",
+            rf"吸取\s*{num_pat}",
+        ]
+        for pat in heal_matchers:
+            m = re.search(pat, content)
+            if m:
+                heal = _parse_cn_number(m.group(1))
+                break
+
+        if event_type == "attack":
+            amount = damage
+        elif event_type == "heal":
+            amount = heal
+        else:
+            amount = 0
+
         effect = {
             "attack": "slash",
             "miss": "wind",
@@ -1341,25 +1739,60 @@ def _normalize_battle_nodes(nodes, player_id, enemy_name=None, is_boss=False):
             "buff": "aura",
             "turn": "turn",
             "result": "result",
-        }.get(event_type, "log")
+        }.get(legacy_type, "log")
 
-        target_side = "enemy" if side == "player" and event_type == "attack" else "player" if side == "enemy" and event_type == "attack" else side
+        actor_side = side if side in ("player", "enemy") else None
+        target_side = side if side in ("player", "enemy") else None
+        if side == "player" and event_type in ("attack", "miss"):
+            target_side = "enemy"
+        elif side == "enemy" and event_type in ("attack", "miss"):
+            target_side = "player"
+
+        # speaker 通常保存“xxx当前血量：cur / max”，必须优先解析。
+        for hp_info in _extract_hp_pairs(speaker, speaker=speaker, side=side):
+            _apply_hp_pair_snapshot(hp_info)
+        for hp_info in _extract_hp_pairs(content, speaker=speaker, side=side):
+            _apply_hp_pair_snapshot(hp_info)
+
+        # content 常保存“xxx剩余血量cur”。这种行没有 max，只更新当前 hp。
+        for hp_info in _extract_remaining_hp(content, speaker=speaker, side=side):
+            _apply_remaining_hp_snapshot(hp_info, fallback_side=target_side)
+
+        if event_type == "attack":
+            if actor_side == "player" and target_side == "enemy":
+                enemy_hp = max(0, int(enemy_hp) - int(damage)) if enemy_hp > 0 else 0
+            elif actor_side == "enemy" and target_side == "player":
+                player_hp = max(0, int(player_hp) - int(damage)) if player_hp > 0 else 0
+        elif event_type == "heal":
+            if actor_side == "player":
+                player_hp = min(int(player_max_hp), int(player_hp) + int(heal)) if player_max_hp > 0 else int(player_hp) + int(heal)
+            elif actor_side == "enemy":
+                enemy_hp = min(int(enemy_max_hp), int(enemy_hp) + int(heal)) if enemy_max_hp > 0 else int(enemy_hp) + int(heal)
+
+        miss = event_type == "miss"
 
         events.append({
             "seq": idx,
             "side": side,
             "target_side": target_side,
-            "type": event_type,
+            "type": legacy_type,
             "effect": effect,
             "speaker": speaker,
             "speaker_img": speaker_img,
             "content": content,
             "amount": amount,
-            "duration": 1050 if event_type in ("attack", "heal", "buff") else 760,
+            "duration": 1050 if legacy_type in ("attack", "heal", "buff") else 760,
+            "event_type": event_type,
+            "actor_side": actor_side,
+            "damage": damage,
+            "heal": heal,
+            "miss": miss,
+            "player_hp": int(player_hp),
+            "player_max_hp": int(player_max_hp),
+            "enemy_hp": int(enemy_hp),
+            "enemy_max_hp": int(enemy_max_hp),
         })
     return events
-
-
 def _build_battle_payload(title, winner, events, player_id, enemy_name=None, is_boss=False):
     event_count = len(events or [])
     return {
@@ -1437,6 +1870,8 @@ def game_home():
     if token:
         user_id, err = _consume_login_token(token)
         if user_id:
+            session.clear()
+            session.permanent = False
             session['player_id'] = str(user_id)
             return redirect(url_for('game_home'))
 
@@ -1461,6 +1896,8 @@ def game_login():
     if not user_id:
         return render_template('game.html', player=None, error=err or "登录令无效或已过期")
         
+    session.clear()
+    session.permanent = False
     session['player_id'] = str(user_id)
     return redirect(url_for('game_home'))
 
@@ -2146,6 +2583,87 @@ def game_api_use_pill():
         }
     )
 
+
+@app.route('/game/api/item/equip', methods=['POST'])
+@game_login_required
+def game_api_item_equip():
+    user_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        goods_id = int(payload.get("goods_id"))
+    except (TypeError, ValueError):
+        return _err("参数错误：goods_id 必须为整数")
+
+    backpack_items = _build_backpack(user_id, limit=500)
+    item = next((x for x in backpack_items if int(x.get("id") or 0) == goods_id), None)
+    if not item:
+        return _err("背包中不存在该物品", 404)
+    if not _is_equipment_item(item):
+        return _err("该物品不是可穿戴装备")
+
+    if int(item.get("state") or 0) != 0:
+        return _err("该装备已被装备，请勿重复装备！")
+
+    if not check_equipment_can_use(user_id, goods_id):
+        return _err("该装备已被装备，请勿重复装备！")
+
+    sql_result = get_use_equipment_sql(user_id, goods_id)
+    sql_list, item_type = sql_result if isinstance(sql_result, tuple) else (sql_result, "")
+    if not isinstance(sql_list, list) or not sql_list:
+        return _err("穿戴失败：未生成有效装备SQL")
+
+    for sql in sql_list:
+        res = execute_sql(DATABASE, sql)
+        if isinstance(res, dict) and res.get("error"):
+            return _err(f"穿戴失败：{res['error']}")
+
+    if item_type == "法器":
+        game_sql.updata_user_faqi_buff(user_id, goods_id)
+    if item_type == "防具":
+        game_sql.updata_user_armor_buff(user_id, goods_id)
+
+    return _ok(message="穿戴成功", goods_id=goods_id)
+
+
+@app.route('/game/api/item/unequip', methods=['POST'])
+@game_login_required
+def game_api_item_unequip():
+    user_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        goods_id = int(payload.get("goods_id"))
+    except (TypeError, ValueError):
+        return _err("参数错误：goods_id 必须为整数")
+
+    backpack_items = _build_backpack(user_id, limit=500)
+    item = next((x for x in backpack_items if int(x.get("id") or 0) == goods_id), None)
+    if not item:
+        return _err("背包中不存在该物品", 404)
+    if not _is_equipment_item(item):
+        return _err("该物品不是可卸下装备")
+
+    if int(item.get("state") or 0) != 1:
+        return _err("装备没有被使用，无法卸载！")
+
+    sql_result = get_no_use_equipment_sql(user_id, goods_id)
+    sql_list, item_type = sql_result if isinstance(sql_result, tuple) else (sql_result, "")
+    if not isinstance(sql_list, list) or not sql_list:
+        return _err("卸下失败：未生成有效装备SQL")
+
+    for sql in sql_list:
+        res = execute_sql(DATABASE, sql)
+        if isinstance(res, dict) and res.get("error"):
+            return _err(f"卸下失败：{res['error']}")
+
+    if item_type == "法器":
+        game_sql.updata_user_faqi_buff(user_id, 0)
+    if item_type == "防具":
+        game_sql.updata_user_armor_buff(user_id, 0)
+
+    return _ok(message="卸下成功", goods_id=goods_id)
+
 @app.route('/game/api/impart/wish', methods=['POST'])
 @game_login_required
 def game_api_impart_wish():
@@ -2265,6 +2783,27 @@ def game_api_impart_wish():
 
     return jsonify(result)
 
+
+@app.route('/game/api/impart/cards', methods=['GET'])
+@game_login_required
+def game_api_impart_cards():
+    player_id = _current_player_id()
+    card_dict = impart_data_json.data_person_list(player_id) or {}
+    cards = []
+
+    for card_name, count in sorted(card_dict.items(), key=lambda x: (-int(x[1] or 0), x[0])):
+        card_count = int(count or 0)
+        detail = get_impart_card_display_info(card_name, card_count)
+        cards.append({
+            "name": card_name,
+            "rarity": detail.get("rarity", "blue"),
+            "effect": detail.get("effect", "效果未知"),
+            "current_count": int(detail.get("current_count", card_count) or 0),
+            "stars": detail.get("stars", ""),
+        })
+
+    return _ok(cards=cards)
+
 @app.route('/game/api/shop')
 @game_login_required
 def game_api_shop():
@@ -2289,6 +2828,76 @@ def game_api_shop():
         "message": "商城购买流程开发中，当前展示商品清单。",
         "goods": goods,
     })
+
+
+@app.route('/game/api/shop/buy', methods=['POST'])
+@game_login_required
+def game_api_shop_buy():
+    player_id = _current_player_id()
+    if not player_id:
+        return _err("未登录", status_code=401, login_required=True)
+
+    payload = request.get_json(silent=True) or {}
+    item_id_raw = payload.get('item_id')
+    quantity_raw = payload.get('quantity')
+
+    if not isinstance(item_id_raw, int):
+        return _err("item_id 必须是整数")
+    if not isinstance(quantity_raw, int):
+        return _err("quantity 必须是整数")
+    if quantity_raw < 1 or quantity_raw > 99:
+        return _err("quantity 需在 1~99 之间")
+
+    sample_ids = [1999, 2500, 4001, 4002, 6001]
+    if item_id_raw not in sample_ids:
+        return _err("该物品不在当前商城可购买范围")
+
+    item_info = _serialize_item(item_id_raw)
+    goods_name = item_info.get('name') or f"物品{item_id_raw}"
+    goods_type = item_info.get('type') or "未知"
+
+    price = 1000
+    total_cost = price * quantity_raw
+
+    user_rows = execute_sql(DATABASE, "SELECT stone FROM user_xiuxian WHERE user_id = ?", (player_id,))
+    if isinstance(user_rows, dict) and user_rows.get("error"):
+        return _err("购买失败，无法读取用户信息")
+    if not user_rows:
+        return _err("未找到角色信息")
+    current_stone = int((user_rows[0] or {}).get("stone") or 0)
+    if current_stone < total_cost:
+        return _err(f"灵石不足，需要 {total_cost}")
+
+    deduct_res = execute_sql(
+        DATABASE,
+        "UPDATE user_xiuxian SET stone = stone - ? WHERE user_id = ? AND stone >= ?",
+        (total_cost, player_id, total_cost)
+    )
+    if isinstance(deduct_res, dict) and deduct_res.get("error"):
+        return _err("灵石不足或购买失败")
+    if not isinstance(deduct_res, dict) or int(deduct_res.get("affected_rows") or 0) <= 0:
+        return _err("灵石不足或购买失败")
+
+    try:
+        game_sql.send_back(player_id, item_id_raw, goods_name, goods_type, quantity_raw)
+    except Exception:
+        # 回滚灵石，避免出现扣费成功但发货失败
+        execute_sql(
+            DATABASE,
+            "UPDATE user_xiuxian SET stone = stone + ? WHERE user_id = ?",
+            (total_cost, player_id)
+        )
+        return _err("购买失败，物品发放异常")
+
+    left_rows = execute_sql(DATABASE, "SELECT stone FROM user_xiuxian WHERE user_id = ?", (player_id,))
+    stone_left = int((left_rows[0] or {}).get("stone") or 0) if isinstance(left_rows, list) and left_rows else max(current_stone - total_cost, 0)
+
+    return _ok(
+        message=f"购买成功：{goods_name} x{quantity_raw}",
+        cost=total_cost,
+        stone_left=stone_left,
+        item=_serialize_item(item_id_raw)
+    )
 
 
 @app.route('/game/api/work/status')
@@ -2798,16 +3407,15 @@ def game_api_battle_boss_challenge():
     # 战斗
     play_list, winner, _ = _run_async(Boss_fight(player_id, boss, type_in=1, bot_id=0))
     events = _normalize_battle_nodes(play_list, player_id, enemy_name=boss_name, is_boss=True)
-    
-    # 结算奖励（如果是 MVP 预览，可以先只返回战斗结果，正式环境需要更新数据库）
-    reward_msg = ""
-    if winner == "群友赢了":
-        stone = boss.get('max_stone', 0)
-        game_sql.update_ls(player_id, stone, 1)
-        reward_msg = f" 获得灵石：{_display_number(stone)}"
-        
+
+    # 世界 Boss 结算：保留原网页端胜利给灵石逻辑，并补齐世界积分持久化。
+    user_info = game_sql.get_user_info_with_id(player_id) or {}
+    reward = _calc_world_boss_web_reward(player_id, user_info, boss, winner, events)
+    reward_msg = _format_world_boss_reward_message(reward) if winner == "群友赢了" else "未击败 Boss，未获得胜利奖励"
+
     return _ok(
         battle=_build_battle_payload(f"挑战世界Boss：{boss_name}", winner, events, player_id, enemy_name=boss_name, is_boss=True),
+        reward=reward,
         message=f"战斗结束！{reward_msg}"
     )
 
@@ -2903,6 +3511,8 @@ def login():
     if token_arg:
         admin_id, err = _consume_admin_token(token_arg)
         if admin_id:
+            session.clear()
+            session.permanent = False
             session['admin_id'] = admin_id
             return redirect(url_for('home'))
         else:
