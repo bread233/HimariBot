@@ -49,6 +49,7 @@ game_sql = XiuxianDateManage()
 update_manager = UpdateManager()
 xiuxian_impart = XIUXIAN_IMPART_BUFF()
 app = Flask(__name__)
+app.config["SESSION_PERMANENT"] = False
 
 # 配置
 DATA_PATH = Path.cwd() / "data" / "xiuxian"
@@ -1438,6 +1439,8 @@ def game_home():
     if token:
         user_id, err = _consume_login_token(token)
         if user_id:
+            session.clear()
+            session.permanent = False
             session['player_id'] = str(user_id)
             return redirect(url_for('game_home'))
 
@@ -1462,6 +1465,8 @@ def game_login():
     if not user_id:
         return render_template('game.html', player=None, error=err or "登录令无效或已过期")
         
+    session.clear()
+    session.permanent = False
     session['player_id'] = str(user_id)
     return redirect(url_for('game_home'))
 
@@ -2313,6 +2318,76 @@ def game_api_shop():
     })
 
 
+@app.route('/game/api/shop/buy', methods=['POST'])
+@game_login_required
+def game_api_shop_buy():
+    player_id = _current_player_id()
+    if not player_id:
+        return _err("未登录", status_code=401, login_required=True)
+
+    payload = request.get_json(silent=True) or {}
+    item_id_raw = payload.get('item_id')
+    quantity_raw = payload.get('quantity')
+
+    if not isinstance(item_id_raw, int):
+        return _err("item_id 必须是整数")
+    if not isinstance(quantity_raw, int):
+        return _err("quantity 必须是整数")
+    if quantity_raw < 1 or quantity_raw > 99:
+        return _err("quantity 需在 1~99 之间")
+
+    sample_ids = [1999, 2500, 4001, 4002, 6001]
+    if item_id_raw not in sample_ids:
+        return _err("该物品不在当前商城可购买范围")
+
+    item_info = _serialize_item(item_id_raw)
+    goods_name = item_info.get('name') or f"物品{item_id_raw}"
+    goods_type = item_info.get('type') or "未知"
+
+    price = 1000
+    total_cost = price * quantity_raw
+
+    user_rows = execute_sql(DATABASE, "SELECT stone FROM user_xiuxian WHERE user_id = ?", (player_id,))
+    if isinstance(user_rows, dict) and user_rows.get("error"):
+        return _err("购买失败，无法读取用户信息")
+    if not user_rows:
+        return _err("未找到角色信息")
+    current_stone = int((user_rows[0] or {}).get("stone") or 0)
+    if current_stone < total_cost:
+        return _err(f"灵石不足，需要 {total_cost}")
+
+    deduct_res = execute_sql(
+        DATABASE,
+        "UPDATE user_xiuxian SET stone = stone - ? WHERE user_id = ? AND stone >= ?",
+        (total_cost, player_id, total_cost)
+    )
+    if isinstance(deduct_res, dict) and deduct_res.get("error"):
+        return _err("灵石不足或购买失败")
+    if not isinstance(deduct_res, dict) or int(deduct_res.get("affected_rows") or 0) <= 0:
+        return _err("灵石不足或购买失败")
+
+    try:
+        game_sql.send_back(player_id, item_id_raw, goods_name, goods_type, quantity_raw)
+    except Exception:
+        # 回滚灵石，避免出现扣费成功但发货失败
+        execute_sql(
+            DATABASE,
+            "UPDATE user_xiuxian SET stone = stone + ? WHERE user_id = ?",
+            (total_cost, player_id)
+        )
+        return _err("购买失败，物品发放异常")
+
+    left_rows = execute_sql(DATABASE, "SELECT stone FROM user_xiuxian WHERE user_id = ?", (player_id,))
+    stone_left = int((left_rows[0] or {}).get("stone") or 0) if isinstance(left_rows, list) and left_rows else max(current_stone - total_cost, 0)
+
+    return _ok(
+        message=f"购买成功：{goods_name} x{quantity_raw}",
+        cost=total_cost,
+        stone_left=stone_left,
+        item=_serialize_item(item_id_raw)
+    )
+
+
 @app.route('/game/api/work/status')
 @game_login_required
 def game_api_work_status():
@@ -2925,6 +3000,8 @@ def login():
     if token_arg:
         admin_id, err = _consume_admin_token(token_arg)
         if admin_id:
+            session.clear()
+            session.permanent = False
             session['admin_id'] = admin_id
             return redirect(url_for('home'))
         else:

@@ -2135,6 +2135,7 @@
                         <button class="tab-btn" data-tab="alchemy">炼丹</button>
                         <button class="tab-btn" data-tab="sect">宗门</button>
                         <button class="tab-btn" data-tab="impart">传承</button>
+                        <button class="tab-btn" data-tab="shop">商店</button>
                         <button class="tab-btn" data-tab="backpack">背包</button>
                         <button class="tab-btn" data-tab="social">社交</button>
                         <button class="tab-btn" data-tab="battle">战斗</button>
@@ -2260,6 +2261,14 @@
                         </div>
                         <div class="item-list" id="item-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px;">
                             <!-- 物品将通过 JS 动态渲染 -->
+                        </div>
+                    </div>
+
+                    <div id="tab-shop" class="tab-pane">
+                        <h3 class="panel-title">仙坊商店 <span class="badge">单价 1000 灵石</span></h3>
+                        <p class="notice">当前仅支持单次购买 1 个道具。</p>
+                        <div class="item-list" id="shop-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:10px;">
+                            <div class="item-card"><div class="item-name">加载中...</div></div>
                         </div>
                     </div>
 
@@ -2463,7 +2472,7 @@
     <div class="toast" id="toast"></div>
 
     <script>
-        const state = { profile: null, backpack: [], impartCards: [], work: null, battleTimer: null, battle: null, battleIndex: 0, battlePaused: false };
+        const state = { profile: null, backpack: [], shop: [], impartCards: [], work: null, battleTimer: null, battle: null, battleIndex: 0, battlePaused: false };
 
         function $(id) { return document.getElementById(id); }
         function pct(value, max) { return Math.max(0, Math.min(100, max ? (value / max) * 100 : 0)); }
@@ -2516,6 +2525,7 @@
             if (name === 'sect') loadSectInfo();
             if (name === 'alchemy') loadAlchemy();
             if (name === 'impart') loadImpartCards();
+            if (name === 'shop') loadShop();
             if (name === 'social') loadPlayers();
             if (name === 'settings') loadSettings();
         }
@@ -2539,6 +2549,57 @@
                     </div>
                 `;
             }).join('');
+        }
+
+        function renderShop() {
+            const list = $('shop-list');
+            const goods = state.shop || [];
+            if (!list) return;
+            if (!goods.length) {
+                list.innerHTML = `<div class="item-card"><div class="item-name">暂无可购买商品</div></div>`;
+                return;
+            }
+            list.innerHTML = goods.map(item => `
+                <div class="item-card">
+                    <div class="item-name" title="${item.name}">${item.name}</div>
+                    <div class="item-meta">${item.type} · ${item.level}</div>
+                    <div class="item-meta">${item.desc || '暂无描述'}</div>
+                    <div class="item-count"><span>价格</span><b>${number_to(item.price || 1000)} 灵石</b></div>
+                    <button class="btn" onclick="buyShopItem(${item.id}, this)">购买</button>
+                </div>
+            `).join('');
+        }
+
+        async function loadShop() {
+            try {
+                const data = await api('/game/api/shop');
+                state.shop = (data.shop && data.shop.goods) ? data.shop.goods : [];
+                renderShop();
+            } catch (err) {
+                toast(err.message || '加载商店失败');
+            }
+        }
+
+        async function buyShopItem(itemId, btn) {
+            if (!itemId || !btn) return;
+            btn.disabled = true;
+            const oldText = btn.textContent;
+            btn.textContent = '购买中...';
+            try {
+                const data = await api('/game/api/shop/buy', {
+                    method: 'POST',
+                    body: JSON.stringify({ item_id: itemId, quantity: 1 })
+                });
+                toast(data.message || '购买成功');
+                await loadProfileOnly();
+                await loadBackpack();
+                await loadShop();
+            } catch (err) {
+                toast(err.message || '购买失败');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = oldText;
+            }
         }
 
         async function loadImpartCards() {
@@ -3141,7 +3202,7 @@
 
         async function loadAll() {
             try {
-                const [profile, work, backpack, rift, sect, retreat, breakStatus, impartCards] = await Promise.all([
+                const [profile, work, backpack, rift, sect, retreat, breakStatus, impartCards, shop] = await Promise.all([
                     api('/game/api/profile'),
                     api('/game/api/work/status'),
                     api('/game/api/backpack'),
@@ -3149,13 +3210,16 @@
                     api('/game/api/sect'),
                     api('/game/api/retreat/status'),
                     api('/game/api/breakthrough/status'),
-                    api('/game/api/impart/cards')
+                    api('/game/api/impart/cards'),
+                    api('/game/api/shop')
                 ]);
                 renderProfile(profile.profile);
                 renderWork(work.work);
                 state.backpack = backpack.items;
+                state.shop = (shop.shop && shop.shop.goods) ? shop.shop.goods : [];
                 state.impartCards = impartCards.cards || [];
                 renderBackpack();
+                renderShop();
                 renderImpartCards();
                 renderRift(rift.rift);
                 renderSect(sect.sect);
