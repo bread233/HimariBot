@@ -1750,6 +1750,7 @@
                         <button class="tab-btn" data-tab="rift">秘境</button>
                         <button class="tab-btn" data-tab="alchemy">炼丹</button>
                         <button class="tab-btn" data-tab="sect">宗门</button>
+                        <button class="tab-btn" data-tab="impart">传承</button>
                         <button class="tab-btn" data-tab="backpack">背包</button>
                         <button class="tab-btn" data-tab="social">社交</button>
                         <button class="tab-btn" data-tab="battle">战斗</button>
@@ -1840,6 +1841,20 @@
                         <h3 class="panel-title">宗门信息 <span class="badge" id="sect-badge">--</span></h3>
                         <div class="stat-grid" id="sect-info">
                             <div class="card muted">正在加载宗门信息...</div>
+                        </div>
+                    </div>
+
+
+                    <div id="tab-impart" class="tab-pane">
+                        <h3 class="panel-title">传承祈愿 <span class="badge">思恋结晶</span></h3>
+                        <div class="quest-card">
+                            <h4>思恋结晶传承祈愿</h4>
+                            <p class="hint">消耗思恋结晶抽取传承卡片。1 次消耗 10 颗，10 次消耗 100 颗。</p>
+                            <div class="action-grid">
+                                <button class="btn primary" id="btn-impart-wish-1" onclick="performImpartWish(1)">祈愿 1 次</button>
+                                <button class="btn ghost" id="btn-impart-wish-10" onclick="performImpartWish(10)">祈愿 10 次</button>
+                            </div>
+                            <div id="impart-wish-result" class="hint" style="margin-top:12px;">暂无祈愿结果</div>
                         </div>
                     </div>
 
@@ -2451,6 +2466,45 @@
                 await loadBackpack();
             } catch (e) {
                 toast(e.message || '使用丹药失败');
+            }
+        }
+
+
+        async function performImpartWish(wishTimes) {
+            const btnOne = $('btn-impart-wish-1');
+            const btnTen = $('btn-impart-wish-10');
+            const resultEl = $('impart-wish-result');
+            const buttons = [btnOne, btnTen].filter(Boolean);
+            buttons.forEach(btn => btn.disabled = true);
+            if (resultEl) resultEl.textContent = '祈愿中...';
+
+            try {
+                const data = await api('/game/api/impart/wish', {
+                    method: 'POST',
+                    body: JSON.stringify({ wish_times: wishTimes })
+                });
+
+                if (data.ok === false) {
+                    const message = data.message || '传承祈愿失败';
+                    if (resultEl) resultEl.textContent = message;
+                    toast(message);
+                    return;
+                }
+
+                const newCards = (data.new_cards && data.new_cards.length) ? data.new_cards.join('、') : '无';
+                const drawnCards = (data.drawn_cards && data.drawn_cards.length) ? data.drawn_cards.join('、') : '无';
+                const message = `祈愿成功：消耗 ${data.cost} 思恋结晶，剩余 ${data.currency_left}。新卡：${newCards}；本次抽中：${drawnCards}；重复 ${data.total_duplicates || 0} 张；保底 ${data.guaranteed_pulls || 0} 次；闭关时间 +${data.total_seclusion_time || 0} 分钟。`;
+                if (resultEl) resultEl.textContent = message;
+                toast(data.message || '祈愿成功');
+
+                await loadProfileOnly();
+                await loadBackpack();
+            } catch (err) {
+                const message = err.message || '传承祈愿请求失败';
+                if (resultEl) resultEl.textContent = message;
+                toast(message);
+            } finally {
+                buttons.forEach(btn => btn.disabled = false);
             }
         }
 

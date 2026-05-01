@@ -2151,26 +2151,63 @@ def game_api_impart_wish():
     player_id = _current_player_id()
     payload = request.get_json(silent=True)
     if not payload:
-        return jsonify({"ok": False, "message": "\u8bf7\u6c42\u53c2\u6570\u4e0d\u80fd\u4e3a\u7a7a"})
+        return jsonify({
+            "success": False,
+            "ok": False,
+            "error": "\u8bf7\u6c42\u53c2\u6570\u4e0d\u80fd\u4e3a\u7a7a",
+            "message": "\u8bf7\u6c42\u53c2\u6570\u4e0d\u80fd\u4e3a\u7a7a"
+        })
 
     wish_times_raw = payload.get("wish_times")
     if wish_times_raw is None:
-        return jsonify({"ok": False, "message": "wish_times \u4e0d\u80fd\u4e3a\u7a7a"})
+        return jsonify({
+            "success": False,
+            "ok": False,
+            "error": "wish_times \u4e0d\u80fd\u4e3a\u7a7a",
+            "message": "wish_times \u4e0d\u80fd\u4e3a\u7a7a"
+        })
 
     try:
         wish_times = int(wish_times_raw)
     except (TypeError, ValueError):
-        return jsonify({"ok": False, "message": "wish_times \u5fc5\u987b\u662f\u6574\u6570"})
+        return jsonify({
+            "success": False,
+            "ok": False,
+            "error": "wish_times \u5fc5\u987b\u662f\u6574\u6570",
+            "message": "wish_times \u5fc5\u987b\u662f\u6574\u6570"
+        })
 
     if wish_times not in (1, 10):
-        return jsonify({"ok": False, "message": "wish_times \u53ea\u5141\u8bb8 1 \u6216 10"})
+        return jsonify({
+            "success": False,
+            "ok": False,
+            "error": "wish_times \u53ea\u5141\u8bb8 1 \u6216 10",
+            "message": "wish_times \u53ea\u5141\u8bb8 1 \u6216 10"
+        })
 
     try:
         from ..xiuxian_impart import perform_impart_crystal_wish
         result = _run_async(perform_impart_crystal_wish(player_id, wish_times))
     except Exception as e:
         logger.exception(f"Impart crystal wish failed: user_id={player_id}, error={e}")
-        return jsonify({"ok": False, "message": "\u4f20\u627f\u7948\u613f\u5931\u8d25"})
+        return jsonify({
+            "success": False,
+            "ok": False,
+            "error": "\u4f20\u627f\u7948\u613f\u5931\u8d25",
+            "message": "\u4f20\u627f\u7948\u613f\u5931\u8d25"
+        })
+
+    if isinstance(result, dict):
+        result.setdefault("success", bool(result.get("ok", True)))
+        if not result.get("success"):
+            result.setdefault("error", result.get("message") or "\u4f20\u627f\u7948\u613f\u5931\u8d25")
+    else:
+        result = {
+            "success": False,
+            "ok": False,
+            "error": "\u4f20\u627f\u7948\u613f\u5931\u8d25",
+            "message": "\u4f20\u627f\u7948\u613f\u5931\u8d25"
+        }
 
     return jsonify(result)
 
