@@ -612,6 +612,7 @@ async def perform_impart_crystal_wish(user_id: int, wish_times: int) -> dict:
 
     current_wish = impart_data_draw["wish"]
     drawn_cards = []
+    draw_slots = []
     total_seclusion_time = 0
     guaranteed_pulls = 0
 
@@ -620,6 +621,11 @@ async def perform_impart_crystal_wish(user_id: int, wish_times: int) -> dict:
         if current_wish >= 89:
             reap_img = random.choice(img_list)
             drawn_cards.append(reap_img)
+            draw_slots.append({
+                "hit": True,
+                "name": reap_img,
+                "guaranteed": True,
+            })
             guaranteed_pulls += 1
             total_seclusion_time += 1200
             current_wish = 0
@@ -627,9 +633,19 @@ async def perform_impart_crystal_wish(user_id: int, wish_times: int) -> dict:
             if get_rank(user_id):
                 reap_img = random.choice(img_list)
                 drawn_cards.append(reap_img)
+                draw_slots.append({
+                    "hit": True,
+                    "name": reap_img,
+                    "guaranteed": False,
+                })
                 total_seclusion_time += 1200
                 current_wish = 0
             else:
+                draw_slots.append({
+                    "hit": False,
+                    "name": None,
+                    "guaranteed": False,
+                })
                 total_seclusion_time += 660
 
     new_cards, card_counts = impart_data_json.data_person_add_batch(user_id, drawn_cards)
@@ -653,6 +669,7 @@ async def perform_impart_crystal_wish(user_id: int, wish_times: int) -> dict:
          "currency_left": impart_data_draw["stone_num"],
          "wish": impart_data_draw["wish"],
          "drawn_cards": drawn_cards,
+         "draw_slots": draw_slots,
         "new_cards": new_cards,
         "card_counts": card_counts,
         "total_new_cards": total_new_cards,

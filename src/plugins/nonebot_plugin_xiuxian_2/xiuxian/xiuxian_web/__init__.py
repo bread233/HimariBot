@@ -2203,22 +2203,58 @@ def game_api_impart_wish():
         if not result.get("success"):
             result.setdefault("error", result.get("message") or "\u4f20\u627f\u7948\u613f\u5931\u8d25")
         elif result.get("success"):
-            drawn_cards = result.get("drawn_cards", [])
-            new_cards = result.get("new_cards", [])
-            card_counts = result.get("card_counts", {})
-            result["draw_results"] = [
-                {
-                    "name": card_name,
-                    "rarity": detail["rarity"],
-                    "is_new": card_name in new_cards,
-                    "effect": detail["effect"],
-                    "current_count": detail["current_count"],
-                    "stars": detail["stars"],
-                }
-                for card_name in drawn_cards
-                for count in [int(card_counts.get(card_name, 0) or 0)]
-                for detail in [get_impart_card_display_info(card_name, count)]
-            ]
+            card_counts = result.get("card_counts") or {}
+            new_cards = result.get("new_cards") or []
+            draw_slots = result.get("draw_slots") or []
+
+            if draw_slots:
+                result["draw_results"] = []
+                for slot in draw_slots:
+                    if not slot.get("hit"):
+                        result["draw_results"].append(
+                            {
+                                "empty": True,
+                                "name": "未获得",
+                                "rarity": "blue",
+                                "is_new": False,
+                                "effect": "",
+                                "current_count": 0,
+                                "stars": "",
+                                "guaranteed": False,
+                            }
+                        )
+                        continue
+
+                    card_name = slot.get("name")
+                    count = int(card_counts.get(card_name, 0) or 0)
+                    detail = get_impart_card_display_info(card_name, count)
+                    result["draw_results"].append(
+                        {
+                            "empty": False,
+                            "name": card_name,
+                            "rarity": detail["rarity"],
+                            "is_new": card_name in new_cards,
+                            "effect": detail["effect"],
+                            "current_count": detail["current_count"],
+                            "stars": detail["stars"],
+                            "guaranteed": bool(slot.get("guaranteed")),
+                        }
+                    )
+            else:
+                drawn_cards = result.get("drawn_cards", [])
+                result["draw_results"] = [
+                    {
+                        "name": card_name,
+                        "rarity": detail["rarity"],
+                        "is_new": card_name in new_cards,
+                        "effect": detail["effect"],
+                        "current_count": detail["current_count"],
+                        "stars": detail["stars"],
+                    }
+                    for card_name in drawn_cards
+                    for count in [int(card_counts.get(card_name, 0) or 0)]
+                    for detail in [get_impart_card_display_info(card_name, count)]
+                ]
     else:
         result = {
             "success": False,
