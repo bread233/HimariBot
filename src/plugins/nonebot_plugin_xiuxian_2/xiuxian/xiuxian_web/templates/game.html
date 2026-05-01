@@ -761,6 +761,69 @@
             min-height: 180px;
         }
 
+        .fighter .fighter-ui {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        .fighter .fighter-hp {
+            position: absolute;
+            left: 8px;
+            right: 8px;
+            top: 8px;
+            height: 10px;
+            border-radius: 999px;
+            overflow: hidden;
+            background: rgba(5, 7, 12, .9);
+            border: 1px solid rgba(255, 255, 255, .18);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, .45);
+        }
+
+        .fighter .fighter-hp-delayed,
+        .fighter .fighter-hp-current {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+        }
+
+        .fighter .fighter-hp-delayed {
+            background: linear-gradient(90deg, #f2b53a, #ffd67c);
+            transition: width .42s ease;
+        }
+
+        .fighter .fighter-hp-current {
+            background: linear-gradient(90deg, #8d142d, #f15f79);
+            transition: width .12s linear;
+            z-index: 1;
+        }
+
+        .fighter .fighter-floating {
+            position: absolute;
+            left: 50%;
+            top: 30%;
+            transform: translate(-50%, -50%);
+            display: grid;
+            gap: 4px;
+        }
+
+        .fighter .float-text {
+            font-size: clamp(20px, 4.2vw, 34px);
+            font-weight: 900;
+            letter-spacing: .02em;
+            opacity: .98;
+            text-shadow: 0 0 14px rgba(0, 0, 0, .85), 0 0 24px rgba(255, 255, 255, .3);
+            animation: floatUp .72s ease forwards;
+        }
+
+        .fighter .float-text.damage { color: #ff718f; }
+        .fighter .float-text.heal { color: #86f7b2; }
+        .fighter .float-text.miss { color: #9fd6ff; }
+        .fighter .float-text.buff { color: #d0b0ff; }
+
         .fighter img {
             width: 100%;
             height: 100%;
@@ -877,6 +940,23 @@
             100% {
                 opacity: 0;
                 transform: translate(-50%, -96%) scale(.92);
+            }
+        }
+
+        @keyframes floatUp {
+            0% {
+                opacity: .98;
+                transform: translateY(0) scale(.92);
+            }
+
+            20% {
+                opacity: 1;
+                transform: translateY(-6px) scale(1.03);
+            }
+
+            100% {
+                opacity: 0;
+                transform: translateY(-32px) scale(.98);
             }
         }
 
@@ -1514,6 +1594,12 @@
                 min-height: 145px;
             }
 
+            .fighter .fighter-hp {
+                top: 6px;
+                left: 6px;
+                right: 6px;
+            }
+
             .battle-caption {
                 left: 10px;
                 right: 10px;
@@ -1687,6 +1773,10 @@
 
             .fighter {
                 min-height: 155px;
+            }
+
+            .fighter .fighter-floating {
+                top: 36%;
             }
 
             .battle-caption {
@@ -2482,10 +2572,190 @@
     <div class="toast" id="toast"></div>
 
     <script>
-        const state = { profile: null, backpack: [], shop: [], impartCards: [], work: null, battleTimer: null, battle: null, battleIndex: 0, battlePaused: false };
+        const state = {
+            profile: null, backpack: [], shop: [], impartCards: [], work: null,
+            battleTimer: null, battle: null, battleIndex: 0, battlePaused: false,
+            battleFinished: false,
+            battleFinishToast: null,
+            battleFinishReloadProfile: false,
+            battleViz: {
+                player: { hpPercent: 100, delayedPercent: 100, hasHp: false, delayedTimer: null },
+                enemy: { hpPercent: 100, delayedPercent: 100, hasHp: false, delayedTimer: null }
+            }
+        };
 
         function $(id) { return document.getElementById(id); }
         function pct(value, max) { return Math.max(0, Math.min(100, max ? (value / max) * 100 : 0)); }
+        function clampPercent(v) { return Math.max(0, Math.min(100, Number(v) || 0)); }
+        function parseChineseNumberToFloat(valueText) {
+            const s = String(valueText || '').trim().replace(/,/g, '');
+            if (!s) return null;
+            const m = s.match(/^([0-9]+(?:\.[0-9]+)?)([万亿])?$/);
+            if (!m) {
+                const plain = Number.parseFloat(s);
+                return Number.isFinite(plain) ? plain : null;
+            }
+            const base = Number.parseFloat(m[1]);
+            if (!Number.isFinite(base)) return null;
+            const unit = m[2];
+            if (unit === '万') return base * 10000;
+            if (unit === '亿') return base * 100000000;
+            return base;
+        }
+        function parseHpFromBattleText(text) {
+            const s = String(text || '');
+            let current = null;
+            let max = null;
+            let percent = null;
+
+            const hpPair = s.match(/当前血量\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?\s*[万亿]?)\s*\/\s*([0-9]+(?:\.[0-9]+)?\s*[万亿]?)/);
+            if (hpPair) {
+                current = parseChineseNumberToFloat(hpPair[1].replace(/\s+/g, ''));
+                max = parseChineseNumberToFloat(hpPair[2].replace(/\s+/g, ''));
+            }
+
+            if (current === null) {
+                const remaining = s.match(/剩余血量\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?\s*[万亿]?)/);
+                if (remaining) current = parseChineseNumberToFloat(remaining[1].replace(/\s+/g, ''));
+            }
+
+            const pctMatch = s.match(/([0-9]{1,3}(?:\.[0-9]+)?)\s*%/);
+            if (pctMatch) {
+                const p = Number.parseFloat(pctMatch[1]);
+                if (Number.isFinite(p)) percent = clampPercent(p);
+            }
+
+            return {
+                current: Number.isFinite(current) ? current : null,
+                max: Number.isFinite(max) && max > 0 ? max : null,
+                percent: Number.isFinite(percent) ? percent : null
+            };
+        }
+        function inferBattleSideFromText(text) {
+            const s = String(text || '');
+            const playerNames = [
+                state.profile?.name,
+                state.battle?.player_name,
+                state.battle?.player?.name,
+                state.battle?.player
+            ].filter(Boolean).map(v => String(v));
+            const enemyNames = [
+                state.battle?.enemy_name,
+                state.battle?.enemy?.name,
+                state.battle?.enemy,
+                state.battle?.boss_name,
+                state.battle?.target_name
+            ].filter(Boolean).map(v => String(v));
+            if (playerNames.some(name => name && s.includes(name))) return 'player';
+            if (enemyNames.some(name => name && s.includes(name))) return 'enemy';
+            return null;
+        }
+        function isBattleHpStatusLine(text) {
+            const s = String(text || '');
+            return (
+                /当前血量|剩余血量|气血/.test(s) &&
+                (
+                    /[0-9.]+\s*[万亿]?\s*\/\s*[0-9.]+\s*[万亿]?/.test(s) ||
+                    /[■□▇▆▅▄▃▂▁█░▒▓]+/.test(s) ||
+                    /\d+\s*%/.test(s)
+                )
+            );
+        }
+        function isLikelyHpText(text) {
+            const s = String(text || '');
+            return /当前血量|剩余血量|气血[:：]|█|▇|▆|▅|▃|▂|░|\b\d{1,3}%\b/.test(s);
+        }
+        function battleSideState(side) {
+            return side === 'enemy' ? state.battleViz.enemy : state.battleViz.player;
+        }
+        function ensureFighterUi(side) {
+            const fighter = side === 'enemy' ? $('fighter-enemy') : $('fighter-player');
+            if (!fighter) return;
+            let ui = fighter.querySelector('.fighter-ui');
+            if (!ui) {
+                ui = document.createElement('div');
+                ui.className = 'fighter-ui';
+                ui.innerHTML = `
+                    <div class="fighter-hp">
+                        <i class="fighter-hp-delayed" data-role="hp-delayed"></i>
+                        <i class="fighter-hp-current" data-role="hp-current"></i>
+                    </div>
+                    <div class="fighter-floating" data-role="floating"></div>
+                `;
+                fighter.appendChild(ui);
+            }
+        }
+        function setFighterHp(side, hpPercent, { immediateDelayed = false } = {}) {
+            ensureFighterUi(side);
+            const fighter = side === 'enemy' ? $('fighter-enemy') : $('fighter-player');
+            const s = battleSideState(side);
+            if (!fighter) return;
+            const cur = fighter.querySelector('[data-role="hp-current"]');
+            const delayed = fighter.querySelector('[data-role="hp-delayed"]');
+            const next = clampPercent(hpPercent);
+            const prev = clampPercent(s.hpPercent);
+            s.hasHp = true;
+            s.hpPercent = next;
+            s.current = next;
+            if (cur) cur.style.width = `${next}%`;
+            if (s.delayedTimer) {
+                clearTimeout(s.delayedTimer);
+                s.delayedTimer = null;
+            }
+            if (immediateDelayed || next >= s.delayedPercent) {
+                s.delayedPercent = next;
+                s.delayed = next;
+                if (delayed) delayed.style.width = `${next}%`;
+                return;
+            }
+            s.delayedPercent = prev;
+            s.delayed = prev;
+            if (delayed) delayed.style.width = `${prev}%`;
+            s.delayedTimer = setTimeout(() => {
+                s.delayedPercent = next;
+                s.delayed = next;
+                if (delayed) delayed.style.width = `${next}%`;
+            }, 420);
+        }
+        function syncOneBattleHpBar(side) {
+            ensureFighterUi(side);
+            const fighter = side === 'enemy' ? $('fighter-enemy') : $('fighter-player');
+            const s = battleSideState(side);
+            if (!fighter || !s) return;
+            const cur = fighter.querySelector('[data-role="hp-current"]');
+            const delayed = fighter.querySelector('[data-role="hp-delayed"]');
+            const current = clampPercent(Number.isFinite(Number(s.current)) ? s.current : s.hpPercent);
+            const delayedValue = clampPercent(Number.isFinite(Number(s.delayed)) ? s.delayed : s.delayedPercent);
+            if (cur) cur.style.width = `${current}%`;
+            if (delayed) delayed.style.width = `${delayedValue}%`;
+        }
+        function syncBattleHpBars() {
+            syncOneBattleHpBar('player');
+            syncOneBattleHpBar('enemy');
+        }
+        function resolveHpInfo(ev, side) {
+            const hpCandidates = side === 'player'
+                ? [ev.player_hp, ev.player_current_hp]
+                : [ev.enemy_hp, ev.enemy_current_hp];
+            const maxCandidates = side === 'player'
+                ? [ev.player_max_hp]
+                : [ev.enemy_max_hp];
+            const hp = hpCandidates.find(v => Number.isFinite(Number(v)));
+            const maxHp = maxCandidates.find(v => Number.isFinite(Number(v)) && Number(v) > 0);
+            if (!Number.isFinite(Number(hp)) || !Number.isFinite(Number(maxHp)) || Number(maxHp) <= 0) return null;
+            return pct(Number(hp), Number(maxHp));
+        }
+        function spawnFloatingText(side, kind, text) {
+            ensureFighterUi(side);
+            const fighter = side === 'enemy' ? $('fighter-enemy') : $('fighter-player');
+            const container = fighter?.querySelector('[data-role="floating"]');
+            if (!container) return;
+            const el = document.createElement('div');
+            el.className = `float-text ${kind}`;
+            el.textContent = text;
+            container.appendChild(el);
+            setTimeout(() => el.remove(), 760);
+        }
         
         // 格式化数字显示 (JS 版)
         function number_to(num) {
@@ -3062,8 +3332,6 @@
                 if (buttonEl) buttonEl.disabled = false;
             }
         }
-
-
 
         let lastImpartWishTimes = 1;
 
@@ -3680,9 +3948,10 @@
                     body: JSON.stringify({ name, jj })
                 });
                 $('world-boss-panel').style.display = 'none';
-                playBattle(data.battle);
-                if (data.message) toast(data.message);
-                await loadProfileOnly();
+                playBattle(data.battle, {
+                    finishMessage: data.message || '',
+                    reloadProfileOnFinish: true
+                });
             } catch (err) { toast(err.message); }
         }
         async function startPlayerBattle() {
@@ -3693,17 +3962,32 @@
                 playBattle(data.battle);
             } catch (err) { toast(err.message); }
         }
-        function playBattle(battle) {
+        function playBattle(battle, options = {}) {
             clearTimeout(state.battleTimer);
             state.battle = battle;
             state.battleIndex = 0;
             state.battlePaused = false;
+            state.battleFinished = false;
+            state.battleFinishToast = options.finishMessage || null;
+            state.battleFinishReloadProfile = Boolean(options.reloadProfileOnFinish);
             $('btn-battle-toggle').disabled = false;
             $('btn-battle-skip').disabled = false;
             $('btn-battle-toggle').textContent = '暂停';
             $('battle-title').textContent = `${battle.title} · 胜者：${battle.winner} · ${battle.meta?.event_count || battle.events.length}幕`;
             $('battle-log').innerHTML = '';
             $('battle-caption').textContent = '战斗开始……';
+            ['player', 'enemy'].forEach(side => {
+                const sideState = battleSideState(side);
+                if (sideState.delayedTimer) clearTimeout(sideState.delayedTimer);
+                sideState.delayedTimer = null;
+                sideState.hpPercent = 100;
+                sideState.delayedPercent = 100;
+                sideState.current = 100;
+                sideState.delayed = 100;
+                sideState.hasHp = false;
+                ensureFighterUi(side);
+                setFighterHp(side, 100, { immediateDelayed: true });
+            });
 
             // 初始化图片并添加错误处理
             if (battle.enemy_img) {
@@ -3716,6 +4000,9 @@
             } else if (state.profile && state.profile.card_img) {
                 $('fighter-player').innerHTML = `<img src="${state.profile.card_img}" onerror="this.src='/assets/card/default'" alt="player">`;
             }
+            ensureFighterUi('player');
+            ensureFighterUi('enemy');
+            syncBattleHpBars();
 
             updateBattleProgress();
             scheduleNextBattleEvent(500);
@@ -3736,7 +4023,8 @@
             const player = $('fighter-player'), enemy = $('fighter-enemy');
             player.classList.remove('hit', 'cast', 'heal', 'aura', 'wind');
             enemy.classList.remove('hit', 'cast', 'heal', 'aura', 'wind');
-            $('battle-caption').textContent = `${ev.speaker}：${ev.content}`;
+            const eventContent = String(ev.content || '');
+            $('battle-caption').textContent = `${ev.speaker}：${eventContent}`;
 
             // 更新图片并添加错误处理
             if (ev.speaker_img) {
@@ -3745,30 +4033,61 @@
                     if (!fighter.querySelector('img') || fighter.querySelector('img').src.indexOf(ev.speaker_img) === -1) {
                         const fallback = ev.side === 'player' ? '/assets/card/default' : '/assets/boss/default';
                         fighter.innerHTML = `<img src="${ev.speaker_img}" onerror="this.src='${fallback}'" alt="fighter">`;
+                        ensureFighterUi(ev.side);
+                        syncOneBattleHpBar(ev.side);
                     }
                 }
             }
 
-            const line = document.createElement('div');
-            line.className = `log-line ${ev.side}`;
-            line.textContent = `${String(ev.seq).padStart(2, '0')}｜${ev.speaker}：${ev.content}`;
-            $('battle-log').prepend(line);
+            if (!isLikelyHpText(eventContent) && !isBattleHpStatusLine(eventContent)) {
+                const line = document.createElement('div');
+                line.className = `log-line ${ev.side}`;
+                line.textContent = `${String(ev.seq).padStart(2, '0')}｜${ev.speaker}：${eventContent}`;
+                $('battle-log').prepend(line);
+            }
 
-            const actor = ev.side === 'player' ? player : (ev.side === 'enemy' ? enemy : null);
-            const target = ev.target_side === 'player' ? player : (ev.target_side === 'enemy' ? enemy : actor);
-            if (actor && ev.type === 'attack') actor.classList.add('cast');
+            const targetSide = ev.target_side === 'player' ? 'player' : (ev.target_side === 'enemy' ? 'enemy' : null);
+            const actorSide = ev.actor_side === 'player' || ev.actor_side === 'enemy'
+                ? ev.actor_side
+                : (ev.side === 'player' ? 'player' : (ev.side === 'enemy' ? 'enemy' : null));
+            const actor = actorSide === 'player' ? player : (actorSide === 'enemy' ? enemy : null);
+            const target = targetSide === 'player' ? player : (targetSide === 'enemy' ? enemy : actor);
+            const eventType = ev.event_type || ev.type;
+            if (actor && eventType === 'attack') actor.classList.add('cast');
             if (target) {
-                const klass = ev.type === 'attack' ? 'hit' : (ev.type === 'heal' ? 'heal' : (ev.type === 'buff' ? 'aura' : (ev.type === 'miss' ? 'wind' : '')));
+                const klass = eventType === 'attack' ? 'hit' : (eventType === 'heal' ? 'heal' : (eventType === 'buff' ? 'aura' : (eventType === 'miss' ? 'wind' : '')));
                 if (klass) target.classList.add(klass);
+            }
+
+            const playerHpPercent = resolveHpInfo(ev, 'player');
+            const enemyHpPercent = resolveHpInfo(ev, 'enemy');
+            if (playerHpPercent !== null) setFighterHp('player', playerHpPercent);
+            if (enemyHpPercent !== null) setFighterHp('enemy', enemyHpPercent);
+
+            const damage = Number(ev.damage ?? 0);
+            const heal = Number(ev.heal ?? 0);
+            const isMiss = ev.miss === true || eventType === 'miss';
+            if (isMiss && targetSide) {
+                spawnFloatingText(targetSide, 'miss', 'MISS');
+            } else if (Number.isFinite(damage) && damage > 0 && targetSide) {
+                spawnFloatingText(targetSide, 'damage', `-${number_to(Math.round(damage))}`);
+            } else if (Number.isFinite(heal) && heal > 0) {
+                const healSide = actorSide || targetSide;
+                if (healSide) spawnFloatingText(healSide, 'heal', `+${number_to(Math.round(heal))}`);
             }
             spawnBattleFx(ev);
             setTimeout(() => { player.classList.remove('hit', 'cast', 'heal', 'aura', 'wind'); enemy.classList.remove('hit', 'cast', 'heal', 'aura', 'wind'); }, 520);
         }
         function spawnBattleFx(ev) {
-            if (!['attack', 'heal', 'miss', 'buff'].includes(ev.type)) return;
+            const eventType = ev.event_type || ev.type;
+            if (!['attack', 'heal', 'miss', 'buff'].includes(eventType)) return;
             const fx = document.createElement('div');
-            fx.className = `battle-fx ${ev.type}`;
-            fx.textContent = ev.type === 'miss' ? 'MISS' : (ev.type === 'heal' ? `+${ev.amount || ''}` : (ev.type === 'buff' ? 'BUFF' : `-${ev.amount || ''}`));
+            fx.className = `battle-fx ${eventType}`;
+            const damage = Number(ev.damage ?? 0);
+            const heal = Number(ev.heal ?? 0);
+            fx.textContent = eventType === 'miss' || ev.miss === true
+                ? 'MISS'
+                : (eventType === 'heal' ? `+${number_to(Math.round(heal || 0))}` : (eventType === 'buff' ? 'BUFF' : `-${number_to(Math.round(damage || 0))}`));
             document.querySelector('.battle-stage').appendChild(fx);
             setTimeout(() => fx.remove(), 760);
         }
@@ -3778,10 +4097,22 @@
             $('battle-progress-bar').style.width = `${total ? (state.battleIndex / total) * 100 : 0}%`;
         }
         function finishBattle() {
+            if (state.battleFinished) return;
+            state.battleFinished = true;
             clearTimeout(state.battleTimer);
             $('battle-caption').textContent = `战斗结束，胜者：${state.battle?.winner || '--'}`;
             $('btn-battle-toggle').disabled = true;
             $('btn-battle-skip').disabled = true;
+
+            const finishToast = state.battleFinishToast;
+            const reloadProfile = state.battleFinishReloadProfile;
+            state.battleFinishToast = null;
+            state.battleFinishReloadProfile = false;
+
+            if (finishToast) toast(finishToast);
+            if (reloadProfile) {
+                loadProfileOnly().catch(err => toast(err.message || '刷新角色信息失败'));
+            }
         }
         function toggleBattlePause() {
             if (!state.battle) return;
