@@ -41,7 +41,7 @@ from ..xiuxian_rift.riftmake import (
 from ..xiuxian_mixelixir.mixelixirutil import get_mix_elixir_msg, tiaohe, check_mix, make_dict
 from ..xiuxian_boss.makeboss import create_all_bosses, createboss_jj
 from ..xiuxian_boss.bossconfig import get_boss_config
-from ..xiuxian_impart.impart_uitls import get_impart_card_rarity
+from ..xiuxian_impart.impart_uitls import get_impart_card_display_info
 
 items = Items()
 game_sql = XiuxianDateManage()
@@ -2205,13 +2205,19 @@ def game_api_impart_wish():
         elif result.get("success"):
             drawn_cards = result.get("drawn_cards", [])
             new_cards = result.get("new_cards", [])
+            card_counts = result.get("card_counts", {})
             result["draw_results"] = [
                 {
                     "name": card_name,
-                    "rarity": get_impart_card_rarity(card_name),
-                    "is_new": card_name in new_cards
+                    "rarity": detail["rarity"],
+                    "is_new": card_name in new_cards,
+                    "effect": detail["effect"],
+                    "current_count": detail["current_count"],
+                    "stars": detail["stars"],
                 }
                 for card_name in drawn_cards
+                for count in [int(card_counts.get(card_name, 0) or 0)]
+                for detail in [get_impart_card_display_info(card_name, count)]
             ]
     else:
         result = {

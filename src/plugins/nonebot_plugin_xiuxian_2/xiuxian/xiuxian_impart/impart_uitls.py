@@ -161,3 +161,54 @@ _RARITY_MAP = _calculate_rarities()
 def get_impart_card_rarity(card_name: str) -> str:
     """根据卡名获取传承卡的稀有度"""
     return _RARITY_MAP.get(card_name, "blue")
+
+
+def get_impart_card_effect(card_name: str) -> str:
+    """根据卡名获取可读的效果文本"""
+    card_data = impart_all.get(card_name)
+    if not card_data:
+        return "效果未知"
+
+    card_type = card_data.get("type")
+    vale = card_data.get("vale")
+
+    type_map = {
+        "impart_two_exp": "每日双修次数提升",
+        "impart_exp_up": "闭关经验提升",
+        "impart_atk_per": "攻击提升",
+        "impart_hp_per": "气血提升",
+        "impart_mp_per": "真元提升",
+        "boss_atk": "Boss战攻击提升",
+        "impart_know_per": "会心提升",
+        "impart_burst_per": "会心伤害提升",
+        "impart_mix_per": "炼丹收获数量提升",
+        "impart_reap_per": "灵田收取数量提升",
+    }
+
+    effect_name = type_map.get(card_type)
+    if not effect_name:
+        return "效果未知"
+
+    try:
+        value = float(vale)
+    except (TypeError, ValueError):
+        return "效果未知"
+
+    if abs(value) < 1:
+        value_text = f"{value:+.0%}"
+    elif value.is_integer():
+        value_text = f"{int(value):+d}"
+    else:
+        value_text = f"{value:+g}"
+
+    return f"{effect_name} {value_text}"
+
+
+def get_impart_card_display_info(card_name: str, count: int = 0) -> dict:
+    count = int(count or 0)
+    return {
+        "effect": get_impart_card_effect(card_name),
+        "current_count": count,
+        "stars": get_star_rating(count),
+        "rarity": get_impart_card_rarity(card_name),
+    }

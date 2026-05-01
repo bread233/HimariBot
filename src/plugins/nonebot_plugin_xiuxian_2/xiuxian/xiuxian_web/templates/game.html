@@ -1664,7 +1664,227 @@
                 font-size: 13px;
             }
         }
-    </style>
+    
+        .gacha-modal-overlay {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: radial-gradient(circle at center, rgba(255, 214, 112, 0.18), rgba(10, 6, 18, 0.86) 48%, rgba(5, 3, 10, 0.96));
+            backdrop-filter: blur(8px);
+            z-index: 9999;
+        }
+
+        .gacha-modal-overlay.show {
+            display: flex;
+        }
+
+        .gacha-modal-card {
+            width: min(960px, 96vw);
+            max-height: 92vh;
+            overflow: auto;
+            border: 1px solid rgba(255, 214, 112, 0.58);
+            border-radius: 24px;
+            background:
+                linear-gradient(145deg, rgba(35, 20, 48, 0.96), rgba(18, 9, 31, 0.98)),
+                radial-gradient(circle at top, rgba(255, 214, 112, 0.12), transparent 42%);
+            box-shadow: 0 0 42px rgba(255, 174, 38, 0.22), inset 0 0 24px rgba(255, 214, 112, 0.06);
+            padding: 22px;
+        }
+
+        .gacha-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            border-bottom: 1px solid rgba(255, 214, 112, 0.26);
+            padding-bottom: 12px;
+            margin-bottom: 16px;
+        }
+
+        .gacha-modal-header h3 {
+            margin: 0;
+            font-size: 24px;
+            color: #ffe08a;
+            text-shadow: 0 0 18px rgba(255, 214, 112, 0.45);
+        }
+
+        .gacha-modal-close {
+            border: 1px solid rgba(255, 214, 112, 0.42);
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.04);
+            color: #ffe9b8;
+            width: 36px;
+            height: 36px;
+            cursor: pointer;
+            font-size: 22px;
+            line-height: 1;
+        }
+
+        .gacha-summary {
+            color: #d8c7e8;
+            margin-bottom: 16px;
+            line-height: 1.7;
+        }
+
+        .gacha-result-grid {
+            display: grid;
+            gap: 14px;
+            margin: 16px 0 20px;
+        }
+
+        .gacha-result-grid.single {
+            grid-template-columns: minmax(180px, 260px);
+            justify-content: center;
+        }
+
+        .gacha-result-grid.ten {
+            grid-template-columns: repeat(5, 1fr);
+        }
+
+        .gacha-result-card.empty {
+            opacity: 0.5;
+            border-color: rgba(255, 255, 255, 0.1);
+            background: rgba(0, 0, 0, 0.2);
+            box-shadow: none;
+        }
+
+        .gacha-result-card {
+            position: relative;
+            min-height: 166px;
+            border: 2px solid rgba(90, 169, 255, 0.9);
+            border-radius: 18px;
+            padding: 14px 10px;
+            background:
+                linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+                radial-gradient(circle at top, rgba(90, 169, 255, 0.18), transparent 55%);
+            box-shadow: 0 0 18px rgba(90, 169, 255, 0.25), inset 0 0 16px rgba(255, 255, 255, 0.04);
+            transform: translateY(12px) scale(0.96);
+            opacity: 0;
+            animation: gachaCardReveal 520ms ease forwards;
+        }
+
+        .gacha-result-card.rarity-gold {
+            border-color: #ffd76a;
+            background:
+                linear-gradient(180deg, rgba(255, 236, 168, 0.18), rgba(255, 255, 255, 0.03)),
+                radial-gradient(circle at top, rgba(255, 215, 106, 0.35), transparent 58%);
+            box-shadow: 0 0 34px rgba(255, 215, 106, 0.68), inset 0 0 24px rgba(255, 215, 106, 0.12);
+        }
+
+        .gacha-result-card.rarity-purple {
+            border-color: #b276ff;
+            background:
+                linear-gradient(180deg, rgba(206, 165, 255, 0.16), rgba(255, 255, 255, 0.03)),
+                radial-gradient(circle at top, rgba(178, 118, 255, 0.32), transparent 58%);
+            box-shadow: 0 0 28px rgba(178, 118, 255, 0.55), inset 0 0 22px rgba(178, 118, 255, 0.10);
+        }
+
+        .gacha-result-card.rarity-blue {
+            border-color: #5aa9ff;
+            box-shadow: 0 0 20px rgba(90, 169, 255, 0.38), inset 0 0 18px rgba(90, 169, 255, 0.08);
+        }
+
+        .gacha-card-rarity {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 64px;
+            border-radius: 999px;
+            padding: 4px 9px;
+            font-size: 12px;
+            font-weight: 700;
+            background: rgba(255, 255, 255, 0.08);
+            color: #e9ddff;
+            margin-bottom: 12px;
+        }
+
+        .rarity-gold .gacha-card-rarity {
+            color: #4b3100;
+            background: linear-gradient(135deg, #fff0aa, #ffbf32);
+        }
+
+        .rarity-purple .gacha-card-rarity {
+            color: #ffffff;
+            background: linear-gradient(135deg, #d4a2ff, #7c4dff);
+        }
+
+        .rarity-blue .gacha-card-rarity {
+            color: #ffffff;
+            background: linear-gradient(135deg, #8fd1ff, #3478ff);
+        }
+
+        .gacha-card-name {
+            color: #fff3cc;
+            font-weight: 800;
+            font-size: 17px;
+            line-height: 1.35;
+            word-break: break-word;
+            min-height: 48px;
+        }
+
+
+        .gacha-card-detail {
+            margin-top: 10px;
+            display: grid;
+            gap: 3px;
+            color: #d8c7e8;
+            font-size: 12px;
+            line-height: 1.35;
+        }
+
+        .gacha-card-detail strong {
+            color: #ffe8a8;
+            font-weight: 800;
+        }
+
+        .gacha-card-stars {
+            color: #ffd76a;
+            letter-spacing: 0.08em;
+            text-shadow: 0 0 10px rgba(255, 215, 106, 0.35);
+        }
+
+        .gacha-new-badge {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 3px 8px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #ffec8a, #ff9f1c);
+            color: #351c00;
+            font-size: 12px;
+            font-weight: 900;
+            box-shadow: 0 0 14px rgba(255, 196, 49, 0.55);
+        }
+
+        .gacha-modal-actions {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        @keyframes gachaCardReveal {
+            0% {
+                opacity: 0;
+                transform: translateY(18px) scale(0.9) rotateY(45deg);
+                filter: brightness(0.7);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0) scale(1) rotateY(0deg);
+                filter: brightness(1);
+            }
+        }
+
+        @media (max-width: 760px) {
+            .gacha-result-grid.ten {
+                grid-template-columns: repeat(2, minmax(120px, 1fr));
+            }
+        }
+</style>
 </head>
 
 <body>
@@ -1673,7 +1893,7 @@
         <section class="login-card">
             <div class="login-art">
                 <h1>仙途绘卷</h1>
-                <p>将 QQ 文字修仙具象化为网页 UI：角色面板、悬赏令、背包、战斗回放。当前为 MVP 原型，后续可继续扩展成完整 DMM 风格页游。</p>
+                <p>将 QQ 文字修仙具象化为网页 UI：角色面板、悬赏令、背包、战斗回放。</p>
                 <div class="hero-rune"></div>
             </div>
             <form class="login-form" action="{{ url_for('game_login') }}" method="post">
@@ -2470,6 +2690,130 @@
         }
 
 
+
+        let lastImpartWishTimes = 1;
+
+        function escapeGachaHtml(value) {
+            const raw = value === null || value === undefined ? '' : String(value);
+            return raw.replace(/[&<>"']/g, s => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[s]));
+        }
+
+        function getImpartRarityLabel(rarity) {
+            if (rarity === 'gold') return '\u6700\u7a00\u6709';
+            if (rarity === 'purple') return '\u7a00\u6709';
+            return '\u5e38\u89c1';
+        }
+
+        function getSafeImpartDrawResults(data) {
+            if (Array.isArray(data.draw_results) && data.draw_results.length) {
+                return data.draw_results;
+            }
+            const newCards = Array.isArray(data.new_cards) ? data.new_cards : [];
+            const drawnCards = Array.isArray(data.drawn_cards) ? data.drawn_cards : [];
+            return drawnCards.map(name => ({
+                name,
+                rarity: 'blue',
+                is_new: newCards.includes(name)
+            }));
+        }
+
+        function showImpartGachaModal(data, wishTimes) {
+            lastImpartWishTimes = wishTimes || 1;
+
+            const modal = $('impart-gacha-modal');
+            const title = $('impart-gacha-title');
+            const summary = $('impart-gacha-summary');
+            const grid = $('impart-gacha-grid');
+            if (!modal || !summary || !grid) return;
+
+            const cards = getSafeImpartDrawResults(data);
+            const actualWishTimes = Number(wishTimes || data.wish_times || 1);
+            const isTen = actualWishTimes === 10;
+
+            if (title) {
+                title.textContent = isTen ? '\u5341\u8fde\u4f20\u627f\u7948\u613f' : '\u4f20\u627f\u7948\u613f\u7ed3\u679c';
+            }
+
+            const cost = data.cost !== undefined ? data.cost : 0;
+            const left = data.currency_left !== undefined ? data.currency_left : 0;
+            const newCount = data.total_new_cards !== undefined ? data.total_new_cards : 0;
+            const duplicateCount = data.total_duplicates !== undefined ? data.total_duplicates : 0;
+            const guaranteed = data.guaranteed_pulls !== undefined ? data.guaranteed_pulls : 0;
+            const seclusion = data.total_seclusion_time !== undefined ? data.total_seclusion_time : 0;
+
+            summary.innerHTML = `
+                <div>\u6d88\u8017 <strong>${cost}</strong> \u601d\u604b\u7ed3\u6676\uff0c\u5269\u4f59 <strong>${left}</strong>\u3002</div>
+                <div>\u65b0\u5361 <strong>${newCount}</strong> \u5f20\uff0c\u91cd\u590d <strong>${duplicateCount}</strong> \u5f20\uff0c\u4fdd\u5e95 <strong>${guaranteed}</strong> \u6b21\uff0c\u95ed\u5173\u65f6\u95f4 +<strong>${seclusion}</strong> \u5206\u949f\u3002</div>
+            `;
+
+            grid.className = `gacha-result-grid ${isTen ? 'ten' : 'single'}`;
+            const slots = [];
+            if (isTen) {
+                for (let i = 0; i < Math.min(cards.length, 10); i++) {
+                    slots.push(cards[i]);
+                }
+                while (slots.length < 10) {
+                         slots.push({
+                             name: '\u672a\u83b7\u5f97',
+                             rarity: 'blue',
+                             is_new: false,
+                             empty: true
+                         });
+                }
+            } else {
+                slots.push(...cards);
+            }
+
+            grid.innerHTML = slots.map((card, index) => {
+                const isEmpty = card.empty === true;
+                const rarity = ['gold', 'purple', 'blue'].includes(card.rarity) ? card.rarity : 'blue';
+                const name = escapeGachaHtml(card.name || '\u672a\u77e5\u4f20\u627f');
+                const label = isEmpty ? '' : getImpartRarityLabel(rarity);
+                const newBadge = (!isEmpty && card.is_new) ? '<span class="gacha-new-badge">NEW</span>' : '';
+                const extraClass = isEmpty ? 'empty' : `rarity-${rarity}`;
+                const effect = escapeGachaHtml(card.effect || '\u6548\u679c\u672a\u77e5');
+                const currentCount = Number(card.current_count || 0);
+                const stars = escapeGachaHtml(card.stars || '');
+                const detailHtml = !isEmpty ? `
+                            <div class="gacha-card-detail">
+                                <div>\u8be5\u5361\u6548\u679c\uff1a<strong>${effect}</strong></div>
+                                <div>\u5f53\u524d\u6301\u6709\uff1a<strong>${currentCount}</strong> \u5f20</div>
+                                <div>\u5f53\u524d\u661f\u7ea7\uff1a<strong class="gacha-card-stars">${stars}</strong></div>
+                            </div>
+                        ` : '';
+                
+                return `
+                    <div class="gacha-result-card ${extraClass}" style="animation-delay:${Math.min(index * 80, 720)}ms">
+                        ${newBadge}
+                        ${!isEmpty ? `<div class="gacha-card-rarity">${label}</div>` : ''}
+                        <div class="gacha-card-name">${name}</div>
+                        ${detailHtml}
+                    </div>
+                `;
+            }).join('');
+
+            modal.classList.add('show');
+            modal.setAttribute('aria-hidden', 'false');
+        }
+
+        function closeImpartGachaModal() {
+            const modal = $('impart-gacha-modal');
+            if (!modal) return;
+            modal.classList.remove('show');
+            modal.setAttribute('aria-hidden', 'true');
+        }
+
+        async function repeatImpartWishFromModal() {
+            closeImpartGachaModal();
+            await performImpartWish(lastImpartWishTimes || 1);
+        }
+
         async function performImpartWish(wishTimes) {
             const btnOne = $('btn-impart-wish-1');
             const btnTen = $('btn-impart-wish-10');
@@ -2495,6 +2839,7 @@
                 const drawnCards = (data.drawn_cards && data.drawn_cards.length) ? data.drawn_cards.join('、') : '无';
                 const message = `祈愿成功：消耗 ${data.cost} 思恋结晶，剩余 ${data.currency_left}。新卡：${newCards}；本次抽中：${drawnCards}；重复 ${data.total_duplicates || 0} 张；保底 ${data.guaranteed_pulls || 0} 次；闭关时间 +${data.total_seclusion_time || 0} 分钟。`;
                 if (resultEl) resultEl.textContent = message;
+                showImpartGachaModal(data, wishTimes);
                 toast(data.message || '祈愿成功');
 
                 await loadProfileOnly();
@@ -3106,6 +3451,22 @@
         loadAll();
     </script>
     {% endif %}
+
+    <div class="gacha-modal-overlay" id="impart-gacha-modal" aria-hidden="true">
+        <div class="gacha-modal-card">
+            <div class="gacha-modal-header">
+                <h3 id="impart-gacha-title">&#20256;&#25215;&#31048;&#24895;&#32467;&#26524;</h3>
+                <button class="gacha-modal-close" type="button" onclick="closeImpartGachaModal()">&times;</button>
+            </div>
+            <div id="impart-gacha-summary" class="gacha-summary"></div>
+            <div id="impart-gacha-grid" class="gacha-result-grid"></div>
+            <div class="gacha-modal-actions">
+                <button class="btn ghost" type="button" onclick="closeImpartGachaModal()">&#20851;&#38381;</button>
+                <button class="btn primary" type="button" onclick="repeatImpartWishFromModal()">&#20877;&#31048;&#24895;&#19968;&#27425;</button>
+            </div>
+        </div>
+    </div>
+
 </body>
 
 </html>
