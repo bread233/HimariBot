@@ -44,6 +44,8 @@ from .boss_limit import boss_limit
 from .. import DRIVER
 # boss定时任务
 scheduler = require("nonebot_plugin_apscheduler").scheduler
+WORLD_BOSS_INTEGRAL_BASE = 15000
+WORLD_BOSS_DAILY_INTEGRAL_LIMIT = 30000
 
 conf_data = JsonConfig().read_data()
 config = get_boss_config()
@@ -365,7 +367,7 @@ async def battle_(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent, args
     today_stone = boss_limit.get_stone(user_id)
     
     # 设置每日上限
-    integral_limit = 6000
+    integral_limit = WORLD_BOSS_DAILY_INTEGRAL_LIMIT
     stone_limit = 300000000
     
     # 初始化奖励变量
@@ -394,7 +396,7 @@ async def battle_(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent, args
         boss_integral = 0
         integral_msg = "今日积分已达上限，无法获得更多积分！"
     else:
-        boss_integral = max(int(damage_ratio * 3000), 1)
+        boss_integral = max(int(damage_ratio * WORLD_BOSS_INTEGRAL_BASE), 1)
         # 应用境界压制衰减
         boss_integral = int(boss_integral * rank_penalty)
         boss_integral = min(boss_integral, integral_limit - today_integral)
@@ -909,7 +911,7 @@ async def boss_integral_info_(bot: Bot, event: GroupMessageEvent | PrivateMessag
     today_battle_count = boss_limit.get_battle_count(user_id)
     
     # 设置每日上限
-    integral_limit = 6000
+    integral_limit = WORLD_BOSS_DAILY_INTEGRAL_LIMIT
     stone_limit = 300000000
     battle_count = 30
     
