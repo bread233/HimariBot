@@ -4,6 +4,7 @@ import numpy
 from ..xiuxian_config import XiuConfig
 from ..xiuxian_utils.xiuxian2_handle import XIUXIAN_IMPART_BUFF
 from .impart_data import impart_data_json
+from .impart_all import impart_all
 
 xiuxian_impart = XIUXIAN_IMPART_BUFF()
 img_path = Path() / "data" / "xiuxian" / "卡图"
@@ -125,3 +126,38 @@ def get_star_rating(count):
 def get_image_representation(image_name: str):
     """获取对应卡图地址"""
     return img_path / f"{image_name}.webp"
+
+def _calculate_rarities():
+    card_scores = []
+    for name, data in impart_all.items():
+        vale = data.get("vale", 0)
+        score = 0.0
+        try:
+            if isinstance(vale, (int, float)):
+                score = float(vale)
+            elif isinstance(vale, dict):
+                score = sum(abs(v) for v in vale.values() if isinstance(v, (int, float)))
+            else:
+                score = 0.0
+        except Exception:
+            score = 0.0
+        card_scores.append((score, name))
+
+    card_scores.sort(key=lambda x: x[0], reverse=True)
+    
+    rarity_map = {}
+    n = len(card_scores)
+    for i, (score, name) in enumerate(card_scores):
+        if i < n * 0.15:
+            rarity_map[name] = "gold"
+        elif i < n * 0.50:
+            rarity_map[name] = "purple"
+        else:
+            rarity_map[name] = "blue"
+    return rarity_map
+
+_RARITY_MAP = _calculate_rarities()
+
+def get_impart_card_rarity(card_name: str) -> str:
+    """根据卡名获取传承卡的稀有度"""
+    return _RARITY_MAP.get(card_name, "blue")
