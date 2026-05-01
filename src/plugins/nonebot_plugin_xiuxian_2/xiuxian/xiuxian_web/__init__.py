@@ -42,6 +42,7 @@ from ..xiuxian_mixelixir.mixelixirutil import get_mix_elixir_msg, tiaohe, check_
 from ..xiuxian_boss.makeboss import create_all_bosses, createboss_jj
 from ..xiuxian_boss.bossconfig import get_boss_config
 from ..xiuxian_impart.impart_uitls import get_impart_card_display_info
+from ..xiuxian_impart.impart_data import impart_data_json
 
 items = Items()
 game_sql = XiuxianDateManage()
@@ -2264,6 +2265,27 @@ def game_api_impart_wish():
         }
 
     return jsonify(result)
+
+
+@app.route('/game/api/impart/cards', methods=['GET'])
+@game_login_required
+def game_api_impart_cards():
+    player_id = _current_player_id()
+    card_dict = impart_data_json.data_person_list(player_id) or {}
+    cards = []
+
+    for card_name, count in sorted(card_dict.items(), key=lambda x: (-int(x[1] or 0), x[0])):
+        card_count = int(count or 0)
+        detail = get_impart_card_display_info(card_name, card_count)
+        cards.append({
+            "name": card_name,
+            "rarity": detail.get("rarity", "blue"),
+            "effect": detail.get("effect", "效果未知"),
+            "current_count": int(detail.get("current_count", card_count) or 0),
+            "stars": detail.get("stars", ""),
+        })
+
+    return _ok(cards=cards)
 
 @app.route('/game/api/shop')
 @game_login_required
