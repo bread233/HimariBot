@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 
 <head>
@@ -2362,7 +2362,7 @@
         function renderBackpack() {
             const list = $('item-list');
             list.innerHTML = '';
-            
+
             const filteredItems = (state.backpack || []).filter(item => {
                 if (currentFilter === 'all') return true;
                 if (currentFilter === '技能') return item.type === '技能' || item.item_type === '功法' || item.item_type === '神通';
@@ -2380,7 +2380,9 @@
                 const card = document.createElement('div');
                 card.className = `item-card ${item.equipped ? 'equipped' : ''}`;
                 card.onclick = () => showItemAction(item);
-                
+
+                const isPill = (item.item_type === '丹药' || item.type === '丹药') && item.buff_type === 'hp';
+
                 card.innerHTML = `
                     <div class="item-name">${item.name}</div>
                     <div class="item-meta">${item.level} · ${item.item_type || item.type}</div>
@@ -2388,10 +2390,15 @@
                         <span>数量: ${item.count}</span>
                         <span class="item-badge">${item.type}</span>
                     </div>
+                    ${isPill ? `
+                        <button class="btn ghost" style="margin-top:10px; width:100%;" onclick="usePill(${item.id}, event)">
+                            使用
+                        </button>
+                    ` : ''}
                 `;
                 list.appendChild(card);
             });
-            
+
             // 顺便更新炼丹房的药材
             const yaocai = (state.backpack || []).filter(x => x.type === '药材');
             const alcList = $('alchemy-materials');
@@ -2407,8 +2414,44 @@
         }
 
         function showItemAction(item) {
-            // 后续实现物品详情和操作弹窗
             toast(`选择了: ${item.name} (${item.desc || '暂无描述'})`);
+        }
+
+        async function usePill(itemId, event) {
+            if (event) {
+                event.stopPropagation();
+            }
+
+            try {
+                const resp = await fetch('/game/api/item/use_pill', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        item_id: itemId,
+                        quantity: 1
+                    })
+                });
+
+                const data = await resp.json().catch(() => ({}));
+
+                if (!resp.ok || data.success === false) {
+                    throw new Error(data.error || data.message || '使用丹药失败');
+                }
+
+                toast(data.message || '丹药使用成功');
+
+                const profileData = await api('/game/api/profile');
+                if (profileData.profile) {
+                    renderProfile(profileData.profile);
+                }
+
+                await loadBackpack();
+            } catch (e) {
+                toast(e.message || '使用丹药失败');
+            }
         }
 
         async function loadBackpack() {
