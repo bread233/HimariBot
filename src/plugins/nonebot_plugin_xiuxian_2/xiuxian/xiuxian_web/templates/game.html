@@ -174,6 +174,18 @@
             font: inherit;
         }
 
+        button,
+        .btn,
+        .tab-btn,
+        .action-btn,
+        .player-actions,
+        .item-card {
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+            touch-action: manipulation;
+        }
+
         .input {
             width: 100%;
             min-width: 0;
@@ -506,6 +518,8 @@
             color: var(--gold);
             display: flex;
             justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 6px;
         }
 
         .item-badge {
@@ -644,13 +658,21 @@
         }
 
         .item-card {
-            min-height: 120px;
+            min-height: auto;
+            overflow: visible;
         }
 
         .item-card h4 {
             margin: 0 0 8px;
             color: var(--gold);
             font-size: 15px;
+        }
+
+        .item-card .btn {
+            width: 100%;
+            margin-top: 8px;
+            padding: 8px 10px;
+            font-size: 12px;
         }
 
         .badge {
@@ -1241,15 +1263,23 @@
 
         .player-actions {
             display: flex;
-            gap: 8px;
-            margin-top: 8px;
             flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            margin-top: 8px;
         }
 
         .action-btn {
             padding: 4px 10px;
             font-size: 12px;
             border-radius: 8px;
+        }
+
+        .player-actions .action-btn {
+            min-width: 72px;
+            flex: 0 1 auto;
+            padding: 8px 12px;
+            white-space: nowrap;
         }
 
         .modal-body {
@@ -1660,8 +1690,62 @@
 
             .toast {
                 width: calc(100% - 20px);
-                bottom: calc(14px + env(safe-area-inset-bottom));
+                top: calc(72px + env(safe-area-inset-top));
+                bottom: auto;
+                z-index: 10050;
+                max-height: 40vh;
+                overflow: auto;
+                line-height: 1.45;
+                transform: translateX(-50%) translateY(-12px);
                 font-size: 13px;
+            }
+
+            .toast.show {
+                transform: translateX(-50%) translateY(0);
+            }
+
+            .player-card {
+                grid-template-columns: 72px minmax(0, 1fr);
+                align-items: start;
+            }
+
+            .player-avatar {
+                width: 72px;
+                height: 72px;
+            }
+
+            .player-actions {
+                margin-top: 8px;
+            }
+
+            .player-actions .action-btn {
+                flex: 1 1 calc(50% - 8px);
+                min-width: 0;
+                padding: 8px 8px;
+                font-size: 12px;
+            }
+        }
+
+        @media (max-width: 420px) {
+            .item-list {
+                grid-template-columns: 1fr;
+            }
+
+            .item-card {
+                min-height: auto;
+            }
+
+            .player-card {
+                grid-template-columns: 1fr;
+            }
+
+            .player-avatar {
+                width: 96px;
+                height: 96px;
+            }
+
+            .player-actions .action-btn {
+                flex: 1 1 calc(50% - 8px);
             }
         }
     
@@ -1880,6 +1964,41 @@
         }
 
         @media (max-width: 760px) {
+            .toast {
+                top: calc(72px + env(safe-area-inset-top));
+                bottom: auto;
+                z-index: 10050;
+                max-height: 40vh;
+                overflow: auto;
+                line-height: 1.45;
+                transform: translateX(-50%) translateY(-12px);
+            }
+
+            .toast.show {
+                transform: translateX(-50%) translateY(0);
+            }
+
+            .player-card {
+                grid-template-columns: 72px minmax(0, 1fr);
+                align-items: start;
+            }
+
+            .player-avatar {
+                width: 72px;
+                height: 72px;
+            }
+
+            .player-actions {
+                margin-top: 8px;
+            }
+
+            .player-actions .action-btn {
+                flex: 1 1 calc(50% - 8px);
+                min-width: 0;
+                padding: 8px 8px;
+                font-size: 12px;
+            }
+
             .gacha-result-grid.ten {
                 grid-template-columns: repeat(2, minmax(120px, 1fr));
             }
