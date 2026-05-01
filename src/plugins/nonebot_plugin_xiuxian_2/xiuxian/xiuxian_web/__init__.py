@@ -43,6 +43,11 @@ from ..xiuxian_boss.makeboss import create_all_bosses, createboss_jj
 from ..xiuxian_boss.bossconfig import get_boss_config
 from ..xiuxian_impart.impart_uitls import get_impart_card_display_info
 from ..xiuxian_impart.impart_data import impart_data_json
+from ..xiuxian_back.back_util import (
+    check_equipment_can_use,
+    get_use_equipment_sql,
+    get_no_use_equipment_sql,
+)
 
 items = Items()
 game_sql = XiuxianDateManage()
@@ -459,7 +464,7 @@ def get_table_data(db_path, table_name, page=1, per_page=10, search_field=None, 
     
     total_result = execute_sql(db_path, count_sql, count_params)
     total = total_result[0]['COUNT(*)'] if total_result else 0
-    
+
     return {
         "data": data,
         "total": total,
@@ -873,6 +878,42 @@ def _build_player_profile(user_id):
     if not cards: cards = [c.stem for c in (ASSETS_PATH / "卡图").glob("*.png")]
     card_name = cards[int(user_id) % len(cards)] if cards else "default"
 
+    equipment = {
+        "main": buff_name(buff.get_user_main_buff_data),
+        "sub": buff_name(buff.get_user_sub_buff_data),
+        "skill": buff_name(buff.get_user_sec_buff_data),
+        "movement": buff_name(buff.get_user_effect1_buff_data),
+        "eyes": buff_name(buff.get_user_effect2_buff_data),
+        "weapon": buff_name(buff.get_user_weapon_data),
+        "armor": buff_name(buff.get_user_armor_buff_data),
+    }
+
+    try:
+        equip_rows = execute_sql(
+            DATABASE,
+            "SELECT goods_id, goods_name, goods_type, state FROM back WHERE user_id = ? AND state = 1",
+            (user_id,),
+        ) or []
+        for row in equip_rows:
+            goods_type = str(row.get("goods_type") or "")
+            if goods_type not in ("法器", "防具"):
+                continue
+            goods_id = row.get("goods_id")
+            item = _serialize_item(goods_id, fallback=row)
+            item_obj = {
+                "name": item.get("name"),
+                "type": item.get("type"),
+                "level": item.get("level"),
+                "buff_type": item.get("buff_type"),
+                "buff": item.get("buff"),
+            }
+            if goods_type == "法器":
+                equipment["weapon"] = item_obj
+            elif goods_type == "防具":
+                equipment["armor"] = item_obj
+    except Exception:
+        pass
+
     return {
         "id": int(user.get('user_id')),
         "name": user.get('user_name') or f"无名氏({user_id})",
@@ -908,15 +949,7 @@ def _build_player_profile(user_id):
             "hp": int(user.get('hppractice') or 0),
             "mp": int(user.get('mppractice') or 0),
         },
-        "equipment": {
-            "main": buff_name(buff.get_user_main_buff_data),
-            "sub": buff_name(buff.get_user_sub_buff_data),
-            "skill": buff_name(buff.get_user_sec_buff_data),
-            "movement": buff_name(buff.get_user_effect1_buff_data),
-            "eyes": buff_name(buff.get_user_effect2_buff_data),
-            "weapon": buff_name(buff.get_user_weapon_data),
-            "armor": buff_name(buff.get_user_armor_buff_data),
-        }
+        "equipment": equipment
     }
 
 
@@ -942,6 +975,12 @@ def _build_backpack(user_id, limit=120):
         })
     result.sort(key=lambda x: (not x['equipped'], x['type'], x['id'] or 0))
     return result
+
+
+def _is_equipment_item(item: dict) -> bool:
+    item_type = str(item.get("item_type") or "")
+    goods_type = str(item.get("type") or "")
+    return item_type in ("法器", "防具") or goods_type in ("装备", "法器", "防具")
 
 
 def _build_rankings(limit=20):
@@ -2151,6 +2190,87 @@ def game_api_use_pill():
             "max_hp": max_hp,
         }
     )
+
+
+@app.route('/game/api/item/equip', methods=['POST'])
+@game_login_required
+def game_api_item_equip():
+    user_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        goods_id = int(payload.get("goods_id"))
+    except (TypeError, ValueError):
+        return _err("参数错误：goods_id 必须为整数")
+
+    backpack_items = _build_backpack(user_id, limit=500)
+    item = next((x for x in backpack_items if int(x.get("id") or 0) == goods_id), None)
+    if not item:
+        return _err("背包中不存在该物品", 404)
+    if not _is_equipment_item(item):
+        return _err("该物品不是可穿戴装备")
+
+    if int(item.get("state") or 0) != 0:
+        return _err("该装备已被装备，请勿重复装备！")
+
+    if not check_equipment_can_use(user_id, goods_id):
+        return _err("该装备已被装备，请勿重复装备！")
+
+    sql_result = get_use_equipment_sql(user_id, goods_id)
+    sql_list, item_type = sql_result if isinstance(sql_result, tuple) else (sql_result, "")
+    if not isinstance(sql_list, list) or not sql_list:
+        return _err("穿戴失败：未生成有效装备SQL")
+
+    for sql in sql_list:
+        res = execute_sql(DATABASE, sql)
+        if isinstance(res, dict) and res.get("error"):
+            return _err(f"穿戴失败：{res['error']}")
+
+    if item_type == "法器":
+        game_sql.updata_user_faqi_buff(user_id, goods_id)
+    if item_type == "防具":
+        game_sql.updata_user_armor_buff(user_id, goods_id)
+
+    return _ok(message="穿戴成功", goods_id=goods_id)
+
+
+@app.route('/game/api/item/unequip', methods=['POST'])
+@game_login_required
+def game_api_item_unequip():
+    user_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        goods_id = int(payload.get("goods_id"))
+    except (TypeError, ValueError):
+        return _err("参数错误：goods_id 必须为整数")
+
+    backpack_items = _build_backpack(user_id, limit=500)
+    item = next((x for x in backpack_items if int(x.get("id") or 0) == goods_id), None)
+    if not item:
+        return _err("背包中不存在该物品", 404)
+    if not _is_equipment_item(item):
+        return _err("该物品不是可卸下装备")
+
+    if int(item.get("state") or 0) != 1:
+        return _err("装备没有被使用，无法卸载！")
+
+    sql_result = get_no_use_equipment_sql(user_id, goods_id)
+    sql_list, item_type = sql_result if isinstance(sql_result, tuple) else (sql_result, "")
+    if not isinstance(sql_list, list) or not sql_list:
+        return _err("卸下失败：未生成有效装备SQL")
+
+    for sql in sql_list:
+        res = execute_sql(DATABASE, sql)
+        if isinstance(res, dict) and res.get("error"):
+            return _err(f"卸下失败：{res['error']}")
+
+    if item_type == "法器":
+        game_sql.updata_user_faqi_buff(user_id, 0)
+    if item_type == "防具":
+        game_sql.updata_user_armor_buff(user_id, 0)
+
+    return _ok(message="卸下成功", goods_id=goods_id)
 
 @app.route('/game/api/impart/wish', methods=['POST'])
 @game_login_required

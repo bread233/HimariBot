@@ -398,11 +398,10 @@
 
         .tabs {
             display: flex;
+            flex-wrap: wrap;
             gap: 8px;
-            overflow-x: auto;
+            overflow-x: visible;
             padding-bottom: 8px;
-            scrollbar-width: none;
-            -ms-overflow-style: none;
         }
 
         .tabs::-webkit-scrollbar {
@@ -2009,6 +2008,17 @@
         }
 
         @media (max-width: 760px) {
+            .tabs {
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                scrollbar-width: none;
+                -ms-overflow-style: none;
+            }
+
+            .tabs::-webkit-scrollbar {
+                display: none;
+            }
+
             .toast {
                 top: calc(72px + env(safe-area-inset-top));
                 bottom: auto;
@@ -2859,6 +2869,46 @@
             renderBackpack();
         }
 
+        function formatItemBuff(buffType, buff) {
+            const typeRaw = (buffType ?? '').toString().trim().toLowerCase();
+            const typeMap = {
+                atk: '攻击',
+                attack: '攻击',
+                '攻击': '攻击',
+                hp: '气血',
+                '气血': '气血',
+                mp: '真元',
+                '真元': '真元',
+                exp: '修为',
+                '修为': '修为',
+                def: '防御',
+                defense: '防御',
+                '防御': '防御',
+                crit: '会心',
+                '会心': '会心',
+                burst: '会心伤害',
+                '会心伤害': '会心伤害'
+            };
+
+            if (buff === undefined || buff === null || buff === '') {
+                return '属性：暂无';
+            }
+
+            const val = Number(buff);
+            if (Number.isNaN(val)) {
+                return '属性：暂无';
+            }
+
+            const typeName = typeMap[typeRaw] || '属性';
+            const sign = val > 0 ? '+' : '';
+            const isPercent = Math.abs(val) > 0 && Math.abs(val) < 1;
+            const valueText = isPercent
+                ? `${sign}${(val * 100).toFixed(2).replace(/\.00$/, '').replace(/(\.\d*[1-9])0+$/, '$1')}%`
+                : `${sign}${val}`;
+
+            return `属性：${typeName} ${valueText}`;
+        }
+
         function renderBackpack() {
             const list = $('item-list');
             list.innerHTML = '';
@@ -2882,6 +2932,15 @@
                 card.onclick = () => showItemAction(item);
 
                 const isPill = (item.item_type === '丹药' || item.type === '丹药') && item.buff_type === 'hp';
+                const isEquipment = ['装备', '法器', '防具'].includes(item.type) || ['法器', '防具'].includes(item.item_type);
+                const equipBuffLine = isEquipment
+                    ? `<div class="item-meta">${formatItemBuff(item.buff_type, item.buff)}</div>`
+                    : '';
+                const equipButton = isEquipment
+                    ? (item.equipped
+                        ? `<button class="btn ghost" style="margin-top:10px; width:100%;" onclick="unequipItem(${item.id}, event, this)">卸下</button>`
+                        : `<button class="btn" style="margin-top:10px; width:100%;" onclick="equipItem(${item.id}, event, this)">穿戴</button>`)
+                    : '';
 
                 card.innerHTML = `
                     <div class="item-name">${item.name}</div>
@@ -2890,11 +2949,13 @@
                         <span>数量: ${item.count}</span>
                         <span class="item-badge">${item.type}</span>
                     </div>
+                    ${equipBuffLine}
                     ${isPill ? `
                         <button class="btn ghost" style="margin-top:10px; width:100%;" onclick="usePill(${item.id}, event)">
                             使用
                         </button>
                     ` : ''}
+                    ${equipButton}
                 `;
                 list.appendChild(card);
             });
@@ -2951,6 +3012,54 @@
                 await loadBackpack();
             } catch (e) {
                 toast(e.message || '使用丹药失败');
+            }
+        }
+
+        async function equipItem(goodsId, event, buttonEl) {
+            if (event) event.stopPropagation();
+            if (buttonEl) buttonEl.disabled = true;
+            try {
+                const resp = await fetch('/game/api/item/equip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ goods_id: goodsId })
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || data.success === false) {
+                    throw new Error(data.error || data.message || '穿戴失败');
+                }
+                toast(data.message || '穿戴成功');
+                await loadProfileOnly();
+                await loadBackpack();
+            } catch (e) {
+                toast(e.message || '穿戴失败');
+            } finally {
+                if (buttonEl) buttonEl.disabled = false;
+            }
+        }
+
+        async function unequipItem(goodsId, event, buttonEl) {
+            if (event) event.stopPropagation();
+            if (buttonEl) buttonEl.disabled = true;
+            try {
+                const resp = await fetch('/game/api/item/unequip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ goods_id: goodsId })
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || data.success === false) {
+                    throw new Error(data.error || data.message || '卸下失败');
+                }
+                toast(data.message || '卸下成功');
+                await loadProfileOnly();
+                await loadBackpack();
+            } catch (e) {
+                toast(e.message || '卸下失败');
+            } finally {
+                if (buttonEl) buttonEl.disabled = false;
             }
         }
 
@@ -3162,10 +3271,21 @@
             $('stat-practice').textContent = `攻${profile.cultivation.atk} · 血${profile.cultivation.hp} · 海${profile.cultivation.mp}`;
 
             const eq = profile.equipment;
+            const formatProfileEquip = (v) => {
+                if (v && typeof v === 'object') {
+                    const name = v.name || v.title || '未装备';
+                    const hasBuff = v.buff !== undefined && v.buff !== null && v.buff !== '';
+                    const buffText = hasBuff ? formatItemBuff(v.buff_type, v.buff) : '属性：暂无';
+                    return `${name}<br><small style="color: var(--muted);">${buffText}</small>`;
+                }
+                if (v) return v;
+                return '未装备';
+            };
+
             $('equipment-list').innerHTML = [
                 ['主修', eq.main], ['辅修', eq.sub], ['神通', eq.skill], ['身法', eq.movement],
                 ['瞳术', eq.eyes], ['法器', eq.weapon], ['防具', eq.armor]
-            ].map(([k, v]) => `<div class="equip-row"><span>${k}</span><strong>${v}</strong></div>`).join('');
+            ].map(([k, v]) => `<div class="equip-row"><span>${k}</span><strong>${formatProfileEquip(v)}</strong></div>`).join('');
         }
 
         function renderWork(work) {
