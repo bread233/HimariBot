@@ -423,24 +423,24 @@ async def handle(bot: Bot, event: MessageEvent, state: T_State):
     await help.finish(Msg)
 
 
-friend_req = on_request(priority=5)
+# friend_req = on_request(priority=5)
+# 
+# 
+# @friend_req.handle()
+# async def friend_agree(bot: Bot, event: FriendRequestEvent, state: T_State):
+#     if str(event.user_id) in bot.config.superusers:
+#         await bot.set_friend_add_request(flag=event.flag, approve=True)
 
 
-@friend_req.handle()
-async def friend_agree(bot: Bot, event: FriendRequestEvent, state: T_State):
-    if str(event.user_id) in bot.config.superusers:
-        await bot.set_friend_add_request(flag=event.flag, approve=True)
-
-
-group_invite = on_request(priority=5)
-
-
-@group_invite.handle()
-async def group_agree(bot: Bot, event: GroupRequestEvent, state: T_State):
-    if event.sub_type == "invite" and str(event.user_id) in bot.config.superusers:
-        await bot.set_group_add_request(
-            flag=event.flag, sub_type="invite", approve=True
-        )
+# group_invite = on_request(priority=5)
+# 
+# 
+# @group_invite.handle()
+# async def group_agree(bot: Bot, event: GroupRequestEvent, state: T_State):
+#     if event.sub_type == "invite" and str(event.user_id) in bot.config.superusers:
+#         await bot.set_group_add_request(
+#             flag=event.flag, sub_type="invite", approve=True
+#         )
 
 
 group_decrease = on_notice(priority=5)
