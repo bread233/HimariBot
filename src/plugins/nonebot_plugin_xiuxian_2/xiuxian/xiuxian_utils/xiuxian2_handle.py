@@ -689,7 +689,15 @@ WHERE last_check_info_time = '0' OR last_check_info_time IS NULL
             user_cd_dict = dict(zip(columns, result))
             return user_cd_dict
         else:
+            # 幂等初始化：在 Web/API 并发请求下可能会出现重复插入，需避免 UNIQUE 冲突导致 500
             self.insert_user_cd(user_id)
+            # 插入后再查一次并返回（如果被其他请求抢先插入，INSERT 会被忽略）
+            cur.execute(sql, (user_id,))
+            result = cur.fetchone()
+            if result:
+                columns = [column[0] for column in cur.description]
+                user_cd_dict = dict(zip(columns, result))
+                return user_cd_dict
             return None
 
     def insert_user_cd(self, user_id) -> None:
@@ -698,7 +706,8 @@ WHERE last_check_info_time = '0' OR last_check_info_time IS NULL
         :param user_id: qq
         :return:
         """
-        sql = f"INSERT INTO user_cd (user_id) VALUES (?)"
+        # 使用 INSERT OR IGNORE 保证幂等：如果 user_id 已存在则忽略
+        sql = f"INSERT OR IGNORE INTO user_cd (user_id) VALUES (?)"
         cur = self.conn.cursor()
         cur.execute(sql, (user_id,))
         self.conn.commit()

@@ -50,7 +50,7 @@ PLAYERSDATA = Path() / "data" / "xiuxian" / "players"
 qqq = XiuConfig().qqq
 tribulation_cd = XiuConfig().tribulation_cd * 60
 gfqq = on_command("官群", aliases={"交流群"}, priority=8, block=True)
-run_xiuxian = on_command("我要修仙", aliases={"开始修仙"}, priority=8, block=True)
+run_xiuxian = on_command("我要修仙", aliases={"开始修仙", "加入修仙"}, priority=8, block=True)
 restart = on_fullmatch("重入仙途", priority=7, block=True)
 sign_in = on_command("修仙签到", priority=13, block=True)
 hongyun = on_command("鸿运", aliases={"查看中奖", "奖池查询"}, priority=5, block=True)
@@ -220,7 +220,7 @@ async def remaname_(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent, ar
     await remaname.finish()
 
 
-@run_xiuxian.handle(parameterless=[Cooldown(cd_time=1.4)])
+@run_xiuxian.handle(parameterless=[Cooldown(cd_time=1.4, bypass_private_enabled=True)])
 async def run_xiuxian_(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent):
     """我要修仙"""
     bot, send_group_id = await assign_bot(bot=bot, event=event)
@@ -365,7 +365,7 @@ def save_lottery_data(data):
     with open('xiuxian_lottery.json', 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-@help_in.handle(parameterless=[Cooldown(cd_time=1.4)])
+@help_in.handle(parameterless=[Cooldown(cd_time=1.4, bypass_private_enabled=True)])
 async def help_in_(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent, args: Message = CommandArg()):
     """修仙帮助"""
     bot, send_group_id = await assign_bot(bot=bot, event=event)
@@ -382,7 +382,8 @@ async def help_in_(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent, arg
         """✨【修仙指令】第1页/共4页✨
 ═════════════
 🏮 核心功能
-├── 🌟 启程修仙: 发送"我要修仙"
+├── 🌟 启程修仙: 发送"/我要修仙"或"/加入修仙"（群聊/私聊均可）
+├── 🌐 WebUI 登录: 发送"/修仙登录"（群内或私聊触发后私聊收取登录链接）
 ├── 📊 状态查询: 发送"我的修仙信息"
 ├── 📅 每日签到: 发送"修仙签到"
 ├── 🚀 突破境界: 发送"突破"

@@ -110,7 +110,8 @@ def Cooldown(
         cd_time: float = 0.5,
         isolate_level: CooldownIsolateLevel = CooldownIsolateLevel.USER,
         parallel: int = 1,
-        stamina_cost: int = 0
+        stamina_cost: int = 0,
+        bypass_private_enabled: bool = False
 ) -> None:
     """依赖注入形式的命令冷却
 
@@ -126,6 +127,7 @@ def Cooldown(
         isolate_level: 命令冷却的隔离级别, 参考 `CooldownIsolateLevel`
         parallel: 并行执行的命令数量
         stamina_cost: 每次执行命令消耗的体力值
+        bypass_private_enabled: 是否绕过“私聊功能未启用”的拦截（仅对私聊事件生效）
     """
     if not isinstance(isolate_level, CooldownIsolateLevel):
         raise ValueError(
@@ -181,28 +183,30 @@ def Cooldown(
             )
         else:
             key = CooldownIsolateLevel.GLOBAL.name
-        if not is_private and group_id in conf_data["group"]:
-            pass
-        else:
-            if (
-                    event.sender.role == "admin" or
-                    event.sender.role == "owner" or
-                    event.get_user_id() in bot.config.superusers
-            ):
-                bot = await assign_bot_group(group_id=group_id)
-                targets = ["我要修仙", "修仙签到", "修仙帮助"]
-                group_msg = str(event.message)
-                if any(s in group_msg for s in targets):
-                    if XiuConfig().at_sender:
-                        await bot.send(event=event, message=MessageSegment.at(event.get_user_id()) + "本群已关闭修仙模组,请联系管理员开启,开启命令为【启用修仙功能】!")
-                    else:
-                        await bot.send(event=event, message="本群已关闭修仙模组,请联系管理员开启,开启命令为【启用修仙功能】!")
-                await matcher.finish()
+        # 群聊：检查群是否启用修仙功能；私聊：不做群启用检查
+        if not is_private:
+            if group_id in conf_data["group"]:
+                pass
             else:
-                await matcher.finish()
+                if (
+                        event.sender.role == "admin" or
+                        event.sender.role == "owner" or
+                        event.get_user_id() in bot.config.superusers
+                ):
+                    bot = await assign_bot_group(group_id=group_id)
+                    targets = ["我要修仙", "修仙签到", "修仙帮助"]
+                    group_msg = str(event.message)
+                    if any(s in group_msg for s in targets):
+                        if XiuConfig().at_sender:
+                            await bot.send(event=event, message=MessageSegment.at(event.get_user_id()) + "本群已关闭修仙模组,请联系管理员开启,开启命令为【启用修仙功能】!")
+                        else:
+                            await bot.send(event=event, message="本群已关闭修仙模组,请联系管理员开启,开启命令为【启用修仙功能】!")
+                    await matcher.finish()
+                else:
+                    await matcher.finish()
         
-        if is_private:        
-            if is_private and not conf_data.get("private_enabled", False):
+        if is_private:
+            if (not conf_data.get("private_enabled", False)) and (not bypass_private_enabled):
                 await bot.send(event=event, message="私聊修仙功能未启用，请联系管理员在群聊中发送「启用私聊功能」！")
                 await matcher.finish()
         
