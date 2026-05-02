@@ -1226,6 +1226,172 @@ def _format_world_boss_reward_message(reward: dict) -> str:
     return "，".join(parts) if parts else "未获得奖励"
 
 
+def _get_world_boss_shop_config() -> dict:
+    """读取世界 BOSS 积分商店配置，复用 QQ 端 config['世界积分商品']。"""
+    try:
+        shop = (get_boss_config() or {}).get("世界积分商品") or {}
+        return shop if isinstance(shop, dict) else {}
+    except Exception as e:
+        logger.warning(f"Read world boss shop config failed: {e}")
+        return {}
+
+
+def _find_world_boss_shop_item(shop_id):
+    shop = _get_world_boss_shop_config()
+    shop_id_str = str(shop_id)
+    if shop_id_str in shop:
+        return shop_id_str, shop[shop_id_str]
+
+    for key, value in shop.items():
+        if str(key) == shop_id_str:
+            return str(key), value
+    return None, None
+
+
+def _build_world_boss_shop_goods(user_id: int):
+    boss_info = _get_user_boss_fight_info(user_id)
+    total_integral = int(boss_info.get("boss_integral") or 0)
+    shop = _get_world_boss_shop_config()
+    goods = []
+
+    def _shop_sort_key(pair):
+        key, _ = pair
+        try:
+            return int(key)
+        except Exception:
+            return str(key)
+
+    for raw_shop_id, cfg in sorted(shop.items(), key=_shop_sort_key):
+        if not isinstance(cfg, dict):
+            continue
+
+        try:
+            shop_id = int(raw_shop_id)
+        except Exception:
+            continue
+
+        try:
+            item_id = int(cfg.get("item_id") or cfg.get("id") or shop_id)
+        except Exception:
+            item_id = shop_id
+
+        try:
+            cost = max(int(cfg.get("cost") or 0), 0)
+        except Exception:
+            cost = 0
+
+        try:
+            weekly_limit = max(int(cfg.get("weekly_limit", 1) or 1), 0)
+        except Exception:
+            weekly_limit = 1
+
+        weekly_purchased = int(boss_limit.get_weekly_purchases(user_id, shop_id) or 0)
+        weekly_left = max(weekly_limit - weekly_purchased, 0)
+
+        item = _serialize_item(item_id)
+        goods.append({
+            "shop_id": shop_id,
+            "item_id": item_id,
+            "name": item.get("name") or f"物品{item_id}",
+            "type": item.get("type") or "未知",
+            "item_type": item.get("item_type") or item.get("type") or "未知",
+            "level": item.get("level") or "凡品",
+            "desc": item.get("desc") or "暂无描述",
+            "cost": cost,
+            "cost_display": f"{cost}点",
+            "weekly_limit": weekly_limit,
+            "weekly_purchased": weekly_purchased,
+            "weekly_left": weekly_left,
+            "can_exchange": cost > 0 and total_integral >= cost and weekly_left > 0,
+        })
+
+    return goods
+
+
+def _build_world_boss_shop_payload(user_id: int):
+    boss_info = _get_user_boss_fight_info(user_id)
+    return {
+        "boss_integral": int(boss_info.get("boss_integral") or 0),
+        "today_integral": int(boss_limit.get_integral(user_id) or 0),
+        "today_integral_limit": WORLD_BOSS_DAILY_INTEGRAL_LIMIT,
+        "today_stone": int(boss_limit.get_stone(user_id) or 0),
+        "today_stone_limit": WORLD_BOSS_DAILY_STONE_LIMIT,
+        "today_battle_count": int(boss_limit.get_battle_count(user_id) or 0),
+        "goods": _build_world_boss_shop_goods(user_id),
+    }
+
+
+def _exchange_world_boss_shop_item(user_id: int, shop_id: int, quantity: int):
+    shop_key, cfg = _find_world_boss_shop_item(shop_id)
+    if not shop_key or not isinstance(cfg, dict):
+        return None, "该编号不在世界积分商店内，请检查后再兑换"
+
+    quantity = int(quantity or 1)
+    if quantity < 1:
+        return None, "兑换数量必须大于 0"
+    if quantity > 99:
+        return None, "单次兑换数量不能超过 99"
+
+    shop_id = int(shop_key)
+    try:
+        item_id = int(cfg.get("item_id") or cfg.get("id") or shop_id)
+    except Exception:
+        item_id = shop_id
+
+    try:
+        cost = max(int(cfg.get("cost") or 0), 0)
+    except Exception:
+        cost = 0
+    if cost <= 0:
+        return None, "该商品积分价格配置异常，无法兑换"
+
+    try:
+        weekly_limit = max(int(cfg.get("weekly_limit", 1) or 1), 0)
+    except Exception:
+        weekly_limit = 1
+
+    already_purchased = int(boss_limit.get_weekly_purchases(user_id, shop_id) or 0)
+    if weekly_limit > 0 and already_purchased + quantity > weekly_limit:
+        return None, f"该商品每周限购{weekly_limit}个，您本周已购买{already_purchased}个，无法再购买{quantity}个"
+
+    try:
+        item_info = items.get_data_by_item_id(item_id)
+    except Exception:
+        item_info = None
+    if not item_info:
+        return None, "商品对应物品不存在，无法兑换"
+
+    boss_info = _get_user_boss_fight_info(user_id)
+    current_integral = int(boss_info.get("boss_integral") or 0)
+    total_cost = cost * quantity
+    if current_integral < total_cost:
+        return None, f"世界积分不足，需要{total_cost}点，当前仅有{current_integral}点"
+
+    boss_info["boss_integral"] = current_integral - total_cost
+    _save_user_boss_fight_info(user_id, boss_info)
+    boss_limit.update_weekly_purchase(user_id, shop_id, quantity)
+    game_sql.send_back(user_id, item_id, item_info["name"], item_info["type"], quantity, 1)
+
+    try:
+        log_message(user_id, f"Web 世界BOSS商店兑换：{item_info['name']}x{quantity}，消耗世界积分{total_cost}")
+    except Exception:
+        pass
+
+    return {
+        "shop_id": shop_id,
+        "item_id": item_id,
+        "name": item_info.get("name") or f"物品{item_id}",
+        "type": item_info.get("type") or "未知",
+        "quantity": quantity,
+        "cost": cost,
+        "total_cost": total_cost,
+        "boss_integral": int(boss_info.get("boss_integral") or 0),
+        "weekly_limit": weekly_limit,
+        "weekly_purchased": int(boss_limit.get_weekly_purchases(user_id, shop_id) or 0),
+    }, ""
+
+
+
 def _get_dual_protect_status(user_id: int):
     user_data = _load_player_user_data(user_id)
     status = user_data.get("two_exp_protect", False)
@@ -3380,6 +3546,51 @@ def game_api_battle_boss_list():
     
     # 按境界排序（假设境界列表是有序的，create_all_bosses 应该已经处理好）
     return _ok(bosses=boss_list)
+
+
+@app.route('/game/api/world-boss/shop')
+@game_login_required
+def game_api_world_boss_shop():
+    """获取世界 Boss 积分商店商品与当前积分。"""
+    player_id = _current_player_id()
+    if not game_sql.get_user_info_with_id(player_id):
+        return _err("角色不存在", 404)
+    return _ok(shop=_build_world_boss_shop_payload(player_id))
+
+
+@app.route('/game/api/world-boss/exchange', methods=['POST'])
+@game_login_required
+def game_api_world_boss_exchange():
+    """兑换世界 Boss 积分商店商品。"""
+    player_id = _current_player_id()
+    if not game_sql.get_user_info_with_id(player_id):
+        return _err("角色不存在", 404)
+
+    payload = request.get_json(silent=True) or {}
+    shop_id_raw = payload.get("shop_id", payload.get("item_id"))
+    quantity_raw = payload.get("quantity", 1)
+
+    try:
+        shop_id = int(shop_id_raw)
+    except (TypeError, ValueError):
+        return _err("商品编号错误")
+
+    try:
+        quantity = int(quantity_raw)
+    except (TypeError, ValueError):
+        return _err("兑换数量错误")
+
+    result, error = _exchange_world_boss_shop_item(player_id, shop_id, quantity)
+    if error:
+        return _err(error)
+
+    shop_payload = _build_world_boss_shop_payload(player_id)
+    return _ok(
+        message=f"兑换成功：{result['name']} x{result['quantity']}，消耗世界积分 {result['total_cost']} 点",
+        exchange=result,
+        shop=shop_payload,
+        backpack=_build_backpack(player_id),
+    )
 
 
 @app.route('/game/api/battle/boss/challenge', methods=['POST'])
