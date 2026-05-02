@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml poetry.lock* ./
 
 # 安装依赖 + NoneBot 相关
-RUN poetry install --only main --no-interaction --no-ansi -vvv \
+RUN poetry install --only main --no-root --no-interaction --no-ansi -vvv \
     && pip install --no-cache-dir \
         "pydantic==1.10.15" \
         "fastapi==0.95.2" \
