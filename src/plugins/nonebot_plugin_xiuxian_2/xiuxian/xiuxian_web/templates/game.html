@@ -722,6 +722,8 @@
         .reminder-center {
             margin-top: 14px;
             padding: 12px;
+            max-height: 320px;
+            overflow-y: auto;
             border-radius: 14px;
             background: linear-gradient(135deg, rgba(32, 19, 58, .95), rgba(22, 13, 42, .92));
             border: 1px solid rgba(247, 211, 122, .35);
@@ -737,13 +739,13 @@
         .daily-reminder,
         .social-request-reminder {
             margin-top: 0;
-            padding: 12px;
+            padding: 10px;
             border-radius: 14px;
             background: linear-gradient(135deg, rgba(44, 26, 76, .95), rgba(30, 18, 58, .9));
             border: 1px solid rgba(247, 211, 122, .45);
             min-width: 0;
         }
-        .social-request-reminder { margin-top: 10px; }
+        .social-request-reminder { margin-top: 8px; }
         .daily-reminder.pulse {
             animation: dailyGlow 2.2s ease-in-out infinite;
         }
@@ -781,11 +783,15 @@
         .social-request-reminder.pulse {
             animation: dailyGlow 2.4s ease-in-out infinite;
         }
+        .reminder-center .btn {
+            padding: 8px 10px;
+            font-size: 12px;
+        }
         .social-request-reminder-head { display:flex; justify-content:space-between; align-items:center; gap:10px; color:var(--gold); font-weight:700; }
         @media (max-width: 768px) {
-            .reminder-center { padding: 10px; }
+            .reminder-center { padding: 10px; max-height: 260px; }
             .daily-reminder,
-            .social-request-reminder { padding: 10px; }
+            .social-request-reminder { padding: 8px; }
         }
         @keyframes dailyGlow {
             0%, 100% { box-shadow: 0 0 0 rgba(247, 211, 122, 0); }
