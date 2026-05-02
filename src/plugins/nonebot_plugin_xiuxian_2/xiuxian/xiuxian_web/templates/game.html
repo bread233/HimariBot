@@ -719,6 +719,85 @@
             word-break: break-word;
         }
 
+        .impart-pk-result-card {
+            margin-top: 10px;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.04);
+            animation: fadeIn .2s ease;
+        }
+
+        .impart-pk-result-card .title {
+            margin: 0 0 6px;
+            font-weight: 800;
+        }
+
+        .impart-pk-result-card .meta {
+            margin: 2px 0;
+            font-size: 13px;
+            color: var(--text);
+            word-break: break-word;
+        }
+
+        .impart-pk-result-card.win {
+            border-color: rgba(247, 211, 122, .62);
+            background: linear-gradient(135deg, rgba(247, 211, 122, .15), rgba(134, 247, 178, .12));
+            box-shadow: 0 0 14px rgba(247, 211, 122, .2);
+        }
+
+        .impart-pk-result-card.win .title {
+            color: var(--gold);
+            text-shadow: 0 0 10px rgba(247, 211, 122, .4);
+        }
+
+        .impart-pk-result-card.lose {
+            border-color: rgba(241, 95, 121, .62);
+            background: linear-gradient(135deg, rgba(241, 95, 121, .14), rgba(179, 135, 255, .14));
+            box-shadow: 0 0 14px rgba(179, 135, 255, .22);
+        }
+
+        .impart-pk-result-card.lose .title {
+            color: #ffb3c0;
+            text-shadow: 0 0 10px rgba(241, 95, 121, .35);
+        }
+
+        .impart-pk-log-list {
+            margin-top: 8px;
+            max-height: 220px;
+            overflow-y: auto;
+            display: grid;
+            gap: 6px;
+            word-break: break-word;
+            animation: fadeIn .2s ease;
+        }
+
+        .impart-pk-log-line {
+            border: 1px solid rgba(247, 211, 122, .2);
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 13px;
+            line-height: 1.6;
+            color: var(--muted);
+            background: rgba(255, 255, 255, .04);
+        }
+
+        .impart-pk-log-line.win {
+            border-color: rgba(134, 247, 178, .45);
+            color: #bfffd9;
+            box-shadow: 0 0 10px rgba(134, 247, 178, .14);
+        }
+
+        .impart-pk-log-line.lose {
+            border-color: rgba(241, 95, 121, .48);
+            color: #ffc2cd;
+            box-shadow: 0 0 10px rgba(241, 95, 121, .14);
+        }
+
+        .impart-pk-log-line.normal {
+            color: var(--muted);
+        }
+
         .reminder-center {
             margin-top: 14px;
             padding: 12px;
@@ -2620,7 +2699,7 @@
                             </div>
                             <div id="daily-reminder-text" class="daily-reminder-text hint">正在读取今日虚神界对决状态...</div>
                             <div class="action-grid" style="margin-top:10px;">
-                                <button class="btn" id="btn-go-impart">前往对决</button>
+                                <button class="btn" id="btn-go-impart" onclick="gotoDailyImpart()">前往对决</button>
                             </div>
                         </div>
                         <div id="social-request-reminder" class="social-request-reminder">
@@ -2993,17 +3072,18 @@
             const limit = Number(d.daily_limit || 5);
             const used = Number(d.used || 0);
             const rem = Number(d.remaining || 0);
-            const done = rem <= 0;
+            const done = d.completed === true || rem <= 0;
             if (d.enabled === false) {
                 box.classList.remove('pulse');
-                badge.textContent = '--';
-                text.textContent = d.message || '暂时无法读取虚神界对决状态';
+                box.style.display = 'none';
                 return;
             }
+            box.style.display = 'block';
             badge.textContent = done ? '✓' : `剩${rem}`;
             if (done) {
                 box.classList.remove('pulse');
-                text.innerHTML = `今日虚神界对决已完成<br><span class="hint">可明日再战，继续获取思恋结晶。</span>`;
+                box.style.display = 'none';
+                return;
             } else {
                 box.classList.add('pulse');
                 text.innerHTML = `今日虚神界对决未完成：${used}/${limit}<br><span class="hint">胜利 +20 结晶，失败 +10 结晶</span>`;
@@ -3028,20 +3108,43 @@
             if (logsEl) logsEl.textContent = '正在生成战报...';
             try {
                 const data = await api('/game/api/impart/pk/challenge', { method: 'POST' });
-                const resultMap = { win: '胜利', lose: '失败', none: '已结束' };
-                const resultText = resultMap[data.result] || '已结束';
+                const resultKey = data.result === 'win' ? 'win' : (data.result === 'lose' ? 'lose' : 'normal');
+                const resultTitle = resultKey === 'win' ? '对决胜利' : (resultKey === 'lose' ? '对决失败' : '对决结束');
+                const stones = Number(data.stones_gained || 0);
+                const rem = Number(data.remaining || 0);
+                const limit = Number(data.daily_limit || 7);
                 if (resultEl) {
-                    resultEl.textContent = `${data.message || '对决完成'}（结果：${resultText}，获得 ${Number(data.stones_gained || 0)} 结晶，剩余 ${Number(data.remaining || 0)}/${Number(data.daily_limit || 7)}）`;
+                    resultEl.innerHTML = `
+                        <div class="impart-pk-result-card ${resultKey}">
+                            <div class="title">${resultTitle}</div>
+                            <div class="meta">${data.message || '对决完成'}</div>
+                            <div class="meta">获得 +${stones} 思恋结晶</div>
+                            <div class="meta">今日剩余 ${rem} / ${limit}</div>
+                        </div>
+                    `;
                 }
                 const logs = Array.isArray(data.logs) ? data.logs : [];
-                if (logsEl) logsEl.textContent = logs.length ? logs.join('\n') : '本次无详细日志';
+                if (logsEl) {
+                    if (!logs.length) {
+                        logsEl.innerHTML = '<div class="impart-pk-log-list"><div class="impart-pk-log-line normal">本次无详细日志</div></div>';
+                    } else {
+                        const lines = logs.map((line) => {
+                            const text = String(line || '');
+                            let cls = 'normal';
+                            if (/(胜利|获胜|赢)/.test(text)) cls = 'win';
+                            else if (/(失败|暴毙|输)/.test(text)) cls = 'lose';
+                            return `<div class="impart-pk-log-line ${cls}">${text}</div>`;
+                        }).join('');
+                        logsEl.innerHTML = `<div class="impart-pk-log-list">${lines}</div>`;
+                    }
+                }
                 await loadProfileOnly();
                 await loadDailyStatus();
                 renderImpartPkStatus();
                 toast(data.message || '对决完成');
             } catch (err) {
                 if (resultEl) resultEl.textContent = err.message || '对决失败';
-                if (logsEl) logsEl.textContent = '请稍后重试';
+                if (logsEl) logsEl.innerHTML = '<div class="impart-pk-log-list"><div class="impart-pk-log-line lose">请稍后重试</div></div>';
                 toast(err.message || '对决失败');
             } finally {
                 if (btn) btn.disabled = false;
