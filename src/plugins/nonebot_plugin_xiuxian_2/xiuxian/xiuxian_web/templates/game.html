@@ -817,6 +817,7 @@
         }
         .daily-reminder,
         .social-request-reminder,
+        .world-boss-reminder,
         .retreat-reminder {
             margin-top: 0;
             padding: 10px;
@@ -826,6 +827,7 @@
             min-width: 0;
         }
         .social-request-reminder,
+        .world-boss-reminder,
         .retreat-reminder { margin-top: 8px; }
         .daily-reminder.pulse {
             animation: dailyGlow 2.2s ease-in-out infinite;
@@ -841,6 +843,7 @@
         }
         .daily-reminder-badge,
         .social-request-reminder-badge,
+        .world-boss-reminder-badge,
         .retreat-reminder-badge {
             display: inline-flex;
             align-items: center;
@@ -857,6 +860,7 @@
         }
         .daily-reminder-text,
         .social-request-reminder-text,
+        .world-boss-reminder-text,
         .retreat-reminder-text {
             margin-top: 8px;
             font-size: 13px;
@@ -869,6 +873,9 @@
         .retreat-reminder.pulse {
             animation: dailyGlow 2.1s ease-in-out infinite;
         }
+        .world-boss-reminder.pulse {
+            animation: dailyGlow 2.15s ease-in-out infinite;
+        }
         .reminder-center .btn {
             padding: 8px 10px;
             font-size: 12px;
@@ -878,6 +885,7 @@
             .reminder-center { padding: 10px; max-height: 260px; }
             .daily-reminder,
             .social-request-reminder,
+            .world-boss-reminder,
             .retreat-reminder { padding: 8px; }
         }
         @keyframes dailyGlow {
@@ -2712,6 +2720,16 @@
                                 <button class="btn ghost" id="btn-social-requests-goto" onclick="gotoSocialRequests()">前往处理</button>
                             </div>
                         </div>
+                        <div id="world-boss-reminder" class="world-boss-reminder" style="display:none;">
+                            <div class="social-request-reminder-head">
+                                <span>世界 Boss 奖励提醒</span>
+                                <span id="world-boss-reminder-badge" class="world-boss-reminder-badge">--</span>
+                            </div>
+                            <div id="world-boss-reminder-text" class="world-boss-reminder-text hint">正在读取世界 Boss 奖励状态...</div>
+                            <div class="action-grid" style="margin-top:10px; grid-template-columns: 1fr;">
+                                <button class="btn" id="btn-world-boss-goto" onclick="gotoWorldBossBattle()">前往挑战</button>
+                            </div>
+                        </div>
                         <div id="retreat-reminder" class="retreat-reminder" style="display:none;">
                             <div class="social-request-reminder-head">
                                 <span>闭关结算提醒</span>
@@ -3244,11 +3262,51 @@
             }).join('');
         }
 
+        function renderWorldBossReminder() {
+            const box = $('world-boss-reminder');
+            const text = $('world-boss-reminder-text');
+            const badge = $('world-boss-reminder-badge');
+            if (!box || !text || !badge) return;
+
+            const shop = state.worldBossShop || {};
+            const todayIntegral = Number(shop.today_integral || 0);
+            const todayIntegralLimit = Number(shop.today_integral_limit || 0);
+            const todayStone = Number(shop.today_stone || 0);
+            const todayStoneLimit = Number(shop.today_stone_limit || 0);
+            const todayBattleCount = Number(shop.today_battle_count || 0);
+
+            const hasRewardLeft = (todayIntegral < todayIntegralLimit) || (todayStone < todayStoneLimit);
+            if (!hasRewardLeft) {
+                box.style.display = 'none';
+                box.classList.remove('pulse');
+                return;
+            }
+
+            box.style.display = 'block';
+            box.classList.add('pulse');
+            badge.textContent = todayBattleCount > 0 ? '奖' : '可战';
+            text.innerHTML = `
+                世界 Boss 今日奖励仍可获取<br>
+                积分：${number_to(todayIntegral)} / ${number_to(todayIntegralLimit)}<br>
+                灵石：${number_to(todayStone)} / ${number_to(todayStoneLimit)}<br>
+                今日讨伐：${todayBattleCount} 次
+            `;
+        }
+
+        function gotoWorldBossBattle() {
+            switchTab('battle');
+            const target = $('world-boss-panel') || $('world-boss-list') || $('btn-world-boss-list');
+            if (target && typeof target.scrollIntoView === 'function') {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+
         async function loadWorldBossShop() {
             try {
                 const data = await api('/game/api/world-boss/shop');
                 state.worldBossShop = data.shop || null;
                 renderWorldBossShop();
+                renderWorldBossReminder();
             } catch (err) {
                 const list = $('world-boss-shop-list');
                 if (list) list.innerHTML = `<div class="item-card"><div class="item-name">世界 Boss 商店加载失败</div><div class="item-meta">${err.message || '未知错误'}</div></div>`;
@@ -3307,6 +3365,7 @@
                     await loadBackpack();
                 }
                 renderWorldBossShop();
+                renderWorldBossReminder();
             } catch (err) {
                 toast(err.message || '兑换失败');
             } finally {
@@ -4467,6 +4526,7 @@
                     finishMessage: data.message || '',
                     reloadProfileOnFinish: true
                 });
+                loadWorldBossShop();
             } catch (err) { toast(err.message); }
         }
         async function startPlayerBattle() {
