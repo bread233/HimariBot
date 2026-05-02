@@ -737,7 +737,8 @@
             font-weight: 800;
         }
         .daily-reminder,
-        .social-request-reminder {
+        .social-request-reminder,
+        .retreat-reminder {
             margin-top: 0;
             padding: 10px;
             border-radius: 14px;
@@ -745,7 +746,8 @@
             border: 1px solid rgba(247, 211, 122, .45);
             min-width: 0;
         }
-        .social-request-reminder { margin-top: 8px; }
+        .social-request-reminder,
+        .retreat-reminder { margin-top: 8px; }
         .daily-reminder.pulse {
             animation: dailyGlow 2.2s ease-in-out infinite;
         }
@@ -759,7 +761,8 @@
             font-weight: 700;
         }
         .daily-reminder-badge,
-        .social-request-reminder-badge {
+        .social-request-reminder-badge,
+        .retreat-reminder-badge {
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -774,7 +777,8 @@
             flex-shrink: 0;
         }
         .daily-reminder-text,
-        .social-request-reminder-text {
+        .social-request-reminder-text,
+        .retreat-reminder-text {
             margin-top: 8px;
             font-size: 13px;
             line-height: 1.6;
@@ -782,6 +786,9 @@
         }
         .social-request-reminder.pulse {
             animation: dailyGlow 2.4s ease-in-out infinite;
+        }
+        .retreat-reminder.pulse {
+            animation: dailyGlow 2.1s ease-in-out infinite;
         }
         .reminder-center .btn {
             padding: 8px 10px;
@@ -791,7 +798,8 @@
         @media (max-width: 768px) {
             .reminder-center { padding: 10px; max-height: 260px; }
             .daily-reminder,
-            .social-request-reminder { padding: 8px; }
+            .social-request-reminder,
+            .retreat-reminder { padding: 8px; }
         }
         @keyframes dailyGlow {
             0%, 100% { box-shadow: 0 0 0 rgba(247, 211, 122, 0); }
@@ -2625,6 +2633,16 @@
                                 <button class="btn ghost" id="btn-social-requests-goto" onclick="gotoSocialRequests()">前往处理</button>
                             </div>
                         </div>
+                        <div id="retreat-reminder" class="retreat-reminder" style="display:none;">
+                            <div class="social-request-reminder-head">
+                                <span>闭关结算提醒</span>
+                                <span id="retreat-reminder-badge" class="retreat-reminder-badge">--</span>
+                            </div>
+                            <div id="retreat-reminder-text" class="retreat-reminder-text hint">当前未闭关</div>
+                            <div class="action-grid" style="margin-top:10px; grid-template-columns: 1fr;">
+                                <button class="btn" id="btn-retreat-goto" onclick="gotoRetreatSettle()">前往结算</button>
+                            </div>
+                        </div>
                     </div>
                     <p class="notice" style="margin-top:18px;">MVP 已接入角色、背包、悬赏令与战斗回放。后续可继续扩展宗门、秘境、炼丹、抽卡与商城。</p>
                 </div>
@@ -3288,6 +3306,32 @@
                 badge.textContent = '0';
                 text.textContent = '暂无新的结识申请';
                 btn.textContent = '前往查看';
+            }
+        }
+        function renderRetreatReminder(retreat) {
+            const box = $('retreat-reminder');
+            const text = $('retreat-reminder-text');
+            const badge = $('retreat-reminder-badge');
+            if (!box || !text || !badge) return;
+            const r = retreat || state.retreat || {};
+            const shouldHighlight = !!(r.in_retreat && r.is_max);
+            if (!shouldHighlight) {
+                box.classList.remove('pulse');
+                box.style.display = 'none';
+                badge.textContent = '--';
+                text.textContent = '当前未闭关';
+                return;
+            }
+            box.style.display = 'block';
+            box.classList.add('pulse');
+            badge.textContent = '满';
+            text.innerHTML = `闭关收益已满，可出关结算<br><span class="hint">当前收益：${Number(r.current_exp || 0)} / ${Number(r.max_exp || 0)}</span>`;
+        }
+        function gotoRetreatSettle() {
+            switchTab('retreat');
+            const target = $('tab-retreat') || $('retreat-active-panel');
+            if (target && typeof target.scrollIntoView === 'function') {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
         }
         async function loadSocialRequestStatus() {
@@ -3975,6 +4019,7 @@
                 renderRift(rift.rift);
                 renderSect(sect.sect);
                 renderRetreat(retreat.retreat);
+                renderRetreatReminder(retreat.retreat);
                 renderBreakthrough(breakStatus);
             } catch (err) { toast(err.message); }
         }
@@ -4152,6 +4197,7 @@
                 stopBtn.disabled = true;
                 stopStoneBtn.disabled = true;
             }
+            renderRetreatReminder(retreat);
         }
 
         async function startRetreat() {
@@ -4159,6 +4205,7 @@
                 const data = await api('/game/api/retreat/start', { method: 'POST' });
                 toast(data.message);
                 await loadRetreatStatus();
+                renderRetreatReminder(state.retreat);
                 await loadProfileOnly();
             } catch (err) { toast(err.message); }
         }
@@ -4173,6 +4220,7 @@
                 toast(data.message);
                 renderProfile(data.profile);
                 await loadRetreatStatus();
+                renderRetreatReminder(state.retreat);
             } catch (err) { toast(err.message); }
         }
 
@@ -4180,6 +4228,7 @@
             try {
                 const data = await api('/game/api/retreat/status');
                 renderRetreat(data.retreat);
+                renderRetreatReminder(data.retreat);
             } catch (err) { toast(err.message); }
         }
 
