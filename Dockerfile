@@ -29,7 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml poetry.lock* ./
 
 # 安装依赖 + NoneBot 相关
-RUN poetry install --only main --no-root --no-interaction --no-ansi
+RUN poetry export -f requirements.txt --only main --without-hashes -o requirements.txt \
+    && pip install --no-cache-dir -r requirements.txt
 
 RUN pip install --no-cache-dir \
         "pydantic==1.10.15" \
