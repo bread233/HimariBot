@@ -44,6 +44,9 @@ from ..xiuxian_boss.bossconfig import get_boss_config
 from ..xiuxian_boss.boss_limit import boss_limit
 from ..xiuxian_impart.impart_uitls import get_impart_card_display_info
 from ..xiuxian_impart.impart_data import impart_data_json
+from ..xiuxian_impart_pk.impart_pk import impart_pk
+from ..xiuxian_impart_pk import impart_pk_uitls
+from .. import NICKNAME
 from ..xiuxian_back.back_util import (
     check_equipment_can_use,
     get_use_equipment_sql,
@@ -2336,6 +2339,37 @@ def game_api_friend_requests():
     return _ok(incoming=pack(incoming_ids), outgoing=pack(outgoing_ids))
 
 
+@app.route('/game/api/social/requests/status')
+@game_login_required
+def game_api_social_requests_status():
+    user_id = _current_player_id()
+    try:
+        user_data = _ensure_social_fields(_load_player_user_data(user_id))
+        incoming_ids = [
+            int(k)
+            for k in (user_data.get("friend_requests_in") or {}).keys()
+            if str(k).isdigit()
+        ]
+        pending_count = len(incoming_ids)
+        items = []
+        for uid in incoming_ids[:3]:
+            info = game_sql.get_user_info_with_id(uid) or {}
+            items.append({
+                "user_id": str(uid),
+                "name": info.get("user_name") or f"道友{uid}",
+            })
+        return _ok(requests={
+            "pending_count": pending_count,
+            "has_pending": pending_count > 0,
+            "items": items,
+        })
+    except Exception as e:
+        return _ok(
+            requests={"pending_count": 0, "has_pending": False, "items": []},
+            message=f"结识申请状态读取失败：{e}",
+        )
+
+
 @app.route('/game/api/social/friends')
 @game_login_required
 def game_api_friends():
@@ -3089,6 +3123,105 @@ def game_api_work_status():
     return _ok(work=_serialize_work(status, work_data, player_id))
 
 
+@app.route('/game/api/daily/status')
+@game_login_required
+def game_api_daily_status():
+    daily_limit = 7
+    reward_win = 20
+    reward_lose = 10
+    try:
+        player_id = _current_player_id()
+        user_data = impart_pk.find_user_data(player_id) or {}
+        remaining = int(user_data.get("pk_num") or 0)
+        used = max(daily_limit - remaining, 0)
+        completed = remaining <= 0
+        return _ok(impart_pk={
+            "enabled": True,
+            "daily_limit": daily_limit,
+            "used": used,
+            "remaining": remaining,
+            "completed": completed,
+            "reward_win": reward_win,
+            "reward_lose": reward_lose,
+            "message": "今日虚神界对决已完成" if completed else "今日虚神界对决还未完成"
+        })
+    except Exception:
+        return _ok(impart_pk={
+            "enabled": False,
+            "daily_limit": daily_limit,
+            "used": 0,
+            "remaining": 0,
+            "completed": True,
+            "reward_win": reward_win,
+            "reward_lose": reward_lose,
+            "message": "暂时无法读取虚神界对决状态"
+        })
+
+
+@app.route('/game/api/impart/pk/challenge', methods=['POST'])
+@game_login_required
+def game_api_impart_pk_challenge():
+    player_id = _current_player_id()
+    if not player_id:
+        return _err("未登录", status_code=401, login_required=True)
+
+    daily_limit = 7
+    try:
+        user = game_sql.get_user_info_with_id(player_id)
+        if not user:
+            return _err("未找到角色信息")
+
+        user_data = impart_pk.find_user_data(player_id) or {}
+        pk_num = int(user_data.get("pk_num") or 0)
+        if pk_num <= 0:
+            return _ok(
+                message="今日虚神界对决次数已用尽",
+                result="none",
+                logs=[],
+                stones_gained=0,
+                remaining=0,
+                daily_limit=daily_limit,
+            )
+
+        user_name = user.get("user_name") or str(player_id)
+        logs, win = _run_async(impart_pk_uitls.impart_pk_now_msg_to_bot(user_name, NICKNAME))
+        if isinstance(logs, str):
+            logs = [line for line in logs.split("\n") if line.strip()]
+        elif not isinstance(logs, list):
+            logs = [str(logs)] if logs else []
+
+        stones_gained = 0
+        result = "none"
+        if int(win) == 1:
+            impart_pk.update_user_data(player_id, True)
+            xiuxian_impart.update_stone_num(20, player_id, 1)
+            stones_gained = 20
+            result = "win"
+            message = "对决胜利，获得 20 思恋结晶"
+        elif int(win) == 2:
+            impart_pk.update_user_data(player_id, False)
+            xiuxian_impart.update_stone_num(10, player_id, 1)
+            stones_gained = 10
+            result = "lose"
+            message = "对决失败，获得 10 思恋结晶"
+        else:
+            message = "对决结束"
+
+        latest_user_data = impart_pk.find_user_data(player_id) or {}
+        remaining = int(latest_user_data.get("pk_num") or 0)
+        return _ok(
+            message=message,
+            result=result,
+            logs=logs,
+            stones_gained=stones_gained,
+            remaining=remaining,
+            daily_limit=daily_limit,
+        )
+    except Exception as e:
+        logger.error(f"虚神界对决失败: {e}")
+        return _err("虚神界对决失败，请稍后重试")
+
+
 @app.route('/game/api/work/refresh', methods=['POST'])
 @game_login_required
 def game_api_work_refresh():
@@ -3637,6 +3770,7 @@ def game_api_battle_boss_challenge():
     # 世界 Boss 结算：保留原网页端胜利给灵石逻辑，并补齐世界积分持久化。
     user_info = game_sql.get_user_info_with_id(player_id) or {}
     reward = _calc_world_boss_web_reward(player_id, user_info, boss, winner, events)
+    boss_limit.update_battle_count(player_id)
     reward_msg = _format_world_boss_reward_message(reward) if winner == "群友赢了" else "未击败 Boss，未获得胜利奖励"
 
     return _ok(

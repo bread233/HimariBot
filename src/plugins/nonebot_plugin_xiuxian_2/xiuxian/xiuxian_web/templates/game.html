@@ -719,6 +719,180 @@
             word-break: break-word;
         }
 
+        .impart-pk-result-card {
+            margin-top: 10px;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.04);
+            animation: fadeIn .2s ease;
+        }
+
+        .impart-pk-result-card .title {
+            margin: 0 0 6px;
+            font-weight: 800;
+        }
+
+        .impart-pk-result-card .meta {
+            margin: 2px 0;
+            font-size: 13px;
+            color: var(--text);
+            word-break: break-word;
+        }
+
+        .impart-pk-result-card.win {
+            border-color: rgba(247, 211, 122, .62);
+            background: linear-gradient(135deg, rgba(247, 211, 122, .15), rgba(134, 247, 178, .12));
+            box-shadow: 0 0 14px rgba(247, 211, 122, .2);
+        }
+
+        .impart-pk-result-card.win .title {
+            color: var(--gold);
+            text-shadow: 0 0 10px rgba(247, 211, 122, .4);
+        }
+
+        .impart-pk-result-card.lose {
+            border-color: rgba(241, 95, 121, .62);
+            background: linear-gradient(135deg, rgba(241, 95, 121, .14), rgba(179, 135, 255, .14));
+            box-shadow: 0 0 14px rgba(179, 135, 255, .22);
+        }
+
+        .impart-pk-result-card.lose .title {
+            color: #ffb3c0;
+            text-shadow: 0 0 10px rgba(241, 95, 121, .35);
+        }
+
+        .impart-pk-log-list {
+            margin-top: 8px;
+            max-height: 220px;
+            overflow-y: auto;
+            display: grid;
+            gap: 6px;
+            word-break: break-word;
+            animation: fadeIn .2s ease;
+        }
+
+        .impart-pk-log-line {
+            border: 1px solid rgba(247, 211, 122, .2);
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 13px;
+            line-height: 1.6;
+            color: var(--muted);
+            background: rgba(255, 255, 255, .04);
+        }
+
+        .impart-pk-log-line.win {
+            border-color: rgba(134, 247, 178, .45);
+            color: #bfffd9;
+            box-shadow: 0 0 10px rgba(134, 247, 178, .14);
+        }
+
+        .impart-pk-log-line.lose {
+            border-color: rgba(241, 95, 121, .48);
+            color: #ffc2cd;
+            box-shadow: 0 0 10px rgba(241, 95, 121, .14);
+        }
+
+        .impart-pk-log-line.normal {
+            color: var(--muted);
+        }
+
+        .reminder-center {
+            margin-top: 14px;
+            padding: 12px;
+            max-height: 320px;
+            overflow-y: auto;
+            border-radius: 14px;
+            background: linear-gradient(135deg, rgba(32, 19, 58, .95), rgba(22, 13, 42, .92));
+            border: 1px solid rgba(247, 211, 122, .35);
+        }
+        .reminder-center-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+            color: var(--gold);
+            font-weight: 800;
+        }
+        .daily-reminder,
+        .social-request-reminder,
+        .world-boss-reminder,
+        .retreat-reminder {
+            margin-top: 0;
+            padding: 10px;
+            border-radius: 14px;
+            background: linear-gradient(135deg, rgba(44, 26, 76, .95), rgba(30, 18, 58, .9));
+            border: 1px solid rgba(247, 211, 122, .45);
+            min-width: 0;
+        }
+        .social-request-reminder,
+        .world-boss-reminder,
+        .retreat-reminder { margin-top: 8px; }
+        .daily-reminder.pulse {
+            animation: dailyGlow 2.2s ease-in-out infinite;
+        }
+        .daily-reminder-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            color: var(--gold);
+            font-weight: 700;
+        }
+        .daily-reminder-badge,
+        .social-request-reminder-badge,
+        .world-boss-reminder-badge,
+        .retreat-reminder-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 26px;
+            height: 22px;
+            padding: 0 8px;
+            border-radius: 999px;
+            font-size: 12px;
+            background: rgba(255, 95, 108, .2);
+            color: #ff9ea8;
+            border: 1px solid rgba(255, 95, 108, .45);
+            flex-shrink: 0;
+        }
+        .daily-reminder-text,
+        .social-request-reminder-text,
+        .world-boss-reminder-text,
+        .retreat-reminder-text {
+            margin-top: 8px;
+            font-size: 13px;
+            line-height: 1.6;
+            word-break: break-word;
+        }
+        .social-request-reminder.pulse {
+            animation: dailyGlow 2.4s ease-in-out infinite;
+        }
+        .retreat-reminder.pulse {
+            animation: dailyGlow 2.1s ease-in-out infinite;
+        }
+        .world-boss-reminder.pulse {
+            animation: dailyGlow 2.15s ease-in-out infinite;
+        }
+        .reminder-center .btn {
+            padding: 8px 10px;
+            font-size: 12px;
+        }
+        .social-request-reminder-head { display:flex; justify-content:space-between; align-items:center; gap:10px; color:var(--gold); font-weight:700; }
+        @media (max-width: 768px) {
+            .reminder-center { padding: 10px; max-height: 260px; }
+            .daily-reminder,
+            .social-request-reminder,
+            .world-boss-reminder,
+            .retreat-reminder { padding: 8px; }
+        }
+        @keyframes dailyGlow {
+            0%, 100% { box-shadow: 0 0 0 rgba(247, 211, 122, 0); }
+            50% { box-shadow: 0 0 18px rgba(247, 211, 122, .35); }
+        }
+
         .badge {
             display: inline-flex;
             align-items: center;
@@ -1419,6 +1593,24 @@
             border-radius: 10px;
             color: var(--text);
             outline: none;
+        }
+
+        select,
+        select.input,
+        select.gift-input {
+            color: var(--text);
+            background-color: rgba(38, 28, 50, 0.98);
+        }
+
+        select option {
+            color: #fff4dc;
+            background-color: #2a1d35;
+        }
+
+        select option:checked,
+        select option:hover {
+            color: #2b1500;
+            background-color: #f7d37a;
         }
 
         .gift-input:focus {
@@ -2333,6 +2525,16 @@
 
                     <div id="tab-impart" class="tab-pane">
                         <h3 class="panel-title">传承祈愿 <span class="badge">思恋结晶</span></h3>
+                        <div class="quest-card" style="margin-bottom:12px;">
+                            <h4>虚神界对决</h4>
+                            <p class="hint" id="impart-pk-desc">今日剩余次数：-- / 7</p>
+                            <p class="hint">奖励说明：胜利 +20 思恋结晶，失败 +10 思恋结晶</p>
+                            <div class="action-grid">
+                                <button class="btn" id="btn-impart-pk-challenge" onclick="challengeImpartPk()">开始对决</button>
+                            </div>
+                            <div id="impart-pk-result" class="hint" style="margin-top:10px;">暂无对决结果</div>
+                            <div id="impart-pk-logs" class="hint" style="margin-top:8px; white-space:pre-wrap;">暂无对决日志</div>
+                        </div>
                         <div class="quest-card">
                             <h4>思恋结晶传承祈愿</h4>
                             <p class="hint">消耗思恋结晶抽取传承卡片。1 次消耗 10 颗，10 次消耗 100 颗。</p>
@@ -2496,6 +2698,49 @@
                         <button class="btn ghost" data-jump="battle">战斗剧场</button>
                         <button class="btn ghost" id="btn-reload">刷新数据</button>
                     </div>
+                    <div class="reminder-center">
+                        <div class="reminder-center-head">🔔 提醒中心</div>
+                        <div id="daily-reminder" class="daily-reminder">
+                            <div class="daily-reminder-head">
+                                <span>今日虚神界对决提醒</span>
+                                <span id="daily-reminder-badge" class="daily-reminder-badge">--</span>
+                            </div>
+                            <div id="daily-reminder-text" class="daily-reminder-text hint">正在读取今日虚神界对决状态...</div>
+                            <div class="action-grid" style="margin-top:10px;">
+                                <button class="btn" id="btn-go-impart" onclick="gotoDailyImpart()">前往对决</button>
+                            </div>
+                        </div>
+                        <div id="social-request-reminder" class="social-request-reminder">
+                            <div class="social-request-reminder-head">
+                                <span>结识申请提醒</span>
+                                <span id="social-request-reminder-badge" class="social-request-reminder-badge">--</span>
+                            </div>
+                            <div id="social-request-reminder-text" class="social-request-reminder-text hint">正在读取结识申请状态...</div>
+                            <div class="action-grid" style="margin-top:10px; grid-template-columns: 1fr;">
+                                <button class="btn ghost" id="btn-social-requests-goto" onclick="gotoSocialRequests()">前往处理</button>
+                            </div>
+                        </div>
+                        <div id="world-boss-reminder" class="world-boss-reminder" style="display:none;">
+                            <div class="social-request-reminder-head">
+                                <span>世界 Boss 奖励提醒</span>
+                                <span id="world-boss-reminder-badge" class="world-boss-reminder-badge">--</span>
+                            </div>
+                            <div id="world-boss-reminder-text" class="world-boss-reminder-text hint">正在读取世界 Boss 奖励状态...</div>
+                            <div class="action-grid" style="margin-top:10px; grid-template-columns: 1fr;">
+                                <button class="btn" id="btn-world-boss-goto" onclick="gotoWorldBossBattle()">前往挑战</button>
+                            </div>
+                        </div>
+                        <div id="retreat-reminder" class="retreat-reminder" style="display:none;">
+                            <div class="social-request-reminder-head">
+                                <span>闭关结算提醒</span>
+                                <span id="retreat-reminder-badge" class="retreat-reminder-badge">--</span>
+                            </div>
+                            <div id="retreat-reminder-text" class="retreat-reminder-text hint">当前未闭关</div>
+                            <div class="action-grid" style="margin-top:10px; grid-template-columns: 1fr;">
+                                <button class="btn" id="btn-retreat-goto" onclick="gotoRetreatSettle()">前往结算</button>
+                            </div>
+                        </div>
+                    </div>
                     <p class="notice" style="margin-top:18px;">MVP 已接入角色、背包、悬赏令与战斗回放。后续可继续扩展宗门、秘境、炼丹、抽卡与商城。</p>
                 </div>
             </aside>
@@ -2581,6 +2826,8 @@
     <script>
         const state = {
             profile: null, backpack: [], shop: [], worldBossShop: null, impartCards: [], work: null,
+            dailyStatus: null,
+            socialRequestStatus: null,
             battleTimer: null, battle: null, battleIndex: 0, battlePaused: false,
             battleFinished: false,
             battleFinishToast: null,
@@ -2825,6 +3072,109 @@
             if (name === 'social') loadPlayers();
             if (name === 'settings') loadSettings();
         }
+        async function loadDailyStatus() {
+            try {
+                const data = await api('/game/api/daily/status');
+                state.dailyStatus = data.impart_pk || null;
+            } catch (err) {
+                state.dailyStatus = { enabled: false, message: '日常状态加载失败，请稍后重试' };
+            }
+            renderDailyReminder();
+        }
+        function renderDailyReminder() {
+            const box = $('daily-reminder');
+            const text = $('daily-reminder-text');
+            const badge = $('daily-reminder-badge');
+            if (!box || !text || !badge) return;
+            const d = state.dailyStatus || {};
+            const limit = Number(d.daily_limit || 5);
+            const used = Number(d.used || 0);
+            const rem = Number(d.remaining || 0);
+            const done = d.completed === true || rem <= 0;
+            if (d.enabled === false) {
+                box.classList.remove('pulse');
+                box.style.display = 'none';
+                return;
+            }
+            box.style.display = 'block';
+            badge.textContent = done ? '✓' : `剩${rem}`;
+            if (done) {
+                box.classList.remove('pulse');
+                box.style.display = 'none';
+                return;
+            } else {
+                box.classList.add('pulse');
+                text.innerHTML = `今日虚神界对决未完成：${used}/${limit}<br><span class="hint">胜利 +20 结晶，失败 +10 结晶</span>`;
+            }
+        }
+
+        function renderImpartPkStatus() {
+            const desc = $('impart-pk-desc');
+            if (!desc) return;
+            const d = state.dailyStatus || {};
+            const limit = Number(d.daily_limit || 7);
+            const rem = Number(d.remaining || 0);
+            desc.textContent = `今日剩余次数：${rem} / ${limit}`;
+        }
+
+        async function challengeImpartPk() {
+            const btn = $('btn-impart-pk-challenge');
+            const resultEl = $('impart-pk-result');
+            const logsEl = $('impart-pk-logs');
+            if (btn) btn.disabled = true;
+            if (resultEl) resultEl.textContent = '对决中...';
+            if (logsEl) logsEl.textContent = '正在生成战报...';
+            try {
+                const data = await api('/game/api/impart/pk/challenge', { method: 'POST' });
+                const resultKey = data.result === 'win' ? 'win' : (data.result === 'lose' ? 'lose' : 'normal');
+                const resultTitle = resultKey === 'win' ? '对决胜利' : (resultKey === 'lose' ? '对决失败' : '对决结束');
+                const stones = Number(data.stones_gained || 0);
+                const rem = Number(data.remaining || 0);
+                const limit = Number(data.daily_limit || 7);
+                if (resultEl) {
+                    resultEl.innerHTML = `
+                        <div class="impart-pk-result-card ${resultKey}">
+                            <div class="title">${resultTitle}</div>
+                            <div class="meta">${data.message || '对决完成'}</div>
+                            <div class="meta">获得 +${stones} 思恋结晶</div>
+                            <div class="meta">今日剩余 ${rem} / ${limit}</div>
+                        </div>
+                    `;
+                }
+                const logs = Array.isArray(data.logs) ? data.logs : [];
+                if (logsEl) {
+                    if (!logs.length) {
+                        logsEl.innerHTML = '<div class="impart-pk-log-list"><div class="impart-pk-log-line normal">本次无详细日志</div></div>';
+                    } else {
+                        const lines = logs.map((line) => {
+                            const text = String(line || '');
+                            let cls = 'normal';
+                            if (/(胜利|获胜|赢)/.test(text)) cls = 'win';
+                            else if (/(失败|暴毙|输)/.test(text)) cls = 'lose';
+                            return `<div class="impart-pk-log-line ${cls}">${text}</div>`;
+                        }).join('');
+                        logsEl.innerHTML = `<div class="impart-pk-log-list">${lines}</div>`;
+                    }
+                }
+                await loadProfileOnly();
+                await loadDailyStatus();
+                renderImpartPkStatus();
+                toast(data.message || '对决完成');
+            } catch (err) {
+                if (resultEl) resultEl.textContent = err.message || '对决失败';
+                if (logsEl) logsEl.innerHTML = '<div class="impart-pk-log-list"><div class="impart-pk-log-line lose">请稍后重试</div></div>';
+                toast(err.message || '对决失败');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+        function gotoDailyImpart() {
+            switchTab('impart');
+            const target = $('tab-impart');
+            if (target && typeof target.scrollIntoView === 'function') {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
 
         function renderImpartCards() {
             const list = $('impart-cards-list');
@@ -2845,6 +3195,7 @@
                     </div>
                 `;
             }).join('');
+            renderImpartPkStatus();
         }
 
         function renderShop() {
@@ -2911,11 +3262,51 @@
             }).join('');
         }
 
+        function renderWorldBossReminder() {
+            const box = $('world-boss-reminder');
+            const text = $('world-boss-reminder-text');
+            const badge = $('world-boss-reminder-badge');
+            if (!box || !text || !badge) return;
+
+            const shop = state.worldBossShop || {};
+            const todayIntegral = Number(shop.today_integral || 0);
+            const todayIntegralLimit = Number(shop.today_integral_limit || 0);
+            const todayStone = Number(shop.today_stone || 0);
+            const todayStoneLimit = Number(shop.today_stone_limit || 0);
+            const todayBattleCount = Number(shop.today_battle_count || 0);
+
+            const hasRewardLeft = (todayIntegral < todayIntegralLimit) || (todayStone < todayStoneLimit);
+            if (!hasRewardLeft) {
+                box.style.display = 'none';
+                box.classList.remove('pulse');
+                return;
+            }
+
+            box.style.display = 'block';
+            box.classList.add('pulse');
+            badge.textContent = todayBattleCount > 0 ? '奖' : '可战';
+            text.innerHTML = `
+                世界 Boss 今日奖励仍可获取<br>
+                积分：${number_to(todayIntegral)} / ${number_to(todayIntegralLimit)}<br>
+                灵石：${number_to(todayStone)} / ${number_to(todayStoneLimit)}<br>
+                今日讨伐：${todayBattleCount} 次
+            `;
+        }
+
+        function gotoWorldBossBattle() {
+            switchTab('battle');
+            const target = $('world-boss-panel') || $('world-boss-list') || $('btn-world-boss-list');
+            if (target && typeof target.scrollIntoView === 'function') {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+
         async function loadWorldBossShop() {
             try {
                 const data = await api('/game/api/world-boss/shop');
                 state.worldBossShop = data.shop || null;
                 renderWorldBossShop();
+                renderWorldBossReminder();
             } catch (err) {
                 const list = $('world-boss-shop-list');
                 if (list) list.innerHTML = `<div class="item-card"><div class="item-name">世界 Boss 商店加载失败</div><div class="item-meta">${err.message || '未知错误'}</div></div>`;
@@ -2974,6 +3365,7 @@
                     await loadBackpack();
                 }
                 renderWorldBossShop();
+                renderWorldBossReminder();
             } catch (err) {
                 toast(err.message || '兑换失败');
             } finally {
@@ -3058,6 +3450,78 @@
                 }
             }
         }
+        function renderSocialRequestReminder() {
+            const box = $('social-request-reminder');
+            const text = $('social-request-reminder-text');
+            const badge = $('social-request-reminder-badge');
+            const btn = $('btn-social-requests-goto');
+            if (!box || !text || !badge || !btn) return;
+            const req = (state.socialRequestStatus && state.socialRequestStatus.requests) ? state.socialRequestStatus.requests : {};
+            const pending = Number(req.pending_count || 0);
+            if (pending > 0) {
+                box.classList.add('pulse');
+                badge.textContent = String(pending);
+                text.textContent = `有 ${pending} 条结识申请待处理`;
+                btn.textContent = '前往处理';
+            } else {
+                box.classList.remove('pulse');
+                badge.textContent = '0';
+                text.textContent = '暂无新的结识申请';
+                btn.textContent = '前往查看';
+            }
+        }
+        function renderRetreatReminder(retreat) {
+            const box = $('retreat-reminder');
+            const text = $('retreat-reminder-text');
+            const badge = $('retreat-reminder-badge');
+            if (!box || !text || !badge) return;
+            const r = retreat || state.retreat || {};
+            const shouldHighlight = !!(r.in_retreat && r.is_max);
+            if (!shouldHighlight) {
+                box.classList.remove('pulse');
+                box.style.display = 'none';
+                badge.textContent = '--';
+                text.textContent = '当前未闭关';
+                return;
+            }
+            box.style.display = 'block';
+            box.classList.add('pulse');
+            badge.textContent = '满';
+            text.innerHTML = `闭关收益已满，可出关结算<br><span class="hint">当前收益：${Number(r.current_exp || 0)} / ${Number(r.max_exp || 0)}</span>`;
+        }
+        function gotoRetreatSettle() {
+            switchTab('retreat');
+            const target = $('tab-retreat') || $('retreat-active-panel');
+            if (target && typeof target.scrollIntoView === 'function') {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+        async function loadSocialRequestStatus() {
+            try {
+                const data = await api('/game/api/social/requests/status');
+                state.socialRequestStatus = data || { requests: { pending_count: 0, has_pending: false, items: [] } };
+            } catch (err) {
+                state.socialRequestStatus = { requests: { pending_count: 0, has_pending: false, items: [] }, message: err.message || '读取失败' };
+            }
+            renderSocialRequestReminder();
+        }
+        async function gotoSocialRequests() {
+            switchTab('settings');
+            await loadSettings();
+            const area = $('settings-requests');
+            if (!area) return;
+            if (typeof area.scrollIntoView === 'function') {
+                area.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+            const oldOutline = area.style.outline;
+            const oldBg = area.style.background;
+            area.style.outline = '2px solid rgba(247, 211, 122, .85)';
+            area.style.background = 'rgba(247, 211, 122, .08)';
+            setTimeout(() => {
+                area.style.outline = oldOutline;
+                area.style.background = oldBg;
+            }, 1500);
+        }
 
         let currentGiftTarget = null;
         function showGiftModal(id, name) {
@@ -3116,6 +3580,7 @@
                 toast(data.message || '已处理');
                 await loadPlayers();
                 if ($('settings-status').textContent !== '未加载') await loadSettings();
+                await loadSocialRequestStatus();
             } catch (err) { toast(err.message); }
         }
 
@@ -3707,6 +4172,8 @@
                 state.backpack = backpack.items;
                 state.shop = (shop.shop && shop.shop.goods) ? shop.shop.goods : [];
                 state.impartCards = impartCards.cards || [];
+                loadDailyStatus();
+                await loadSocialRequestStatus();
                 renderBackpack();
                 renderShop();
                 loadWorldBossShop();
@@ -3714,6 +4181,7 @@
                 renderRift(rift.rift);
                 renderSect(sect.sect);
                 renderRetreat(retreat.retreat);
+                renderRetreatReminder(retreat.retreat);
                 renderBreakthrough(breakStatus);
             } catch (err) { toast(err.message); }
         }
@@ -3891,6 +4359,7 @@
                 stopBtn.disabled = true;
                 stopStoneBtn.disabled = true;
             }
+            renderRetreatReminder(retreat);
         }
 
         async function startRetreat() {
@@ -3898,6 +4367,7 @@
                 const data = await api('/game/api/retreat/start', { method: 'POST' });
                 toast(data.message);
                 await loadRetreatStatus();
+                renderRetreatReminder(state.retreat);
                 await loadProfileOnly();
             } catch (err) { toast(err.message); }
         }
@@ -3912,6 +4382,7 @@
                 toast(data.message);
                 renderProfile(data.profile);
                 await loadRetreatStatus();
+                renderRetreatReminder(state.retreat);
             } catch (err) { toast(err.message); }
         }
 
@@ -3919,6 +4390,7 @@
             try {
                 const data = await api('/game/api/retreat/status');
                 renderRetreat(data.retreat);
+                renderRetreatReminder(data.retreat);
             } catch (err) { toast(err.message); }
         }
 
@@ -4054,6 +4526,7 @@
                     finishMessage: data.message || '',
                     reloadProfileOnFinish: true
                 });
+                loadWorldBossShop();
             } catch (err) { toast(err.message); }
         }
         async function startPlayerBattle() {
