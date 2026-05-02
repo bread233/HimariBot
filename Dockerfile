@@ -5,10 +5,7 @@ FROM python:3.10-slim AS builder
 
 ENV PIP_NO_CACHE_DIR=1 \
     PYTHONUNBUFFERED=1 \
-    TZ=Asia/Tokyo \
-    POETRY_HOME=/opt/poetry \
-    PATH="/opt/poetry/bin:$PATH" \
-    POETRY_VIRTUALENVS_CREATE=false
+    TZ=Asia/Tokyo
 
 WORKDIR /app
 
@@ -22,23 +19,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zlib1g-dev \
     libpng-dev \
  && pip install --no-cache-dir --upgrade pip setuptools wheel \
- && pip install --no-cache-dir "poetry>=1.8,<2.0" \
  && rm -rf /var/lib/apt/lists/*
 
 # 只复制依赖定义，利用缓存
-COPY pyproject.toml poetry.lock* ./
+COPY requirements.txt ./
 
-# 安装依赖 + NoneBot 相关
-RUN poetry export -f requirements.txt --only main --without-hashes -o requirements.txt \
-    && pip install --no-cache-dir -r requirements.txt
-
-RUN pip install --no-cache-dir \
-        "pydantic==1.10.15" \
-        "fastapi==0.95.2" \
-        "nonebot2[fastapi,httpx]<2.3" \
-        nonebot-adapter-onebot \
-        nonebot-adapter-qq \
-    && rm -rf /root/.cache/pip /root/.cache/pypoetry
+# 安装依赖
+RUN pip install --no-cache-dir -r requirements.txt
 
 # 再复制源码
 COPY . .
