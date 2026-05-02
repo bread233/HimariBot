@@ -51,7 +51,7 @@ dateparser<1.2.2
 jinja2>=3.1.6,<4.0.0
 pycryptodome>=3.23.0,<4.0.0
 aiosqlite>=0.21.0,<0.22.0
-nonebot-plugin-htmlrender<0.6.8
+nonebot-plugin-htmlrender==0.6.7
 cachetools>=5.0.0,<6.0.0
 nonebot-plugin-userinfo>=0.2.6,<0.3.0
 nonebot-plugin-waiter>=0.8.1,<0.9.0
@@ -79,8 +79,6 @@ Flask>=3.1.2,<3.2.0
 flask-cors>=6.0.1,<7.0.0
 Werkzeug>=3.1.4,<3.2.0
 
-pydantic==1.10.15
-fastapi==0.95.2
-nonebot2[fastapi,httpx]<2.3
+nonebot2[fastapi,httpx]>=2.4.2,<2.5
 nonebot-adapter-onebot
 nonebot-adapter-qq
