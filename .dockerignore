@@ -1,6 +1,10 @@
 # Git / CI
 .git/
+.git
+.gitignore
+.gitattributes
 .github/
+.github
 
 # Tests / docs / migrations
 docs/
@@ -10,8 +14,15 @@ migrations/
 # Python 缓存 / 虚拟环境
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
 .venv/
 venv/
+env/
 
 # 运行时数据 / 日志
 data/
@@ -28,6 +39,10 @@ log/
 .idea/
 .DS_Store
 Thumbs.db
+
+# 通用日志/缓存目录
+logs/
+cache/
 
 # 文档
 README*.md
