@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg-dev \
     zlib1g-dev \
     libpng-dev \
- && pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir --upgrade pip setuptools wheel \
  && pip install --no-cache-dir "poetry>=1.8,<2.0" \
  && rm -rf /var/lib/apt/lists/*
 
@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml poetry.lock* ./
 
 # 安装依赖 + NoneBot 相关
-RUN poetry install --only main --no-root --no-interaction --no-ansi -vvv
+RUN poetry install --only main --no-root --no-interaction --no-ansi
 
 RUN pip install --no-cache-dir \
         "pydantic==1.10.15" \
