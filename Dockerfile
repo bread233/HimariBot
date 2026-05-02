@@ -29,8 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml poetry.lock* ./
 
 # 安装依赖 + NoneBot 相关
-RUN poetry lock --no-update \
-    && poetry install --only main --no-interaction --no-ansi -vvv \
+RUN poetry install --only main --no-interaction --no-ansi -vvv \
     && pip install --no-cache-dir \
         "pydantic==1.10.15" \
         "fastapi==0.95.2" \
@@ -114,7 +113,8 @@ COPY --from=builder /app /app
 RUN python -m playwright install chromium
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+RUN sed -i 's/\r$//' /docker-entrypoint.sh \
+    && chmod +x /docker-entrypoint.sh
 
 EXPOSE 8181
 EXPOSE 5888
