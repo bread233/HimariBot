@@ -2390,6 +2390,16 @@
 
                     <div id="tab-impart" class="tab-pane">
                         <h3 class="panel-title">传承祈愿 <span class="badge">思恋结晶</span></h3>
+                        <div class="quest-card" style="margin-bottom:12px;">
+                            <h4>虚神界对决</h4>
+                            <p class="hint" id="impart-pk-desc">今日剩余次数：-- / 7</p>
+                            <p class="hint">奖励说明：胜利 +20 思恋结晶，失败 +10 思恋结晶</p>
+                            <div class="action-grid">
+                                <button class="btn" id="btn-impart-pk-challenge" onclick="challengeImpartPk()">开始对决</button>
+                            </div>
+                            <div id="impart-pk-result" class="hint" style="margin-top:10px;">暂无对决结果</div>
+                            <div id="impart-pk-logs" class="hint" style="margin-top:8px; white-space:pre-wrap;">暂无对决日志</div>
+                        </div>
                         <div class="quest-card">
                             <h4>思恋结晶传承祈愿</h4>
                             <p class="hint">消耗思恋结晶抽取传承卡片。1 次消耗 10 颗，10 次消耗 100 颗。</p>
@@ -2927,6 +2937,44 @@
                 text.innerHTML = `今日虚神界对决未完成：${used}/${limit}<br><span class="hint">胜利 +20 结晶，失败 +10 结晶</span>`;
             }
         }
+
+        function renderImpartPkStatus() {
+            const desc = $('impart-pk-desc');
+            if (!desc) return;
+            const d = state.dailyStatus || {};
+            const limit = Number(d.daily_limit || 7);
+            const rem = Number(d.remaining || 0);
+            desc.textContent = `今日剩余次数：${rem} / ${limit}`;
+        }
+
+        async function challengeImpartPk() {
+            const btn = $('btn-impart-pk-challenge');
+            const resultEl = $('impart-pk-result');
+            const logsEl = $('impart-pk-logs');
+            if (btn) btn.disabled = true;
+            if (resultEl) resultEl.textContent = '对决中...';
+            if (logsEl) logsEl.textContent = '正在生成战报...';
+            try {
+                const data = await api('/game/api/impart/pk/challenge', { method: 'POST' });
+                const resultMap = { win: '胜利', lose: '失败', none: '已结束' };
+                const resultText = resultMap[data.result] || '已结束';
+                if (resultEl) {
+                    resultEl.textContent = `${data.message || '对决完成'}（结果：${resultText}，获得 ${Number(data.stones_gained || 0)} 结晶，剩余 ${Number(data.remaining || 0)}/${Number(data.daily_limit || 7)}）`;
+                }
+                const logs = Array.isArray(data.logs) ? data.logs : [];
+                if (logsEl) logsEl.textContent = logs.length ? logs.join('\n') : '本次无详细日志';
+                await loadProfileOnly();
+                await loadDailyStatus();
+                renderImpartPkStatus();
+                toast(data.message || '对决完成');
+            } catch (err) {
+                if (resultEl) resultEl.textContent = err.message || '对决失败';
+                if (logsEl) logsEl.textContent = '请稍后重试';
+                toast(err.message || '对决失败');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
         function gotoDailyImpart() {
             switchTab('impart');
             const target = $('tab-impart');
@@ -2954,6 +3002,7 @@
                     </div>
                 `;
             }).join('');
+            renderImpartPkStatus();
         }
 
         function renderShop() {
