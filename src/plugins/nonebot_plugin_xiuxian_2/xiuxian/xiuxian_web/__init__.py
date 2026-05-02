@@ -2339,6 +2339,37 @@ def game_api_friend_requests():
     return _ok(incoming=pack(incoming_ids), outgoing=pack(outgoing_ids))
 
 
+@app.route('/game/api/social/requests/status')
+@game_login_required
+def game_api_social_requests_status():
+    user_id = _current_player_id()
+    try:
+        user_data = _ensure_social_fields(_load_player_user_data(user_id))
+        incoming_ids = [
+            int(k)
+            for k in (user_data.get("friend_requests_in") or {}).keys()
+            if str(k).isdigit()
+        ]
+        pending_count = len(incoming_ids)
+        items = []
+        for uid in incoming_ids[:3]:
+            info = game_sql.get_user_info_with_id(uid) or {}
+            items.append({
+                "user_id": str(uid),
+                "name": info.get("user_name") or f"道友{uid}",
+            })
+        return _ok(requests={
+            "pending_count": pending_count,
+            "has_pending": pending_count > 0,
+            "items": items,
+        })
+    except Exception as e:
+        return _ok(
+            requests={"pending_count": 0, "has_pending": False, "items": []},
+            message=f"结识申请状态读取失败：{e}",
+        )
+
+
 @app.route('/game/api/social/friends')
 @game_login_required
 def game_api_friends():

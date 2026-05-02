@@ -753,6 +753,19 @@
             flex-shrink: 0;
         }
         .daily-reminder-text { font-size: 13px; line-height: 1.6; }
+        .social-request-reminder {
+            margin-top: 12px;
+            padding: 12px;
+            border-radius: 14px;
+            background: linear-gradient(135deg, rgba(40, 20, 70, .95), rgba(24, 14, 48, .92));
+            border: 1px solid rgba(247, 211, 122, .45);
+        }
+        .social-request-reminder.pulse {
+            animation: dailyGlow 2.4s ease-in-out infinite;
+        }
+        .social-request-reminder-head { display:flex; justify-content:space-between; align-items:center; gap:10px; color:var(--gold); font-weight:700; }
+        .social-request-reminder-badge { display:inline-flex; align-items:center; justify-content:center; min-width:26px; height:22px; padding:0 8px; border-radius:999px; font-size:12px; background:rgba(255,95,108,.2); color:#ff9ea8; border:1px solid rgba(255,95,108,.45); flex-shrink:0; }
+        .social-request-reminder-text { margin-top:8px; font-size:13px; line-height:1.6; word-break:break-word; }
         @keyframes dailyGlow {
             0%, 100% { box-shadow: 0 0 0 rgba(247, 211, 122, 0); }
             50% { box-shadow: 0 0 18px rgba(247, 211, 122, .35); }
@@ -2573,6 +2586,16 @@
                             <button class="btn" id="btn-go-impart">前往对决</button>
                         </div>
                     </div>
+                    <div id="social-request-reminder" class="social-request-reminder">
+                        <div class="social-request-reminder-head">
+                            <span>🔔 结识申请提醒</span>
+                            <span id="social-request-reminder-badge" class="social-request-reminder-badge">--</span>
+                        </div>
+                        <div id="social-request-reminder-text" class="social-request-reminder-text hint">正在读取结识申请状态...</div>
+                        <div class="action-grid" style="margin-top:10px; grid-template-columns: 1fr;">
+                            <button class="btn ghost" id="btn-social-requests-goto" onclick="gotoSocialRequests()">前往处理</button>
+                        </div>
+                    </div>
                     <p class="notice" style="margin-top:18px;">MVP 已接入角色、背包、悬赏令与战斗回放。后续可继续扩展宗门、秘境、炼丹、抽卡与商城。</p>
                 </div>
             </aside>
@@ -2659,6 +2682,7 @@
         const state = {
             profile: null, backpack: [], shop: [], worldBossShop: null, impartCards: [], work: null,
             dailyStatus: null,
+            socialRequestStatus: null,
             battleTimer: null, battle: null, battleIndex: 0, battlePaused: false,
             battleFinished: false,
             battleFinishToast: null,
@@ -3216,6 +3240,52 @@
                 }
             }
         }
+        function renderSocialRequestReminder() {
+            const box = $('social-request-reminder');
+            const text = $('social-request-reminder-text');
+            const badge = $('social-request-reminder-badge');
+            const btn = $('btn-social-requests-goto');
+            if (!box || !text || !badge || !btn) return;
+            const req = (state.socialRequestStatus && state.socialRequestStatus.requests) ? state.socialRequestStatus.requests : {};
+            const pending = Number(req.pending_count || 0);
+            if (pending > 0) {
+                box.classList.add('pulse');
+                badge.textContent = String(pending);
+                text.textContent = `有 ${pending} 条结识申请待处理`;
+                btn.textContent = '前往处理';
+            } else {
+                box.classList.remove('pulse');
+                badge.textContent = '0';
+                text.textContent = '暂无新的结识申请';
+                btn.textContent = '前往查看';
+            }
+        }
+        async function loadSocialRequestStatus() {
+            try {
+                const data = await api('/game/api/social/requests/status');
+                state.socialRequestStatus = data || { requests: { pending_count: 0, has_pending: false, items: [] } };
+            } catch (err) {
+                state.socialRequestStatus = { requests: { pending_count: 0, has_pending: false, items: [] }, message: err.message || '读取失败' };
+            }
+            renderSocialRequestReminder();
+        }
+        async function gotoSocialRequests() {
+            switchTab('settings');
+            await loadSettings();
+            const area = $('settings-requests');
+            if (!area) return;
+            if (typeof area.scrollIntoView === 'function') {
+                area.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+            const oldOutline = area.style.outline;
+            const oldBg = area.style.background;
+            area.style.outline = '2px solid rgba(247, 211, 122, .85)';
+            area.style.background = 'rgba(247, 211, 122, .08)';
+            setTimeout(() => {
+                area.style.outline = oldOutline;
+                area.style.background = oldBg;
+            }, 1500);
+        }
 
         let currentGiftTarget = null;
         function showGiftModal(id, name) {
@@ -3274,6 +3344,7 @@
                 toast(data.message || '已处理');
                 await loadPlayers();
                 if ($('settings-status').textContent !== '未加载') await loadSettings();
+                await loadSocialRequestStatus();
             } catch (err) { toast(err.message); }
         }
 
@@ -3866,6 +3937,7 @@
                 state.shop = (shop.shop && shop.shop.goods) ? shop.shop.goods : [];
                 state.impartCards = impartCards.cards || [];
                 loadDailyStatus();
+                await loadSocialRequestStatus();
                 renderBackpack();
                 renderShop();
                 loadWorldBossShop();
