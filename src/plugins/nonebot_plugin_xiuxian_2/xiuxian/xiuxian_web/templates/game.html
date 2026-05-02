@@ -2584,7 +2584,16 @@
             }
         };
 
-        function $(id) { return document.getElementById(id); }
+         function $(id) { return document.getElementById(id); }
+         
+         function getBattleTitleText(battle, finished = false) {
+             const total = battle?.meta?.event_count || battle?.events?.length || 0;
+             const title = battle?.title || '战斗剧场';
+             if (finished) {
+                 return `${title} · 胜者：${battle?.winner || '--'} · ${total}幕`;
+             }
+             return `${title} · 交战中 · ${total}幕`;
+         }
         function pct(value, max) { return Math.max(0, Math.min(100, max ? (value / max) * 100 : 0)); }
         function clampPercent(v) { return Math.max(0, Math.min(100, Number(v) || 0)); }
         function parseChineseNumberToFloat(valueText) {
@@ -3962,18 +3971,18 @@
                 playBattle(data.battle);
             } catch (err) { toast(err.message); }
         }
-        function playBattle(battle, options = {}) {
-            clearTimeout(state.battleTimer);
-            state.battle = battle;
-            state.battleIndex = 0;
-            state.battlePaused = false;
-            state.battleFinished = false;
-            state.battleFinishToast = options.finishMessage || null;
-            state.battleFinishReloadProfile = Boolean(options.reloadProfileOnFinish);
-            $('btn-battle-toggle').disabled = false;
-            $('btn-battle-skip').disabled = false;
-            $('btn-battle-toggle').textContent = '暂停';
-            $('battle-title').textContent = `${battle.title} · 胜者：${battle.winner} · ${battle.meta?.event_count || battle.events.length}幕`;
+         function playBattle(battle, options = {}) {
+             clearTimeout(state.battleTimer);
+             state.battle = battle;
+             state.battleIndex = 0;
+             state.battlePaused = false;
+             state.battleFinished = false;
+             state.battleFinishToast = options.finishMessage || null;
+             state.battleFinishReloadProfile = Boolean(options.reloadProfileOnFinish);
+             $('btn-battle-toggle').disabled = false;
+             $('btn-battle-skip').disabled = false;
+             $('btn-battle-toggle').textContent = '暂停';
+             $('battle-title').textContent = getBattleTitleText(battle, false);
             $('battle-log').innerHTML = '';
             $('battle-caption').textContent = '战斗开始……';
             ['player', 'enemy'].forEach(side => {
@@ -4096,24 +4105,25 @@
             $('battle-progress-text').textContent = `${state.battleIndex}/${total}`;
             $('battle-progress-bar').style.width = `${total ? (state.battleIndex / total) * 100 : 0}%`;
         }
-        function finishBattle() {
-            if (state.battleFinished) return;
-            state.battleFinished = true;
-            clearTimeout(state.battleTimer);
-            $('battle-caption').textContent = `战斗结束，胜者：${state.battle?.winner || '--'}`;
-            $('btn-battle-toggle').disabled = true;
-            $('btn-battle-skip').disabled = true;
+         function finishBattle() {
+             if (state.battleFinished) return;
+             state.battleFinished = true;
+             clearTimeout(state.battleTimer);
+             $('battle-title').textContent = getBattleTitleText(state.battle, true);
+             $('battle-caption').textContent = `战斗结束，胜者：${state.battle?.winner || '--'}`;
+             $('btn-battle-toggle').disabled = true;
+             $('btn-battle-skip').disabled = true;
 
-            const finishToast = state.battleFinishToast;
-            const reloadProfile = state.battleFinishReloadProfile;
-            state.battleFinishToast = null;
-            state.battleFinishReloadProfile = false;
+             const finishToast = state.battleFinishToast;
+             const reloadProfile = state.battleFinishReloadProfile;
+             state.battleFinishToast = null;
+             state.battleFinishReloadProfile = false;
 
-            if (finishToast) toast(finishToast);
-            if (reloadProfile) {
-                loadProfileOnly().catch(err => toast(err.message || '刷新角色信息失败'));
-            }
-        }
+             if (finishToast) toast(finishToast);
+             if (reloadProfile) {
+                 loadProfileOnly().catch(err => toast(err.message || '刷新角色信息失败'));
+             }
+         }
         function toggleBattlePause() {
             if (!state.battle) return;
             state.battlePaused = !state.battlePaused;
