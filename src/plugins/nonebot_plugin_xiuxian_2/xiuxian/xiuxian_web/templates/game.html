@@ -719,6 +719,45 @@
             word-break: break-word;
         }
 
+        .daily-reminder {
+            margin-top: 14px;
+            padding: 12px;
+            border-radius: 14px;
+            background: linear-gradient(135deg, rgba(44, 26, 76, .95), rgba(30, 18, 58, .9));
+            border: 1px solid rgba(247, 211, 122, .45);
+        }
+        .daily-reminder.pulse {
+            animation: dailyGlow 2.2s ease-in-out infinite;
+        }
+        .daily-reminder-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            color: var(--gold);
+            font-weight: 700;
+        }
+        .daily-reminder-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 26px;
+            height: 22px;
+            padding: 0 8px;
+            border-radius: 999px;
+            font-size: 12px;
+            background: rgba(255, 95, 108, .2);
+            color: #ff9ea8;
+            border: 1px solid rgba(255, 95, 108, .45);
+            flex-shrink: 0;
+        }
+        .daily-reminder-text { font-size: 13px; line-height: 1.6; }
+        @keyframes dailyGlow {
+            0%, 100% { box-shadow: 0 0 0 rgba(247, 211, 122, 0); }
+            50% { box-shadow: 0 0 18px rgba(247, 211, 122, .35); }
+        }
+
         .badge {
             display: inline-flex;
             align-items: center;
@@ -2514,6 +2553,16 @@
                         <button class="btn ghost" data-jump="battle">战斗剧场</button>
                         <button class="btn ghost" id="btn-reload">刷新数据</button>
                     </div>
+                    <div id="daily-reminder" class="daily-reminder">
+                        <div class="daily-reminder-head">
+                            <span>📣 日常提醒</span>
+                            <span id="daily-reminder-badge" class="daily-reminder-badge">--</span>
+                        </div>
+                        <div id="daily-reminder-text" class="daily-reminder-text hint">正在读取今日虚神界对决状态...</div>
+                        <div class="action-grid" style="margin-top:10px;">
+                            <button class="btn" id="btn-go-impart">前往对决</button>
+                        </div>
+                    </div>
                     <p class="notice" style="margin-top:18px;">MVP 已接入角色、背包、悬赏令与战斗回放。后续可继续扩展宗门、秘境、炼丹、抽卡与商城。</p>
                 </div>
             </aside>
@@ -2599,6 +2648,7 @@
     <script>
         const state = {
             profile: null, backpack: [], shop: [], worldBossShop: null, impartCards: [], work: null,
+            dailyStatus: null,
             battleTimer: null, battle: null, battleIndex: 0, battlePaused: false,
             battleFinished: false,
             battleFinishToast: null,
@@ -2842,6 +2892,47 @@
             if (name === 'shop') loadShop();
             if (name === 'social') loadPlayers();
             if (name === 'settings') loadSettings();
+        }
+        async function loadDailyStatus() {
+            try {
+                const data = await api('/game/api/daily/status');
+                state.dailyStatus = data.impart_pk || null;
+            } catch (err) {
+                state.dailyStatus = { enabled: false, message: '日常状态加载失败，请稍后重试' };
+            }
+            renderDailyReminder();
+        }
+        function renderDailyReminder() {
+            const box = $('daily-reminder');
+            const text = $('daily-reminder-text');
+            const badge = $('daily-reminder-badge');
+            if (!box || !text || !badge) return;
+            const d = state.dailyStatus || {};
+            const limit = Number(d.daily_limit || 5);
+            const used = Number(d.used || 0);
+            const rem = Number(d.remaining || 0);
+            const done = rem <= 0;
+            if (d.enabled === false) {
+                box.classList.remove('pulse');
+                badge.textContent = '--';
+                text.textContent = d.message || '暂时无法读取虚神界对决状态';
+                return;
+            }
+            badge.textContent = done ? '✓' : `剩${rem}`;
+            if (done) {
+                box.classList.remove('pulse');
+                text.innerHTML = `今日虚神界对决已完成<br><span class="hint">可明日再战，继续获取思恋结晶。</span>`;
+            } else {
+                box.classList.add('pulse');
+                text.innerHTML = `今日虚神界对决未完成：${used}/${limit}<br><span class="hint">胜利 +20 结晶，失败 +10 结晶</span>`;
+            }
+        }
+        function gotoDailyImpart() {
+            switchTab('impart');
+            const target = $('tab-impart');
+            if (target && typeof target.scrollIntoView === 'function') {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
         }
 
         function renderImpartCards() {
@@ -3725,6 +3816,7 @@
                 state.backpack = backpack.items;
                 state.shop = (shop.shop && shop.shop.goods) ? shop.shop.goods : [];
                 state.impartCards = impartCards.cards || [];
+                loadDailyStatus();
                 renderBackpack();
                 renderShop();
                 loadWorldBossShop();

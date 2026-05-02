@@ -44,6 +44,7 @@ from ..xiuxian_boss.bossconfig import get_boss_config
 from ..xiuxian_boss.boss_limit import boss_limit
 from ..xiuxian_impart.impart_uitls import get_impart_card_display_info
 from ..xiuxian_impart.impart_data import impart_data_json
+from ..xiuxian_impart_pk.impart_pk import impart_pk
 from ..xiuxian_back.back_util import (
     check_equipment_can_use,
     get_use_equipment_sql,
@@ -3087,6 +3088,41 @@ def game_api_work_status():
     player_id = _current_player_id()
     status, work_data = _get_player_work_status(player_id)
     return _ok(work=_serialize_work(status, work_data, player_id))
+
+
+@app.route('/game/api/daily/status')
+@game_login_required
+def game_api_daily_status():
+    daily_limit = 7
+    reward_win = 20
+    reward_lose = 10
+    try:
+        player_id = _current_player_id()
+        user_data = impart_pk.find_user_data(player_id) or {}
+        remaining = int(user_data.get("pk_num") or 0)
+        used = max(daily_limit - remaining, 0)
+        completed = remaining <= 0
+        return _ok(impart_pk={
+            "enabled": True,
+            "daily_limit": daily_limit,
+            "used": used,
+            "remaining": remaining,
+            "completed": completed,
+            "reward_win": reward_win,
+            "reward_lose": reward_lose,
+            "message": "今日虚神界对决已完成" if completed else "今日虚神界对决还未完成"
+        })
+    except Exception:
+        return _ok(impart_pk={
+            "enabled": False,
+            "daily_limit": daily_limit,
+            "used": 0,
+            "remaining": 0,
+            "completed": True,
+            "reward_win": reward_win,
+            "reward_lose": reward_lose,
+            "message": "暂时无法读取虚神界对决状态"
+        })
 
 
 @app.route('/game/api/work/refresh', methods=['POST'])
