@@ -719,13 +719,31 @@
             word-break: break-word;
         }
 
-        .daily-reminder {
+        .reminder-center {
             margin-top: 14px;
+            padding: 12px;
+            border-radius: 14px;
+            background: linear-gradient(135deg, rgba(32, 19, 58, .95), rgba(22, 13, 42, .92));
+            border: 1px solid rgba(247, 211, 122, .35);
+        }
+        .reminder-center-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+            color: var(--gold);
+            font-weight: 800;
+        }
+        .daily-reminder,
+        .social-request-reminder {
+            margin-top: 0;
             padding: 12px;
             border-radius: 14px;
             background: linear-gradient(135deg, rgba(44, 26, 76, .95), rgba(30, 18, 58, .9));
             border: 1px solid rgba(247, 211, 122, .45);
+            min-width: 0;
         }
+        .social-request-reminder { margin-top: 10px; }
         .daily-reminder.pulse {
             animation: dailyGlow 2.2s ease-in-out infinite;
         }
@@ -738,7 +756,8 @@
             color: var(--gold);
             font-weight: 700;
         }
-        .daily-reminder-badge {
+        .daily-reminder-badge,
+        .social-request-reminder-badge {
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -752,20 +771,22 @@
             border: 1px solid rgba(255, 95, 108, .45);
             flex-shrink: 0;
         }
-        .daily-reminder-text { font-size: 13px; line-height: 1.6; }
-        .social-request-reminder {
-            margin-top: 12px;
-            padding: 12px;
-            border-radius: 14px;
-            background: linear-gradient(135deg, rgba(40, 20, 70, .95), rgba(24, 14, 48, .92));
-            border: 1px solid rgba(247, 211, 122, .45);
+        .daily-reminder-text,
+        .social-request-reminder-text {
+            margin-top: 8px;
+            font-size: 13px;
+            line-height: 1.6;
+            word-break: break-word;
         }
         .social-request-reminder.pulse {
             animation: dailyGlow 2.4s ease-in-out infinite;
         }
         .social-request-reminder-head { display:flex; justify-content:space-between; align-items:center; gap:10px; color:var(--gold); font-weight:700; }
-        .social-request-reminder-badge { display:inline-flex; align-items:center; justify-content:center; min-width:26px; height:22px; padding:0 8px; border-radius:999px; font-size:12px; background:rgba(255,95,108,.2); color:#ff9ea8; border:1px solid rgba(255,95,108,.45); flex-shrink:0; }
-        .social-request-reminder-text { margin-top:8px; font-size:13px; line-height:1.6; word-break:break-word; }
+        @media (max-width: 768px) {
+            .reminder-center { padding: 10px; }
+            .daily-reminder,
+            .social-request-reminder { padding: 10px; }
+        }
         @keyframes dailyGlow {
             0%, 100% { box-shadow: 0 0 0 rgba(247, 211, 122, 0); }
             50% { box-shadow: 0 0 18px rgba(247, 211, 122, .35); }
@@ -2576,24 +2597,27 @@
                         <button class="btn ghost" data-jump="battle">战斗剧场</button>
                         <button class="btn ghost" id="btn-reload">刷新数据</button>
                     </div>
-                    <div id="daily-reminder" class="daily-reminder">
-                        <div class="daily-reminder-head">
-                            <span>📣 日常提醒</span>
-                            <span id="daily-reminder-badge" class="daily-reminder-badge">--</span>
+                    <div class="reminder-center">
+                        <div class="reminder-center-head">🔔 提醒中心</div>
+                        <div id="daily-reminder" class="daily-reminder">
+                            <div class="daily-reminder-head">
+                                <span>今日虚神界对决提醒</span>
+                                <span id="daily-reminder-badge" class="daily-reminder-badge">--</span>
+                            </div>
+                            <div id="daily-reminder-text" class="daily-reminder-text hint">正在读取今日虚神界对决状态...</div>
+                            <div class="action-grid" style="margin-top:10px;">
+                                <button class="btn" id="btn-go-impart">前往对决</button>
+                            </div>
                         </div>
-                        <div id="daily-reminder-text" class="daily-reminder-text hint">正在读取今日虚神界对决状态...</div>
-                        <div class="action-grid" style="margin-top:10px;">
-                            <button class="btn" id="btn-go-impart">前往对决</button>
-                        </div>
-                    </div>
-                    <div id="social-request-reminder" class="social-request-reminder">
-                        <div class="social-request-reminder-head">
-                            <span>🔔 结识申请提醒</span>
-                            <span id="social-request-reminder-badge" class="social-request-reminder-badge">--</span>
-                        </div>
-                        <div id="social-request-reminder-text" class="social-request-reminder-text hint">正在读取结识申请状态...</div>
-                        <div class="action-grid" style="margin-top:10px; grid-template-columns: 1fr;">
-                            <button class="btn ghost" id="btn-social-requests-goto" onclick="gotoSocialRequests()">前往处理</button>
+                        <div id="social-request-reminder" class="social-request-reminder">
+                            <div class="social-request-reminder-head">
+                                <span>结识申请提醒</span>
+                                <span id="social-request-reminder-badge" class="social-request-reminder-badge">--</span>
+                            </div>
+                            <div id="social-request-reminder-text" class="social-request-reminder-text hint">正在读取结识申请状态...</div>
+                            <div class="action-grid" style="margin-top:10px; grid-template-columns: 1fr;">
+                                <button class="btn ghost" id="btn-social-requests-goto" onclick="gotoSocialRequests()">前往处理</button>
+                            </div>
                         </div>
                     </div>
                     <p class="notice" style="margin-top:18px;">MVP 已接入角色、背包、悬赏令与战斗回放。后续可继续扩展宗门、秘境、炼丹、抽卡与商城。</p>
