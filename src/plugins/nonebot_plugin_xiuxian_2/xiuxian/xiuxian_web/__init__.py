@@ -3770,6 +3770,7 @@ def game_api_battle_boss_challenge():
     # 世界 Boss 结算：保留原网页端胜利给灵石逻辑，并补齐世界积分持久化。
     user_info = game_sql.get_user_info_with_id(player_id) or {}
     reward = _calc_world_boss_web_reward(player_id, user_info, boss, winner, events)
+    boss_limit.update_battle_count(player_id)
     reward_msg = _format_world_boss_reward_message(reward) if winner == "群友赢了" else "未击败 Boss，未获得胜利奖励"
 
     return _ok(
