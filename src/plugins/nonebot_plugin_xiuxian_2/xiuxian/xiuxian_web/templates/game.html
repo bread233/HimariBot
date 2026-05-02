@@ -2370,6 +2370,12 @@
                         <div class="item-list" id="shop-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:10px;">
                             <div class="item-card"><div class="item-name">加载中...</div></div>
                         </div>
+
+                        <h3 class="panel-title" style="margin-top:20px;">世界 Boss 积分商店 <span class="badge" id="world-boss-shop-integral">积分 --</span></h3>
+                        <p class="notice" id="world-boss-shop-status">挑战世界 Boss 获得世界积分，可在此兑换限购物品。</p>
+                        <div class="item-list" id="world-boss-shop-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:10px;">
+                            <div class="item-card"><div class="item-name">加载中...</div></div>
+                        </div>
                     </div>
 
                     <div id="tab-social" class="tab-pane">
@@ -2573,7 +2579,7 @@
 
     <script>
         const state = {
-            profile: null, backpack: [], shop: [], impartCards: [], work: null,
+            profile: null, backpack: [], shop: [], worldBossShop: null, impartCards: [], work: null,
             battleTimer: null, battle: null, battleIndex: 0, battlePaused: false,
             battleFinished: false,
             battleFinishToast: null,
@@ -2584,7 +2590,16 @@
             }
         };
 
-        function $(id) { return document.getElementById(id); }
+         function $(id) { return document.getElementById(id); }
+         
+         function getBattleTitleText(battle, finished = false) {
+             const total = battle?.meta?.event_count || battle?.events?.length || 0;
+             const title = battle?.title || '战斗剧场';
+             if (finished) {
+                 return `${title} · 胜者：${battle?.winner || '--'} · ${total}幕`;
+             }
+             return `${title} · 交战中 · ${total}幕`;
+         }
         function pct(value, max) { return Math.max(0, Math.min(100, max ? (value / max) * 100 : 0)); }
         function clampPercent(v) { return Math.max(0, Math.min(100, Number(v) || 0)); }
         function parseChineseNumberToFloat(valueText) {
@@ -2850,6 +2865,62 @@
             `).join('');
         }
 
+        function renderWorldBossShop() {
+            const shop = state.worldBossShop || {};
+            const goods = shop.goods || [];
+            const list = $('world-boss-shop-list');
+            const badge = $('world-boss-shop-integral');
+            const status = $('world-boss-shop-status');
+
+            if (badge) badge.textContent = `积分 ${number_to(Number(shop.boss_integral || 0))}`;
+            if (status) {
+                const today = Number(shop.today_integral || 0);
+                const todayLimit = Number(shop.today_integral_limit || 0);
+                const battleCount = Number(shop.today_battle_count || 0);
+                status.textContent = `当前世界积分：${number_to(Number(shop.boss_integral || 0))} 点 · 今日获得：${number_to(today)} / ${number_to(todayLimit)} · 今日讨伐：${battleCount} 次`;
+            }
+            if (!list) return;
+
+            if (!goods.length) {
+                list.innerHTML = `<div class="item-card"><div class="item-name">暂无可兑换商品</div><div class="item-meta">请确认后端已配置 config['世界积分商品']。</div></div>`;
+                return;
+            }
+
+            list.innerHTML = goods.map(item => {
+                const weeklyLimit = Number(item.weekly_limit || 0);
+                const weeklyPurchased = Number(item.weekly_purchased || 0);
+                const weeklyLeft = Number(item.weekly_left || 0);
+                const cost = Number(item.cost || 0);
+                const canExchange = Boolean(item.can_exchange);
+                const limitText = weeklyLimit > 0
+                    ? `本周 ${weeklyPurchased}/${weeklyLimit}，剩余 ${weeklyLeft}`
+                    : '本周不限购';
+                const disabledText = canExchange ? '' : 'disabled';
+                const btnText = weeklyLeft <= 0 && weeklyLimit > 0 ? '本周已售罄' : '兑换';
+                return `
+                    <div class="item-card">
+                        <div class="item-name" title="${item.name || ''}">${item.name || '未知商品'}</div>
+                        <div class="item-meta">${item.type || '未知'} · ${item.level || '凡品'}</div>
+                        <div class="item-meta">${item.desc || '暂无描述'}</div>
+                        <div class="item-count"><span>消耗</span><b>${number_to(cost)} 世界积分</b></div>
+                        <div class="item-meta">${limitText}</div>
+                        <button class="btn" ${disabledText} onclick="exchangeWorldBossItem(${Number(item.shop_id || 0)}, this)">${btnText}</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function loadWorldBossShop() {
+            try {
+                const data = await api('/game/api/world-boss/shop');
+                state.worldBossShop = data.shop || null;
+                renderWorldBossShop();
+            } catch (err) {
+                const list = $('world-boss-shop-list');
+                if (list) list.innerHTML = `<div class="item-card"><div class="item-name">世界 Boss 商店加载失败</div><div class="item-meta">${err.message || '未知错误'}</div></div>`;
+            }
+        }
+
         async function loadShop() {
             try {
                 const data = await api('/game/api/shop');
@@ -2858,6 +2929,7 @@
             } catch (err) {
                 toast(err.message || '加载商店失败');
             }
+            await loadWorldBossShop();
         }
 
         async function buyShopItem(itemId, btn) {
@@ -2876,6 +2948,33 @@
                 await loadShop();
             } catch (err) {
                 toast(err.message || '购买失败');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = oldText;
+            }
+        }
+
+        async function exchangeWorldBossItem(shopId, btn) {
+            if (!shopId || !btn) return;
+            btn.disabled = true;
+            const oldText = btn.textContent;
+            btn.textContent = '兑换中...';
+            try {
+                const data = await api('/game/api/world-boss/exchange', {
+                    method: 'POST',
+                    body: JSON.stringify({ shop_id: shopId, quantity: 1 })
+                });
+                toast(data.message || '兑换成功');
+                state.worldBossShop = data.shop || state.worldBossShop;
+                if (Array.isArray(data.backpack)) {
+                    state.backpack = data.backpack;
+                    renderBackpack();
+                } else {
+                    await loadBackpack();
+                }
+                renderWorldBossShop();
+            } catch (err) {
+                toast(err.message || '兑换失败');
             } finally {
                 btn.disabled = false;
                 btn.textContent = oldText;
@@ -3608,6 +3707,7 @@
                 state.impartCards = impartCards.cards || [];
                 renderBackpack();
                 renderShop();
+                loadWorldBossShop();
                 renderImpartCards();
                 renderRift(rift.rift);
                 renderSect(sect.sect);
@@ -3962,18 +4062,18 @@
                 playBattle(data.battle);
             } catch (err) { toast(err.message); }
         }
-        function playBattle(battle, options = {}) {
-            clearTimeout(state.battleTimer);
-            state.battle = battle;
-            state.battleIndex = 0;
-            state.battlePaused = false;
-            state.battleFinished = false;
-            state.battleFinishToast = options.finishMessage || null;
-            state.battleFinishReloadProfile = Boolean(options.reloadProfileOnFinish);
-            $('btn-battle-toggle').disabled = false;
-            $('btn-battle-skip').disabled = false;
-            $('btn-battle-toggle').textContent = '暂停';
-            $('battle-title').textContent = `${battle.title} · 胜者：${battle.winner} · ${battle.meta?.event_count || battle.events.length}幕`;
+         function playBattle(battle, options = {}) {
+             clearTimeout(state.battleTimer);
+             state.battle = battle;
+             state.battleIndex = 0;
+             state.battlePaused = false;
+             state.battleFinished = false;
+             state.battleFinishToast = options.finishMessage || null;
+             state.battleFinishReloadProfile = Boolean(options.reloadProfileOnFinish);
+             $('btn-battle-toggle').disabled = false;
+             $('btn-battle-skip').disabled = false;
+             $('btn-battle-toggle').textContent = '暂停';
+             $('battle-title').textContent = getBattleTitleText(battle, false);
             $('battle-log').innerHTML = '';
             $('battle-caption').textContent = '战斗开始……';
             ['player', 'enemy'].forEach(side => {
@@ -4096,24 +4196,25 @@
             $('battle-progress-text').textContent = `${state.battleIndex}/${total}`;
             $('battle-progress-bar').style.width = `${total ? (state.battleIndex / total) * 100 : 0}%`;
         }
-        function finishBattle() {
-            if (state.battleFinished) return;
-            state.battleFinished = true;
-            clearTimeout(state.battleTimer);
-            $('battle-caption').textContent = `战斗结束，胜者：${state.battle?.winner || '--'}`;
-            $('btn-battle-toggle').disabled = true;
-            $('btn-battle-skip').disabled = true;
+         function finishBattle() {
+             if (state.battleFinished) return;
+             state.battleFinished = true;
+             clearTimeout(state.battleTimer);
+             $('battle-title').textContent = getBattleTitleText(state.battle, true);
+             $('battle-caption').textContent = `战斗结束，胜者：${state.battle?.winner || '--'}`;
+             $('btn-battle-toggle').disabled = true;
+             $('btn-battle-skip').disabled = true;
 
-            const finishToast = state.battleFinishToast;
-            const reloadProfile = state.battleFinishReloadProfile;
-            state.battleFinishToast = null;
-            state.battleFinishReloadProfile = false;
+             const finishToast = state.battleFinishToast;
+             const reloadProfile = state.battleFinishReloadProfile;
+             state.battleFinishToast = null;
+             state.battleFinishReloadProfile = false;
 
-            if (finishToast) toast(finishToast);
-            if (reloadProfile) {
-                loadProfileOnly().catch(err => toast(err.message || '刷新角色信息失败'));
-            }
-        }
+             if (finishToast) toast(finishToast);
+             if (reloadProfile) {
+                 loadProfileOnly().catch(err => toast(err.message || '刷新角色信息失败'));
+             }
+         }
         function toggleBattlePause() {
             if (!state.battle) return;
             state.battlePaused = !state.battlePaused;
