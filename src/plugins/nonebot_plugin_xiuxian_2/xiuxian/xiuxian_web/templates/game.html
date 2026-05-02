@@ -2180,6 +2180,7 @@
             </div>
             <div class="resource-strip">
                 <div class="resource">灵石<strong id="res-stone">--</strong></div>
+                <div class="resource" title="传承祈愿货币：思恋结晶">结晶<strong id="res-impart-crystal">--</strong></div>
                 <div class="resource">修为<strong id="res-exp">--</strong></div>
                 <div class="resource">战力<strong id="res-power">--</strong></div>
                 <div class="resource">体力<strong id="res-stamina">--</strong></div>
@@ -3621,6 +3622,7 @@
             }
 
             $('res-stone').textContent = profile.stone_display;
+            $('res-impart-crystal').textContent = profile.impart_crystal_display || profile.impart_crystal || 0;
             $('res-exp').textContent = profile.exp_display;
             $('res-power').textContent = profile.power_display;
             $('res-stamina').textContent = `${profile.stamina}/${profile.max_stamina}`;

@@ -918,6 +918,17 @@ def _build_player_profile(user_id):
     except Exception:
         pass
 
+    impart_crystal = 0
+    impart_wish = 0
+    impart_daily_draws = 0
+    try:
+        impart_info = xiuxian_impart.get_user_impart_info_with_id(user_id) or {}
+        impart_crystal = int(impart_info.get("stone_num") or 0)
+        impart_wish = int(impart_info.get("wish") or 0)
+        impart_daily_draws = int(impart_info.get("impart_num") or 0)
+    except Exception:
+        pass
+
     return {
         "id": int(user.get('user_id')),
         "name": user.get('user_name') or f"无名氏({user_id})",
@@ -935,6 +946,10 @@ def _build_player_profile(user_id):
         "exp_display": _display_number(exp),
         "stone": int(user.get('stone') or 0),
         "stone_display": _display_number(user.get('stone') or 0),
+        "impart_crystal": impart_crystal,
+        "impart_crystal_display": _display_number(impart_crystal),
+        "impart_wish": impart_wish,
+        "impart_daily_draws": impart_daily_draws,
         "power": power,
         "power_display": _display_number(power),
         "hp": hp,
