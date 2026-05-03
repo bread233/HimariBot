@@ -4696,7 +4696,7 @@
                 }).join('')
                 : `<div class="card muted">暂无宗门商店数据</div>`;
             const sectNameText = escapeHtml(sect.sect_name);
-            const sectOwnerText = escapeHtml(sect.owner);
+            const sectOwnerText = escapeHtml(sect.owner_display || sect.owner);
             const sectPositionText = escapeHtml(sect.position);
             const sectLevelText = escapeHtml(sect.level);
             const sectElixirRoomLevelText = escapeHtml(sect.elixir_room_level);

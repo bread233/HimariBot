@@ -1476,11 +1476,33 @@ def _build_sect_info(user_id):
             "message": "暂无丹房数据",
         }
 
+    owner_value = sect.get("sect_owner") or sect.get("owner") or sect.get("sect_owner_id") or sect.get("owner_id") or "未知"
+    owner_display = owner_value
+    try:
+        owner_id = owner_value
+        if owner_id not in (None, ""):
+            owner_id = str(owner_id).strip()
+        if owner_id and owner_id.isdigit():
+            available_columns = set(columns or set())
+            name_column = next((c for c in ("user_name", "username", "name") if c in available_columns), None)
+            if name_column:
+                owner_name_rows = execute_sql(
+                    DATABASE,
+                    f"SELECT {name_column} AS owner_name FROM user_xiuxian WHERE user_id = ? LIMIT 1",
+                    (owner_id,)
+                )
+                owner_name = ((owner_name_rows or [{}])[0]).get("owner_name")
+                if owner_name not in (None, ""):
+                    owner_display = f"{owner_name}（{owner_id}）"
+    except Exception:
+        owner_display = owner_value
+
     return {
         "joined": True,
         "sect_id": sect_id,
         "sect_name": sect.get("sect_name") or "未知宗门",
-        "owner": sect.get("sect_owner") or "未知",
+        "owner": owner_value,
+        "owner_display": owner_display,
         "level": sect.get("sect_level") or 0,
         "materials": int(sect.get("sect_materials") or 0),
         "scale": int(sect.get("sect_scale") or 0),
