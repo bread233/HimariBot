@@ -3206,6 +3206,9 @@
                 toast('请输入正整数灵石数量');
                 return;
             }
+            if (!confirm(`确认捐献 ${amount} 灵石给宗门吗？`)) {
+                return;
+            }
             btn.disabled = true;
             const oldText = btn.textContent;
             btn.textContent = '捐献中...';
