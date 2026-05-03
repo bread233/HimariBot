@@ -4605,6 +4605,7 @@
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#39;');
             const membersList = Array.isArray(sect.members_list) ? sect.members_list : [];
+            const positionStats = (sect && typeof sect.position_stats === 'object' && sect.position_stats) ? sect.position_stats : {};
             const membersHtml = membersList.length
                 ? membersList.map(m => {
                     const name = escapeHtml((m && (m.user_name || m.username || m.name)) || `用户${(m && m.user_id) || 0}`);
@@ -4627,6 +4628,18 @@
                     `;
                 }).join('')
                 : `<div class="card muted">暂无成员数据</div>`;
+            const positionStatsItems = Array.isArray(positionStats.items) ? positionStats.items : [];
+            const positionStatsHtml = !!positionStats.has_data && positionStatsItems.length
+                ? positionStatsItems.map(item => {
+                    const title = escapeHtml((item && item.title) || '未知职位');
+                    const count = escapeHtml((item && item.count) != null ? item.count : 0);
+                    return `
+                        <div class="sect-member-item">
+                            <p class="sect-member-line2"><span class="sect-member-meta">${title}：${count}人</span></p>
+                        </div>
+                    `;
+                }).join('')
+                : `<div class="card muted">暂无职位统计数据</div>`;
             const joinOpenText = sect.join_open == null ? '未记录' : (sect.join_open ? '开放' : '关闭');
             const closedText = sect.closed == null ? '未记录' : (sect.closed ? '是' : '否');
             const combatPowerText = escapeHtml(formatLargeNumber(sect.combat_power));
@@ -4721,6 +4734,10 @@
                 <div class="card" style="grid-column: 1/-1; margin-top: 8px;">
                     <h4 style="margin:0 0 8px;">宗门商店</h4>
                     <div class="sect-member-list">${shopContentHtml}</div>
+                </div>
+                <div class="card" style="grid-column: 1/-1; margin-top: 8px;">
+                    <h4 style="margin:0 0 8px;">职位统计</h4>
+                    <div class="sect-member-list">${positionStatsHtml}</div>
                 </div>
                 <div class="card" style="grid-column: 1/-1; margin-top: 8px;">
                     <h4 style="margin:0 0 8px;">成员列表</h4>

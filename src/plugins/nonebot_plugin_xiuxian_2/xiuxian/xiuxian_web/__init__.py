@@ -1232,6 +1232,52 @@ def _build_sect_info(user_id):
     except Exception:
         members_list = []
 
+    position_stats = {"has_data": False, "items": [], "total": 0}
+    try:
+        if "sect_position" in columns:
+            stats_rows = execute_sql(
+                DATABASE,
+                """
+                SELECT sect_position, COUNT(*) as c
+                FROM user_xiuxian
+                WHERE sect_id = ?
+                GROUP BY sect_position
+                ORDER BY sect_position ASC
+                LIMIT 20
+                """,
+                (sect_id,)
+            ) or []
+
+            sect_position_cfg = jsondata.sect_config_data() or {}
+            items = []
+            total = 0
+            for row in stats_rows:
+                if not isinstance(row, dict):
+                    continue
+                raw_position = row.get("sect_position")
+                try:
+                    position_val = int(raw_position)
+                except Exception:
+                    position_val = raw_position
+                try:
+                    count_val = int(row.get("c") or 0)
+                except Exception:
+                    count_val = 0
+                total += count_val
+                items.append({
+                    "position": position_val,
+                    "title": sect_position_cfg.get(str(position_val), {}).get("title", "未知职位"),
+                    "count": count_val,
+                })
+
+            position_stats = {
+                "has_data": len(items) > 0,
+                "items": items,
+                "total": total,
+            }
+    except Exception:
+        position_stats = {"has_data": False, "items": [], "total": 0}
+
     task_info = {
         "has_task": False,
         "name": "",
@@ -1445,6 +1491,7 @@ def _build_sect_info(user_id):
         "closed": _safe_bool(closed),
         "combat_power": _safe_int(combat_power),
         "members_list": members_list,
+        "position_stats": position_stats,
         "task_info": task_info,
         "elixir_room_info": elixir_room_info,
         "shop_items": _build_shop_items_preview(),
