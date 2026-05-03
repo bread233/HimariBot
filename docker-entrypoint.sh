@@ -5,19 +5,29 @@ set -e
 mkdir -p /app/data
 mkdir -p /app/log
 
-# 初次运行时，将默认资源拷贝到 data 下
-if [ -d /app/resources/data ]; then
-  echo "📁 Checking default resources..."
+# 外置资源检查（不自动下载/不自动拷贝）
+MISSING=0
 
-  cp -rn /app/resources/data/* /app/data/ 2>/dev/null || true
+if [ ! -f /app/data/resources/tarot/tarot.json ]; then
+  echo "⚠️  [HimariBot] 缺少 Tarot 资源文件: /app/data/resources/tarot/tarot.json"
+  MISSING=1
+fi
 
-  echo "📁 Resources copied to /app/data"
+if [ ! -d /app/data/resources/tarot/resource ]; then
+  echo "⚠️  [HimariBot] 缺少 Tarot 资源目录: /app/data/resources/tarot/resource"
+  MISSING=1
+fi
 
-  # 如果 copy 成功，再删除 /app/resources
-  # -r 删除整个目录
-  # -f 静默，不报错
-  rm -rf /app/resources
-  echo "🧹 Default resources deleted from image to save space"
+if [ ! -d /app/data/xiuxian ]; then
+  echo "⚠️  [HimariBot] 缺少修仙数据目录: /app/data/xiuxian"
+  MISSING=1
+fi
+
+if [ "$MISSING" -eq 1 ]; then
+  echo "⚠️  [HimariBot] 当前镜像不内置大体积 data/resources。"
+  echo "⚠️  [HimariBot] 请前往 GitHub Release 下载 himaribot-data.zip（或仅 Tarot 使用 tarot-resources.zip）。"
+  echo "⚠️  [HimariBot] 将压缩包解压到宿主机映射目录（例如 ./data），并挂载到容器 /app/data。"
+  echo "⚠️  [HimariBot] 解压后容器内应可见：/app/data/resources/tarot 和 /app/data/xiuxian"
 fi
 
 # 启动 NoneBot
