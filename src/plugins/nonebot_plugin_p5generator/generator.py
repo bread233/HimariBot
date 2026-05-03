@@ -7,10 +7,15 @@ from typing import Union
 from PIL import Image, ImageDraw, ImageFont
 import random
 
-path = os.path.dirname(__file__)
-RESOURCES_PATH = os.path.join(path, "data/p5generator")
-if not os.path.exists(RESOURCES_PATH):
-    os.mkdir(RESOURCES_PATH)
+PLUGIN_DIR = os.path.dirname(__file__)
+PROJECT_ROOT = os.path.abspath(os.path.join(PLUGIN_DIR, "../../.."))
+EXTERNAL_RESOURCES_PATH = os.path.join(PROJECT_ROOT, "data", "resources", "p5generator")
+BUNDLED_RESOURCES_PATH = os.path.join(PLUGIN_DIR, "data", "p5generator")
+RESOURCES_PATH = (
+    EXTERNAL_RESOURCES_PATH
+    if os.path.isdir(EXTERNAL_RESOURCES_PATH)
+    else BUNDLED_RESOURCES_PATH
+)
 # RESOURCES_PATH.mkdir(parents=True, exist_ok=True)
 
 
