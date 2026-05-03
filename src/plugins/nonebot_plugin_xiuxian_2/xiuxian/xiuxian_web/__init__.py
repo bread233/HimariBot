@@ -1038,6 +1038,12 @@ def _build_sect_info(user_id):
         columns.discard("")
     except Exception:
         columns = set()
+    try:
+        sect_pragma_rows = execute_sql(DATABASE, "PRAGMA table_info(sects)") or []
+        sect_columns = {str((r or {}).get("name") or "") for r in sect_pragma_rows if isinstance(r, dict)}
+        sect_columns.discard("")
+    except Exception:
+        sect_columns = set()
 
     def _safe_get(obj, key, default=None):
         if isinstance(obj, dict):
@@ -1072,6 +1078,14 @@ def _build_sect_info(user_id):
             return int(value)
         except Exception:
             return None
+
+    def _safe_text(value):
+        if value is None:
+            return ""
+        try:
+            return str(value)
+        except Exception:
+            return ""
 
     join_open = _safe_get(sect, "join_open")
     if join_open is None:
@@ -1239,6 +1253,99 @@ def _build_sect_info(user_id):
             "raw": "",
         }
 
+    elixir_room_info = {
+        "has_data": False,
+        "level": "",
+        "get_num": "",
+        "cd": "",
+        "status": "暂无丹房数据",
+        "message": "暂无丹房数据",
+    }
+    try:
+        sect_level_candidates = ["elixir_room_level", "sect_elixir_room_level", "elixir_level", "elixir_room"]
+        user_get_num_candidates = ["sect_elixir_get", "sect_elixir_get_num", "elixir_get_num"]
+        user_cd_candidates = ["sect_elixir_cd", "sect_elixir_time"]
+
+        level_val = None
+        for field in sect_level_candidates:
+            if field == "elixir_room_level":
+                v = _safe_get(sect, field)
+                if v not in (None, ""):
+                    level_val = v
+                    break
+            elif field in sect_columns:
+                rows = execute_sql(DATABASE, f"SELECT {field} FROM sects WHERE sect_id = ? LIMIT 1", (sect_id,)) or []
+                row = rows[0] if rows and isinstance(rows[0], dict) else {}
+                v = row.get(field)
+                if v not in (None, ""):
+                    level_val = v
+                    break
+
+        user_extra_fields = [c for c in (user_get_num_candidates + user_cd_candidates) if c in columns]
+        user_extra_row = {}
+        if user_extra_fields:
+            sql = f"SELECT {', '.join(user_extra_fields)} FROM user_xiuxian WHERE user_id = ? LIMIT 1"
+            user_rows = execute_sql(DATABASE, sql, (user_id,)) or []
+            user_extra_row = user_rows[0] if user_rows and isinstance(user_rows[0], dict) else {}
+
+        get_num_val = None
+        get_num_field = None
+        for field in user_get_num_candidates:
+            if field in user_extra_row and user_extra_row.get(field) not in (None, ""):
+                get_num_field = field
+                get_num_val = user_extra_row.get(field)
+                break
+
+        cd_val = None
+        cd_field = None
+        for field in user_cd_candidates:
+            if field in user_extra_row and user_extra_row.get(field) not in (None, ""):
+                cd_field = field
+                cd_val = user_extra_row.get(field)
+                break
+
+        level_text = ""
+        if level_val not in (None, ""):
+            level_num = _safe_int(level_val)
+            level_text = str(level_num) if level_num is not None else _safe_text(level_val)
+
+        get_num_text = ""
+        if get_num_val not in (None, ""):
+            if get_num_field == "sect_elixir_get":
+                bool_val = _safe_bool(get_num_val)
+                if bool_val is True:
+                    get_num_text = "今日已领取"
+                elif bool_val is False:
+                    get_num_text = "今日未领取"
+                else:
+                    get_num_text = _safe_text(get_num_val)
+            else:
+                get_num_text = _safe_text(get_num_val)
+
+        cd_text = _safe_text(cd_val) if cd_val not in (None, "") else ""
+
+        has_data = any(v not in (None, "") for v in [level_text, get_num_text, cd_text])
+        status_text = "可查看" if has_data else "暂无丹房数据"
+        message_text = "丹房信息仅供查看" if has_data else "暂无丹房数据"
+
+        elixir_room_info = {
+            "has_data": bool(has_data),
+            "level": level_text,
+            "get_num": get_num_text,
+            "cd": cd_text,
+            "status": status_text,
+            "message": message_text,
+        }
+    except Exception:
+        elixir_room_info = {
+            "has_data": False,
+            "level": "",
+            "get_num": "",
+            "cd": "",
+            "status": "暂无丹房数据",
+            "message": "暂无丹房数据",
+        }
+
     return {
         "joined": True,
         "sect_id": sect_id,
@@ -1255,6 +1362,7 @@ def _build_sect_info(user_id):
         "combat_power": _safe_int(combat_power),
         "members_list": members_list,
         "task_info": task_info,
+        "elixir_room_info": elixir_room_info,
     }
 
 

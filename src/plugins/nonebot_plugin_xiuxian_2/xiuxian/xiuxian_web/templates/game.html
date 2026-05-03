@@ -4643,6 +4643,13 @@
             const taskTimes = escapeHtml(taskInfo.times || '未记录');
             const taskCd = escapeHtml(taskInfo.cd || '未记录');
             const taskRaw = escapeHtml(taskInfo.raw || '');
+            const elixirRoomInfo = (sect && typeof sect.elixir_room_info === 'object' && sect.elixir_room_info) ? sect.elixir_room_info : {};
+            const elixirHasData = !!elixirRoomInfo.has_data;
+            const elixirLevel = escapeHtml(elixirRoomInfo.level || '未记录');
+            const elixirGetNum = escapeHtml(elixirRoomInfo.get_num || '未记录');
+            const elixirCd = escapeHtml(elixirRoomInfo.cd || '未记录');
+            const elixirStatus = escapeHtml(elixirRoomInfo.status || '未记录');
+            const elixirMessage = escapeHtml(elixirRoomInfo.message || '暂无丹房数据');
             const sectNameText = escapeHtml(sect.sect_name);
             const sectOwnerText = escapeHtml(sect.owner);
             const sectPositionText = escapeHtml(sect.position);
@@ -4660,6 +4667,16 @@
                     </div>
                 `
                 : `<div class="card muted">暂无宗门任务</div>`;
+            const elixirRoomContentHtml = elixirHasData
+                ? `
+                    <div class="sect-member-item">
+                        <p class="sect-member-line2"><span class="sect-member-meta">丹房等级：${elixirLevel}</span></p>
+                        <p class="sect-member-line2"><span class="sect-member-meta">今日领取/次数：${elixirGetNum}</span></p>
+                        <p class="sect-member-line2"><span class="sect-member-meta">CD/时间：${elixirCd}</span></p>
+                        <p class="sect-member-line2"><span class="sect-member-meta">状态/说明：${elixirStatus} / ${elixirMessage}</span></p>
+                    </div>
+                `
+                : `<div class="card muted">暂无丹房数据</div>`;
             $('sect-badge').textContent = sect.sect_name;
             el.innerHTML = `
                 <div class="stat-card"><span>宗门名称</span><strong>${sectNameText}</strong></div>
@@ -4676,6 +4693,10 @@
                 <div class="card" style="grid-column: 1/-1; margin-top: 8px;">
                     <h4 style="margin:0 0 8px;">宗门任务</h4>
                     <div class="sect-member-list">${taskContentHtml}</div>
+                </div>
+                <div class="card" style="grid-column: 1/-1; margin-top: 8px;">
+                    <h4 style="margin:0 0 8px;">宗门丹房</h4>
+                    <div class="sect-member-list">${elixirRoomContentHtml}</div>
                 </div>
                 <div class="card" style="grid-column: 1/-1; margin-top: 8px;">
                     <h4 style="margin:0 0 8px;">成员列表</h4>
