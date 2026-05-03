@@ -3188,6 +3188,15 @@
             return data;
         }
 
+        async function loadSectInfo() {
+            try {
+                const data = await api('/game/api/sect');
+                renderSect(data.sect);
+            } catch (err) {
+                toast(err.message || '宗门信息加载失败');
+            }
+        }
+
         function switchTab(name) {
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === name));
             document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));

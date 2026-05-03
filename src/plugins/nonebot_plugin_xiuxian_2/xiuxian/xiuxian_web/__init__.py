@@ -1479,21 +1479,24 @@ def _build_sect_info(user_id):
     owner_value = sect.get("sect_owner") or sect.get("owner") or sect.get("sect_owner_id") or sect.get("owner_id") or "未知"
     owner_display = owner_value
     try:
-        owner_id = owner_value
-        if owner_id not in (None, ""):
-            owner_id = str(owner_id).strip()
-        if owner_id and owner_id.isdigit():
-            available_columns = set(columns or set())
-            name_column = next((c for c in ("user_name", "username", "name") if c in available_columns), None)
-            if name_column:
-                owner_name_rows = execute_sql(
-                    DATABASE,
-                    f"SELECT {name_column} AS owner_name FROM user_xiuxian WHERE user_id = ? LIMIT 1",
-                    (owner_id,)
-                )
-                owner_name = ((owner_name_rows or [{}])[0]).get("owner_name")
-                if owner_name not in (None, ""):
-                    owner_display = f"{owner_name}（{owner_id}）"
+        owner_text = str(owner_value).strip()
+        owner_id = ""
+        if owner_text.isdigit():
+            owner_id = owner_text
+        else:
+            match = re.search(r"(\d+)", owner_text)
+            if match:
+                owner_id = match.group(1)
+
+        if owner_id:
+            owner_name_rows = execute_sql(
+                DATABASE,
+                "SELECT user_name AS owner_name FROM user_xiuxian WHERE user_id = ? LIMIT 1",
+                (owner_id,)
+            )
+            owner_name = ((owner_name_rows or [{}])[0]).get("owner_name")
+            if owner_name not in (None, ""):
+                owner_display = f"{owner_name}（{owner_id}）"
     except Exception:
         owner_display = owner_value
 
