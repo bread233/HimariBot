@@ -4583,10 +4583,22 @@
             const num = Number(raw);
             if (Number.isNaN(num)) return String(value);
 
-            const withUnit = (n, unit) => `${n.toFixed(2).replace(/\.?0+$/, '')}${unit}`;
+            const units = [
+                { value: 1e24, label: '秭' },
+                { value: 1e20, label: '垓' },
+                { value: 1e16, label: '京' },
+                { value: 1e12, label: '兆' },
+                { value: 1e8, label: '亿' },
+                { value: 1e4, label: '万' },
+            ];
+
             const abs = Math.abs(num);
-            if (abs >= 100000000) return withUnit(num / 100000000, '亿');
-            if (abs >= 10000) return withUnit(num / 10000, '万');
+            const format = (n, unit) => `${n.toFixed(2).replace(/\.?0+$/, '')}${unit}`;
+            for (const unit of units) {
+                if (abs >= unit.value) {
+                    return format(num / unit.value, unit.label);
+                }
+            }
 
             return typeof value === 'string' ? value.trim() : String(num);
         }
