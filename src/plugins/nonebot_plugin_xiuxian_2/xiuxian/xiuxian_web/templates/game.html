@@ -3225,6 +3225,59 @@
             }
         }
 
+        function fillMaxSectDonate() {
+            const input = $('sect-donate-amount');
+            if (!input) return;
+
+            const profileStone = state && state.profile ? state.profile.stone : null;
+            if (typeof profileStone === 'number' && Number.isFinite(profileStone)) {
+                const amount = Math.floor(profileStone);
+                if (amount >= 1) {
+                    input.value = String(amount);
+                    return;
+                }
+                toast('无法识别当前灵石数量');
+                return;
+            }
+            if (typeof profileStone === 'string' && profileStone.trim() !== '' && Number.isFinite(Number(profileStone))) {
+                const amount = Math.floor(Number(profileStone));
+                if (amount >= 1) {
+                    input.value = String(amount);
+                    return;
+                }
+                toast('无法识别当前灵石数量');
+                return;
+            }
+
+            const stoneText = (($('res-stone') && $('res-stone').textContent) || '').trim();
+            const normalized = stoneText.replace(/,/g, '').replace(/\s+/g, '');
+            const match = normalized.match(/^([0-9]+(?:\.[0-9]+)?)([万亿兆京垓秭]?)$/);
+            if (!match) {
+                toast('无法识别当前灵石数量');
+                return;
+            }
+
+            const base = Number(match[1]);
+            const unit = match[2] || '';
+            const unitMap = {
+                '': 1,
+                '万': 10000,
+                '亿': 100000000,
+                '兆': 1000000000000,
+                '京': 10000000000000000,
+                '垓': 100000000000000000000,
+                '秭': 1000000000000000000000000
+            };
+            const multi = unitMap[unit];
+            const parsed = base * multi;
+            const amount = Math.floor(parsed);
+            if (!Number.isFinite(parsed) || !Number.isFinite(amount) || amount < 1) {
+                toast('无法识别当前灵石数量');
+                return;
+            }
+            input.value = String(amount);
+        }
+
         function switchTab(name) {
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === name));
             document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
@@ -4780,6 +4833,7 @@
                     <h4 style="margin:0 0 8px;">宗门捐献</h4>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                         <input class="input" id="sect-donate-amount" type="number" min="1" step="1" placeholder="输入灵石数量" style="flex:1 1 180px; min-width:0;">
+                        <button class="btn" type="button" onclick="fillMaxSectDonate()">最大</button>
                         <button class="btn" id="btn-sect-donate" onclick="donateSect()">捐献</button>
                     </div>
                 </div>
