@@ -4538,11 +4538,17 @@
                 el.innerHTML = `<div class="card muted" style="grid-column: 1/-1">${sect.message}</div>`;
                 return;
             }
+            const joinOpenText = sect.join_open == null ? '未记录' : (sect.join_open ? '开放' : '关闭');
+            const closedText = sect.closed == null ? '未记录' : (sect.closed ? '是' : '否');
+            const combatPowerText = sect.combat_power == null ? '未记录' : sect.combat_power;
             $('sect-badge').textContent = sect.sect_name;
             el.innerHTML = `
                 <div class="stat-card"><span>宗门名称</span><strong>${sect.sect_name}</strong></div>
                 <div class="stat-card"><span>宗主</span><strong>${sect.owner}</strong></div>
                 <div class="stat-card"><span>职位</span><strong>${sect.position}</strong></div>
+                <div class="stat-card"><span>加入状态</span><strong>${joinOpenText}</strong></div>
+                <div class="stat-card"><span>封山状态</span><strong>${closedText}</strong></div>
+                <div class="stat-card"><span>宗门战力</span><strong>${combatPowerText}</strong></div>
                 <div class="stat-card"><span>宗门等级</span><strong>${sect.level}</strong></div>
                 <div class="stat-card"><span>建设度</span><strong>${sect.materials}</strong></div>
                 <div class="stat-card"><span>宗门规模</span><strong>${sect.scale}</strong></div>

@@ -1032,6 +1032,53 @@ def _build_sect_info(user_id):
         return {"joined": False, "message": "尚未加入宗门"}
     sect = game_sql.get_sect_info(sect_id) or {}
     members = execute_sql(DATABASE, "SELECT COUNT(*) as c FROM user_xiuxian WHERE sect_id = ?", (sect_id,)) or [{"c": 0}]
+
+    def _safe_get(obj, key, default=None):
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        try:
+            if hasattr(obj, "keys") and key in obj.keys():
+                return obj[key]
+        except Exception:
+            pass
+        return getattr(obj, key, default)
+
+    def _safe_bool(value):
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on", "开放"}:
+                return True
+            if normalized in {"0", "false", "no", "off", "关闭"}:
+                return False
+            return None
+        return None
+
+    def _safe_int(value):
+        if value is None or value == "":
+            return None
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    join_open = _safe_get(sect, "join_open")
+    if join_open is None:
+        join_open = _safe_get(sect, "is_join_open")
+
+    closed = _safe_get(sect, "closed")
+    if closed is None:
+        closed = _safe_get(sect, "is_closed")
+
+    combat_power = _safe_get(sect, "combat_power")
+    if combat_power is None:
+        combat_power = _safe_get(sect, "power")
+
     return {
         "joined": True,
         "sect_id": sect_id,
@@ -1043,6 +1090,9 @@ def _build_sect_info(user_id):
         "elixir_room_level": int(sect.get("elixir_room_level") or 0),
         "members": int((members[0] or {}).get("c") or 0),
         "position": jsondata.sect_config_data().get(str(user.get("sect_position")), {}).get("title", "弟子"),
+        "join_open": _safe_bool(join_open),
+        "closed": _safe_bool(closed),
+        "combat_power": _safe_int(combat_power),
     }
 
 
