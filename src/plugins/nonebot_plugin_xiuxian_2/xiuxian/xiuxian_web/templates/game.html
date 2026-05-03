@@ -881,12 +881,62 @@
             font-size: 12px;
         }
         .social-request-reminder-head { display:flex; justify-content:space-between; align-items:center; gap:10px; color:var(--gold); font-weight:700; }
+        .top-reminder-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            color: #f7d37a;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .top-reminder-count {
+            min-width: 18px;
+            height: 18px;
+            padding: 0 5px;
+            border-radius: 999px;
+            background: rgba(255, 92, 122, .9);
+            color: #fff;
+            font-size: 12px;
+            line-height: 18px;
+            justify-content: center;
+            align-items: center;
+            display: none;
+        }
+        @media (min-width: 769px) {
+            .top-reminder-row {
+                display: none;
+            }
+        }
         @media (max-width: 768px) {
             .reminder-center { padding: 10px; max-height: 260px; }
             .daily-reminder,
             .social-request-reminder,
             .world-boss-reminder,
             .retreat-reminder { padding: 8px; }
+        }
+        @media (max-width: 480px) {
+            .reminder-center {
+                max-height: 220px;
+                overflow-y: auto;
+                overflow-x: hidden;
+            }
+            .daily-reminder,
+            .social-request-reminder,
+            .world-boss-reminder,
+            .retreat-reminder {
+                max-width: 100%;
+            }
+        }
+        .target-highlight {
+            animation: targetHighlightPulse 1.2s ease-out;
+        }
+        @keyframes targetHighlightPulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(255, 214, 102, 0.75);
+            }
+            100% {
+                box-shadow: 0 0 0 10px rgba(255, 214, 102, 0);
+            }
         }
         @keyframes dailyGlow {
             0%, 100% { box-shadow: 0 0 0 rgba(247, 211, 122, 0); }
@@ -1959,12 +2009,19 @@
 
             .battle-stage {
                 grid-template-columns: 1fr;
-                min-height: 420px;
+                min-height: unset;
                 gap: 10px;
+                overflow: visible;
             }
 
             .fighter {
-                min-height: 155px;
+                min-height: 120px;
+            }
+
+            .fighter img {
+                max-height: 120px;
+                width: auto;
+                object-fit: contain;
             }
 
             .fighter .fighter-floating {
@@ -1979,6 +2036,34 @@
                 grid-column: 1 / -1;
                 min-height: auto;
                 margin-top: 0;
+                font-size: 13px;
+                line-height: 1.45;
+                padding: 8px 10px;
+            }
+
+            .battle-log {
+                max-height: 150px;
+                overflow-y: auto;
+                overflow-x: hidden;
+            }
+
+            #tab-battle {
+                overflow-x: hidden;
+            }
+
+            #tab-battle .action-grid {
+                gap: 8px;
+            }
+
+            #tab-battle .action-grid > div {
+                display: grid !important;
+                grid-template-columns: minmax(0, 1fr);
+                gap: 8px;
+            }
+
+            #tab-battle input,
+            #tab-battle .btn {
+                min-width: 0;
             }
 
             .battle-fx {
@@ -2369,10 +2454,11 @@
                 <div class="brand-title">修仙模拟器 · 仙途绘卷</div>
                 <div class="hint">当前角色：{{ player.user_name or player.user_id }} · <a href="#" id="link-settings" style="color:var(--gold);">设置</a> · <a href="{{ url_for('game_logout') }}"
                         style="color:var(--gold);">退出登录</a></div>
+                <div class="hint top-reminder-row"><a href="#" id="top-reminder-link" class="top-reminder-link">🔔 提醒 <span id="top-reminder-count" class="top-reminder-count"></span></a></div>
             </div>
             <div class="resource-strip">
                 <div class="resource">灵石<strong id="res-stone">--</strong></div>
-                <div class="resource" title="传承祈愿货币：思恋结晶">结晶<strong id="res-impart-crystal">--</strong></div>
+                <div class="resource" title="传承祈愿货币：思恋结晶">思恋结晶<strong id="res-impart-crystal">--</strong></div>
                 <div class="resource">修为<strong id="res-exp">--</strong></div>
                 <div class="resource">战力<strong id="res-power">--</strong></div>
                 <div class="resource">体力<strong id="res-stamina">--</strong></div>
@@ -3072,14 +3158,58 @@
             if (name === 'social') loadPlayers();
             if (name === 'settings') loadSettings();
         }
+        function scrollToVisibleTarget(target, options = {}) {
+            if (!target || typeof target.scrollIntoView !== 'function') return;
+            const delay = Number(options.delay || 80);
+            const block = options.block || 'center';
+            window.setTimeout(() => {
+                target.scrollIntoView({ behavior: 'smooth', block });
+                target.classList.add('target-highlight');
+                window.setTimeout(() => target.classList.remove('target-highlight'), 1200);
+            }, delay);
+        }
+        function scrollToBattleStageOnMobile(delay = 160) {
+            if (!window.matchMedia('(max-width: 768px)').matches) return;
+            const battleTarget = document.querySelector('.battle-stage') || $('battle-caption') || $('battle-log');
+            scrollToVisibleTarget(battleTarget, { block: 'start', delay });
+        }
+        function ensureTargetVisible(target, displayStyle = 'block') {
+            if (!target) return;
+            if (target.style && target.style.display === 'none') {
+                target.style.display = displayStyle;
+            }
+        }
+        function gotoReminderCenter() {
+            const target = document.querySelector('.reminder-center');
+            scrollToVisibleTarget(target, { block: 'center', delay: 80 });
+        }
+        function updateReminderBadgeCount() {
+            const badge = document.getElementById('top-reminder-count');
+            if (!badge) return;
+            const items = [
+                document.getElementById('daily-reminder'),
+                document.getElementById('social-request-reminder'),
+                document.getElementById('retreat-reminder'),
+                document.getElementById('world-boss-reminder')
+            ];
+            const count = items.filter(el => {
+                if (!el) return false;
+                return getComputedStyle(el).display !== 'none';
+            }).length;
+            badge.textContent = count > 0 ? String(count) : '';
+            badge.style.display = count > 0 ? 'inline-flex' : 'none';
+        }
         async function loadDailyStatus() {
             try {
                 const data = await api('/game/api/daily/status');
                 state.dailyStatus = data.impart_pk || null;
             } catch (err) {
                 state.dailyStatus = { enabled: false, message: '日常状态加载失败，请稍后重试' };
+            } finally {
+                updateReminderBadgeCount();
             }
             renderDailyReminder();
+            updateReminderBadgeCount();
         }
         function renderDailyReminder() {
             const box = $('daily-reminder');
@@ -3170,10 +3300,8 @@
         }
         function gotoDailyImpart() {
             switchTab('impart');
-            const target = $('tab-impart');
-            if (target && typeof target.scrollIntoView === 'function') {
-                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
+            const target = $('impart-pk-result') || $('impart-pk-desc') || $('tab-impart');
+            scrollToVisibleTarget(target, { block: 'center', delay: 90 });
         }
 
         function renderImpartCards() {
@@ -3295,10 +3423,22 @@
 
         function gotoWorldBossBattle() {
             switchTab('battle');
-            const target = $('world-boss-panel') || $('world-boss-list') || $('btn-world-boss-list');
-            if (target && typeof target.scrollIntoView === 'function') {
-                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
+            window.setTimeout(async () => {
+                const panel = $('world-boss-panel');
+                const list = $('world-boss-list');
+                const btn = $('btn-world-boss-list');
+
+                ensureTargetVisible(panel, 'block');
+
+                if (typeof loadWorldBosses === 'function') {
+                    await loadWorldBosses();
+                } else if (btn && typeof btn.click === 'function') {
+                    btn.click();
+                }
+
+                const target = panel || list || btn;
+                scrollToVisibleTarget(target, { block: 'center', delay: 40 });
+            }, 80);
         }
 
         async function loadWorldBossShop() {
@@ -3310,6 +3450,8 @@
             } catch (err) {
                 const list = $('world-boss-shop-list');
                 if (list) list.innerHTML = `<div class="item-card"><div class="item-name">世界 Boss 商店加载失败</div><div class="item-meta">${err.message || '未知错误'}</div></div>`;
+            } finally {
+                updateReminderBadgeCount();
             }
         }
 
@@ -3491,10 +3633,10 @@
         }
         function gotoRetreatSettle() {
             switchTab('retreat');
-            const target = $('tab-retreat') || $('retreat-active-panel');
-            if (target && typeof target.scrollIntoView === 'function') {
-                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
+            const activePanel = $('retreat-active-panel');
+            ensureTargetVisible(activePanel, 'block');
+            const target = activePanel || $('tab-retreat');
+            scrollToVisibleTarget(target, { block: 'center', delay: 90 });
         }
         async function loadSocialRequestStatus() {
             try {
@@ -3502,25 +3644,18 @@
                 state.socialRequestStatus = data || { requests: { pending_count: 0, has_pending: false, items: [] } };
             } catch (err) {
                 state.socialRequestStatus = { requests: { pending_count: 0, has_pending: false, items: [] }, message: err.message || '读取失败' };
+            } finally {
+                updateReminderBadgeCount();
             }
             renderSocialRequestReminder();
+            updateReminderBadgeCount();
         }
         async function gotoSocialRequests() {
             switchTab('settings');
             await loadSettings();
             const area = $('settings-requests');
             if (!area) return;
-            if (typeof area.scrollIntoView === 'function') {
-                area.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-            const oldOutline = area.style.outline;
-            const oldBg = area.style.background;
-            area.style.outline = '2px solid rgba(247, 211, 122, .85)';
-            area.style.background = 'rgba(247, 211, 122, .08)';
-            setTimeout(() => {
-                area.style.outline = oldOutline;
-                area.style.background = oldBg;
-            }, 1500);
+            scrollToVisibleTarget(area, { block: 'center', delay: 90 });
         }
 
         let currentGiftTarget = null;
@@ -4068,6 +4203,8 @@
                 renderBackpack();
             } catch (e) {
                 toast('加载背包失败: ' + e.message);
+            } finally {
+                updateReminderBadgeCount();
             }
         }
 
@@ -4526,6 +4663,9 @@
                     finishMessage: data.message || '',
                     reloadProfileOnFinish: true
                 });
+                if (typeof scrollToBattleStageOnMobile === 'function') {
+                    scrollToBattleStageOnMobile();
+                }
                 loadWorldBossShop();
             } catch (err) { toast(err.message); }
         }
@@ -4724,6 +4864,10 @@
             e.preventDefault();
             switchTab('settings');
         });
+        $('top-reminder-link').addEventListener('click', (e) => {
+            e.preventDefault();
+            gotoReminderCenter();
+        });
         $('btn-settings-save').addEventListener('click', saveSettings);
         $('btn-settings-reload').addEventListener('click', loadSettings);
         $('btn-dual-accept').addEventListener('click', () => {
@@ -4748,6 +4892,7 @@
             history.replaceState({}, '', next);
         }
         loadAll();
+        updateReminderBadgeCount();
     </script>
     {% endif %}
 
