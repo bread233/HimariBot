@@ -1079,6 +1079,59 @@ def _build_sect_info(user_id):
     if combat_power is None:
         combat_power = _safe_get(sect, "power")
 
+    members_list = []
+    try:
+        pragma_rows = execute_sql(DATABASE, "PRAGMA table_info(user_xiuxian)") or []
+        columns = {str((r or {}).get("name") or "") for r in pragma_rows if isinstance(r, dict)}
+        columns.discard("")
+
+        if columns:
+            name_col = next((c for c in ("user_name", "username", "name") if c in columns), None)
+            level_col = next((c for c in ("level", "realm", "jingjie", "境界") if c in columns), None)
+            contribution_col = next((c for c in ("sect_contribution", "contribution") if c in columns), None)
+            position_col = "sect_position" if "sect_position" in columns else None
+
+            select_fields = ["user_id"]
+            if name_col:
+                select_fields.append(name_col)
+            if level_col:
+                select_fields.append(level_col)
+            if position_col:
+                select_fields.append(position_col)
+            if contribution_col:
+                select_fields.append(contribution_col)
+
+            order_parts = []
+            if position_col:
+                order_parts.append("sect_position ASC")
+            if contribution_col:
+                order_parts.append(f"{contribution_col} DESC")
+
+            sql = f"SELECT {', '.join(select_fields)} FROM user_xiuxian WHERE sect_id = ?"
+            if order_parts:
+                sql += " ORDER BY " + ", ".join(order_parts)
+            sql += " LIMIT 100"
+
+            member_rows = execute_sql(DATABASE, sql, (sect_id,)) or []
+            for row in member_rows:
+                if not isinstance(row, dict):
+                    continue
+                raw_position = row.get(position_col) if position_col else None
+                try:
+                    pos_num = int(raw_position) if raw_position is not None and raw_position != "" else 4
+                except Exception:
+                    pos_num = 4
+                members_list.append({
+                    "user_id": int(row.get("user_id") or 0),
+                    "user_name": (row.get(name_col) if name_col else None) or "",
+                    "level": (row.get(level_col) if level_col else None) or None,
+                    "sect_position": pos_num,
+                    "position_title": jsondata.sect_config_data().get(str(pos_num), {}).get("title", "弟子"),
+                "contribution": _safe_int(row.get(contribution_col)) if contribution_col else None,
+                })
+    except Exception:
+        members_list = []
+
     return {
         "joined": True,
         "sect_id": sect_id,
@@ -1093,6 +1146,7 @@ def _build_sect_info(user_id):
         "join_open": _safe_bool(join_open),
         "closed": _safe_bool(closed),
         "combat_power": _safe_int(combat_power),
+        "members_list": members_list,
     }
 
 

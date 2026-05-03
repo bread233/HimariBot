@@ -4538,6 +4538,29 @@
                 el.innerHTML = `<div class="card muted" style="grid-column: 1/-1">${sect.message}</div>`;
                 return;
             }
+            const escapeHtml = (value) => String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+            const membersList = Array.isArray(sect.members_list) ? sect.members_list : [];
+            const membersHtml = membersList.length
+                ? membersList.map(m => {
+                    const name = escapeHtml((m && (m.user_name || m.username || m.name)) || `用户${(m && m.user_id) || 0}`);
+                    const uid = escapeHtml((m && m.user_id) != null ? m.user_id : '-');
+                    const position = escapeHtml((m && (m.position_title || m.position || m.sect_position)) || '-');
+                    const level = escapeHtml((m && m.level) || '-');
+                    const contribution = escapeHtml((m && m.contribution) != null ? m.contribution : '-');
+                    return `
+                        <div class="quest-card" style="margin-bottom:10px;">
+                            <h4 style="margin:0 0 6px;">${name}</h4>
+                            <p class="hint" style="margin:0;">UID：${uid}</p>
+                            <p class="hint" style="margin:4px 0 0;">职位：${position}｜境界：${level}｜贡献：${contribution}</p>
+                        </div>
+                    `;
+                }).join('')
+                : `<div class="card muted">暂无成员数据</div>`;
             const joinOpenText = sect.join_open == null ? '未记录' : (sect.join_open ? '开放' : '关闭');
             const closedText = sect.closed == null ? '未记录' : (sect.closed ? '是' : '否');
             const combatPowerText = sect.combat_power == null ? '未记录' : sect.combat_power;
@@ -4554,6 +4577,10 @@
                 <div class="stat-card"><span>宗门规模</span><strong>${sect.scale}</strong></div>
                 <div class="stat-card"><span>丹房等级</span><strong>${sect.elixir_room_level}</strong></div>
                 <div class="stat-card"><span>成员数量</span><strong>${sect.members}</strong></div>
+                <div class="card" style="grid-column: 1/-1; margin-top: 8px;">
+                    <h4 style="margin:0 0 8px;">成员列表</h4>
+                    ${membersHtml}
+                </div>
             `;
         }
 
