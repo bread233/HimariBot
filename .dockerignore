@@ -48,3 +48,5 @@ cache/
 README*.md
 
 src/plugins_disabled/
+tarot-resources.zip
+src/plugins/tarot/resource/
