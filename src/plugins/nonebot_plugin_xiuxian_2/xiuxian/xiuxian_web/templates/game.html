@@ -3216,7 +3216,7 @@
                 });
                 toast(data.message || '捐献成功');
                 input.value = '';
-                await Promise.all([loadProfile(), loadSectInfo()]);
+                await Promise.all([loadProfileOnly(), loadSectInfo()]);
             } catch (err) {
                 toast(err.message);
             } finally {
