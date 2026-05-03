@@ -147,6 +147,25 @@ data/xiuxian
 data/resources
 ```
 
+特别提醒：
+
+- `himaribot-data.zip` 压缩包顶层已经是 `autoreply/`、`resources/`、`xiuxian/` 等目录。
+- 请直接在宿主机 `data` 映射目录内解压，不要再多套一层 `data/`。
+
+正确路径示例：
+
+```text
+/volume1/docker/himaribot/himari/data/resources/tarot/tarot.json
+/volume1/docker/himaribot/himari/data/xiuxian
+```
+
+错误路径示例（多套一层 data）：
+
+```text
+/volume1/docker/himaribot/himari/data/data/resources/tarot/tarot.json
+/volume1/docker/himaribot/himari/data/data/xiuxian
+```
+
 ### ⚠️ 使用声明
 本项目仅供学习交流
 禁止用于违反法律法规及 QQ 协议的行为！
