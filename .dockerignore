@@ -32,7 +32,7 @@ log/
 
 # 如果资源希望用挂载方式提供，就打开这一行
 # 否则先保留不动
-# resources/
+resources/
 
 # IDE / OS 杂物
 .vscode/
