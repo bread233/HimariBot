@@ -1087,6 +1087,90 @@ def _build_sect_info(user_id):
         except Exception:
             return ""
 
+    def _compact_text(value):
+        text = _safe_text(value).strip()
+        return text
+
+    def _join_non_empty(parts, sep="，"):
+        valid = [p for p in parts if isinstance(p, str) and p.strip()]
+        return sep.join(valid)
+
+    def _safe_first(data, keys):
+        if not isinstance(data, dict):
+            return None
+        for key in keys:
+            if key in data and data.get(key) not in (None, ""):
+                return data.get(key)
+        return None
+
+    def _format_cost_text(cfg):
+        if not isinstance(cfg, dict):
+            return ""
+        cost = _safe_first(cfg, ["cost", "price", "contribution", "integral", "stone", "materials"])
+        if cost not in (None, ""):
+            if "contribution" in cfg:
+                return f"贡献 {_safe_text(cfg.get('contribution'))}"
+            if "integral" in cfg:
+                return f"贡献 {_safe_text(cfg.get('integral'))}"
+            if "stone" in cfg:
+                return f"灵石 {_safe_text(cfg.get('stone'))}"
+            if "materials" in cfg:
+                return f"资材 {_safe_text(cfg.get('materials'))}"
+            return _safe_text(cost)
+        parts = []
+        need_item = cfg.get("need_item")
+        if isinstance(need_item, dict):
+            for item_id, num in list(need_item.items())[:5]:
+                parts.append(f"物品{_safe_text(item_id)}x{_safe_text(num)}")
+        return _join_non_empty(parts)
+
+    def _format_requirement_text(cfg):
+        if not isinstance(cfg, dict):
+            return ""
+        req_parts = []
+        level_req = _safe_first(cfg, ["sect_level", "need_sect_level", "required_sect_level"])
+        if level_req not in (None, ""):
+            req_parts.append(f"宗门等级≥{_safe_text(level_req)}")
+        room_req = _safe_first(cfg, ["elixir_room_level", "need_elixir_room_level", "required_elixir_room_level"])
+        if room_req not in (None, ""):
+            req_parts.append(f"丹房等级≥{_safe_text(room_req)}")
+        pos_req = _safe_first(cfg, ["position", "sect_position", "required_position", "title"])
+        if pos_req not in (None, ""):
+            req_parts.append(f"职位要求：{_safe_text(pos_req)}")
+        contribution_req = _safe_first(cfg, ["need_contribution", "required_contribution", "min_contribution"])
+        if contribution_req not in (None, ""):
+            req_parts.append(f"贡献≥{_safe_text(contribution_req)}")
+        return _join_non_empty(req_parts)
+
+    def _build_shop_items_preview():
+        try:
+            from ..xiuxian_sect.sectconfig import get_config as get_sect_config  # 局部导入，避免影响启动
+            cfg = get_sect_config() or {}
+            shop_cfg = cfg.get("商店商品") if isinstance(cfg, dict) else {}
+            if not isinstance(shop_cfg, dict):
+                return []
+            items_preview = []
+            for item_id, item_cfg in list(shop_cfg.items())[:100]:
+                if not isinstance(item_cfg, dict):
+                    continue
+                name = _compact_text(_safe_first(item_cfg, ["name", "title"])) or f"商品{_safe_text(item_id)}"
+                desc = _compact_text(_safe_first(item_cfg, ["description", "desc", "remark"]))
+                cost = _compact_text(_format_cost_text(item_cfg)) or "未记录"
+                weekly_limit = _safe_first(item_cfg, ["weekly_limit", "daily_limit", "limit", "stock"])
+                limit = f"限制：{_safe_text(weekly_limit)}" if weekly_limit not in (None, "") else "未记录"
+                requirement = _compact_text(_format_requirement_text(item_cfg)) or "条件未知"
+                items_preview.append({
+                    "name": name,
+                    "description": desc,
+                    "cost": cost,
+                    "limit": limit,
+                    "requirement": requirement,
+                    "status": "可查看",
+                })
+            return items_preview
+        except Exception:
+            return []
+
     join_open = _safe_get(sect, "join_open")
     if join_open is None:
         join_open = _safe_get(sect, "is_join_open")
@@ -1363,6 +1447,7 @@ def _build_sect_info(user_id):
         "members_list": members_list,
         "task_info": task_info,
         "elixir_room_info": elixir_room_info,
+        "shop_items": _build_shop_items_preview(),
     }
 
 

@@ -4650,6 +4650,26 @@
             const elixirCd = escapeHtml(elixirRoomInfo.cd || '未记录');
             const elixirStatus = escapeHtml(elixirRoomInfo.status || '未记录');
             const elixirMessage = escapeHtml(elixirRoomInfo.message || '暂无丹房数据');
+            const shopItems = Array.isArray(sect.shop_items) ? sect.shop_items : [];
+            const shopContentHtml = shopItems.length
+                ? shopItems.map(item => {
+                    const name = escapeHtml((item && item.name) || '未命名商品');
+                    const cost = escapeHtml((item && item.cost) || '未记录');
+                    const limit = escapeHtml((item && item.limit) || '未记录');
+                    const requirement = escapeHtml((item && item.requirement) || '条件未知');
+                    const description = escapeHtml((item && item.description) || '');
+                    const status = escapeHtml((item && item.status) || '可查看');
+                    return `
+                        <div class="sect-member-item">
+                            <p class="sect-member-line1"><span class="sect-member-name">${name}</span></p>
+                            <p class="hint sect-member-line2"><span class="sect-member-meta">消耗：${cost}</span></p>
+                            <p class="hint sect-member-line2"><span class="sect-member-meta">限制：${limit}</span></p>
+                            <p class="hint sect-member-line2"><span class="sect-member-meta">要求：${requirement}</span></p>
+                            <p class="hint sect-member-line2"><span class="sect-member-meta">说明/状态：${description || '-'} / ${status}</span></p>
+                        </div>
+                    `;
+                }).join('')
+                : `<div class="card muted">暂无宗门商店数据</div>`;
             const sectNameText = escapeHtml(sect.sect_name);
             const sectOwnerText = escapeHtml(sect.owner);
             const sectPositionText = escapeHtml(sect.position);
@@ -4697,6 +4717,10 @@
                 <div class="card" style="grid-column: 1/-1; margin-top: 8px;">
                     <h4 style="margin:0 0 8px;">宗门丹房</h4>
                     <div class="sect-member-list">${elixirRoomContentHtml}</div>
+                </div>
+                <div class="card" style="grid-column: 1/-1; margin-top: 8px;">
+                    <h4 style="margin:0 0 8px;">宗门商店</h4>
+                    <div class="sect-member-list">${shopContentHtml}</div>
                 </div>
                 <div class="card" style="grid-column: 1/-1; margin-top: 8px;">
                     <h4 style="margin:0 0 8px;">成员列表</h4>
