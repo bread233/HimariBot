@@ -3020,6 +3020,118 @@ def game_api_sect():
     return _ok(sect=_build_sect_info(player_id))
 
 
+@app.route('/game/api/sect/donate', methods=['POST'])
+@game_login_required
+def game_api_sect_donate():
+    player_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    amount_raw = payload.get("amount")
+    if isinstance(amount_raw, bool):
+        return _err("amount 必须是整数")
+    try:
+        amount = int(amount_raw)
+    except (TypeError, ValueError):
+        return _err("amount 必须是整数")
+
+    if amount <= 0:
+        return _err("amount 必须大于 0")
+    if amount > 2147483647:
+        return _err("amount 超出允许范围")
+
+    user = game_sql.get_user_info_with_id(player_id)
+    if not user:
+        return _err("当前用户不存在", 404)
+
+    sect_id = user.get("sect_id")
+    if not sect_id:
+        return _err("当前未加入宗门")
+
+    sect = game_sql.get_sect_info(sect_id)
+    if not sect:
+        return _err("当前宗门不存在", 404)
+
+    conn = None
+    try:
+        conn = sqlite3.connect(DATABASE, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        user_cols = {str(r["name"]) for r in cur.execute("PRAGMA table_info(user_xiuxian)").fetchall() if r and r["name"]}
+        sect_cols = {str(r["name"]) for r in cur.execute("PRAGMA table_info(sects)").fetchall() if r and r["name"]}
+        if "sect_contribution" not in user_cols:
+            return _err("数据库缺少列：user_xiuxian.sect_contribution")
+        if "sect_used_stone" not in sect_cols:
+            return _err("数据库缺少列：sects.sect_used_stone")
+        if "sect_scale" not in sect_cols:
+            return _err("数据库缺少列：sects.sect_scale")
+
+        conn.execute("BEGIN")
+        cur.execute(
+            "UPDATE user_xiuxian SET stone = stone - ? WHERE user_id = ? AND stone >= ?",
+            (amount, player_id, amount),
+        )
+        if cur.rowcount <= 0:
+            conn.rollback()
+            return _err("灵石不足")
+
+        cur.execute(
+            "UPDATE sects SET sect_used_stone = COALESCE(sect_used_stone,0) + ?, sect_scale = COALESCE(sect_scale,0) + ? WHERE sect_id = ?",
+            (amount, amount, sect_id),
+        )
+        if cur.rowcount <= 0:
+            conn.rollback()
+            return _err("宗门不存在或更新失败")
+
+        cur.execute(
+            "UPDATE user_xiuxian SET sect_contribution = COALESCE(sect_contribution,0) + ? WHERE user_id = ?",
+            (amount, player_id),
+        )
+        if cur.rowcount <= 0:
+            conn.rollback()
+            return _err("个人贡献更新失败")
+
+        row = cur.execute(
+            """
+            SELECT u.stone AS stone_left,
+                   COALESCE(u.sect_contribution,0) AS sect_contribution,
+                   COALESCE(s.sect_scale,0) AS sect_scale,
+                   COALESCE(s.sect_used_stone,0) AS sect_used_stone
+              FROM user_xiuxian u
+              LEFT JOIN sects s ON s.sect_id = ?
+             WHERE u.user_id = ?
+             LIMIT 1
+            """,
+            (sect_id, player_id),
+        ).fetchone()
+        if not row:
+            conn.rollback()
+            return _err("捐献成功但读取结果失败")
+
+        conn.commit()
+        return _ok(
+            message="捐献成功",
+            amount=amount,
+            stone_left=int(row["stone_left"] or 0),
+            sect_contribution=int(row["sect_contribution"] or 0),
+            sect_scale=int(row["sect_scale"] or 0),
+            sect_used_stone=int(row["sect_used_stone"] or 0),
+        )
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.exception(f"sect donate failed: user_id={player_id}, error={e}")
+        return _err("宗门捐献失败，请稍后重试")
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 @app.route('/game/api/rift/explore', methods=['POST'])
 @game_login_required
 def game_api_rift_explore():

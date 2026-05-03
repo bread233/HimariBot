@@ -3197,6 +3197,34 @@
             }
         }
 
+        async function donateSect() {
+            const input = $('sect-donate-amount');
+            const btn = $('btn-sect-donate');
+            if (!input || !btn) return;
+            const amount = Number.parseInt(input.value, 10);
+            if (!Number.isInteger(amount) || amount <= 0) {
+                toast('请输入正整数灵石数量');
+                return;
+            }
+            btn.disabled = true;
+            const oldText = btn.textContent;
+            btn.textContent = '捐献中...';
+            try {
+                const data = await api('/game/api/sect/donate', {
+                    method: 'POST',
+                    body: JSON.stringify({ amount })
+                });
+                toast(data.message || '捐献成功');
+                input.value = '';
+                await Promise.all([loadProfile(), loadSectInfo()]);
+            } catch (err) {
+                toast(err.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = oldText;
+            }
+        }
+
         function switchTab(name) {
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === name));
             document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
@@ -4747,6 +4775,13 @@
                 <div class="card" style="grid-column: 1/-1; margin-top: 8px;">
                     <h4 style="margin:0 0 8px;">宗门任务</h4>
                     <div class="sect-member-list">${taskContentHtml}</div>
+                </div>
+                <div class="card" style="grid-column: 1/-1; margin-top: 8px;">
+                    <h4 style="margin:0 0 8px;">宗门捐献</h4>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                        <input class="input" id="sect-donate-amount" type="number" min="1" step="1" placeholder="输入灵石数量" style="flex:1 1 180px; min-width:0;">
+                        <button class="btn" id="btn-sect-donate" onclick="donateSect()">捐献</button>
+                    </div>
                 </div>
                 <div class="card" style="grid-column: 1/-1; margin-top: 8px;">
                     <h4 style="margin:0 0 8px;">宗门丹房</h4>
