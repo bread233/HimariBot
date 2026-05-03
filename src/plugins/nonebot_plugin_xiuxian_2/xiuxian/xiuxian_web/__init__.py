@@ -1032,17 +1032,494 @@ def _build_sect_info(user_id):
         return {"joined": False, "message": "尚未加入宗门"}
     sect = game_sql.get_sect_info(sect_id) or {}
     members = execute_sql(DATABASE, "SELECT COUNT(*) as c FROM user_xiuxian WHERE sect_id = ?", (sect_id,)) or [{"c": 0}]
+    try:
+        pragma_rows = execute_sql(DATABASE, "PRAGMA table_info(user_xiuxian)") or []
+        columns = {str((r or {}).get("name") or "") for r in pragma_rows if isinstance(r, dict)}
+        columns.discard("")
+    except Exception:
+        columns = set()
+    try:
+        sect_pragma_rows = execute_sql(DATABASE, "PRAGMA table_info(sects)") or []
+        sect_columns = {str((r or {}).get("name") or "") for r in sect_pragma_rows if isinstance(r, dict)}
+        sect_columns.discard("")
+    except Exception:
+        sect_columns = set()
+
+    def _safe_get(obj, key, default=None):
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        try:
+            if hasattr(obj, "keys") and key in obj.keys():
+                return obj[key]
+        except Exception:
+            pass
+        return getattr(obj, key, default)
+
+    def _safe_bool(value):
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on", "开放"}:
+                return True
+            if normalized in {"0", "false", "no", "off", "关闭"}:
+                return False
+            return None
+        return None
+
+    def _safe_int(value):
+        if value is None or value == "":
+            return None
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    def _safe_text(value):
+        if value is None:
+            return ""
+        try:
+            return str(value)
+        except Exception:
+            return ""
+
+    def _compact_text(value):
+        text = _safe_text(value).strip()
+        return text
+
+    def _join_non_empty(parts, sep="，"):
+        valid = [p for p in parts if isinstance(p, str) and p.strip()]
+        return sep.join(valid)
+
+    def _safe_first(data, keys):
+        if not isinstance(data, dict):
+            return None
+        for key in keys:
+            if key in data and data.get(key) not in (None, ""):
+                return data.get(key)
+        return None
+
+    def _format_cost_text(cfg):
+        if not isinstance(cfg, dict):
+            return ""
+        cost = _safe_first(cfg, ["cost", "price", "contribution", "integral", "stone", "materials"])
+        if cost not in (None, ""):
+            if "contribution" in cfg:
+                return f"贡献 {_safe_text(cfg.get('contribution'))}"
+            if "integral" in cfg:
+                return f"贡献 {_safe_text(cfg.get('integral'))}"
+            if "stone" in cfg:
+                return f"灵石 {_safe_text(cfg.get('stone'))}"
+            if "materials" in cfg:
+                return f"资材 {_safe_text(cfg.get('materials'))}"
+            return _safe_text(cost)
+        parts = []
+        need_item = cfg.get("need_item")
+        if isinstance(need_item, dict):
+            for item_id, num in list(need_item.items())[:5]:
+                parts.append(f"物品{_safe_text(item_id)}x{_safe_text(num)}")
+        return _join_non_empty(parts)
+
+    def _format_requirement_text(cfg):
+        if not isinstance(cfg, dict):
+            return ""
+        req_parts = []
+        level_req = _safe_first(cfg, ["sect_level", "need_sect_level", "required_sect_level"])
+        if level_req not in (None, ""):
+            req_parts.append(f"宗门等级≥{_safe_text(level_req)}")
+        room_req = _safe_first(cfg, ["elixir_room_level", "need_elixir_room_level", "required_elixir_room_level"])
+        if room_req not in (None, ""):
+            req_parts.append(f"丹房等级≥{_safe_text(room_req)}")
+        pos_req = _safe_first(cfg, ["position", "sect_position", "required_position", "title"])
+        if pos_req not in (None, ""):
+            req_parts.append(f"职位要求：{_safe_text(pos_req)}")
+        contribution_req = _safe_first(cfg, ["need_contribution", "required_contribution", "min_contribution"])
+        if contribution_req not in (None, ""):
+            req_parts.append(f"贡献≥{_safe_text(contribution_req)}")
+        return _join_non_empty(req_parts)
+
+    def _build_shop_items_preview():
+        try:
+            from ..xiuxian_sect.sectconfig import get_config as get_sect_config  # 局部导入，避免影响启动
+            cfg = get_sect_config() or {}
+            shop_cfg = cfg.get("商店商品") if isinstance(cfg, dict) else {}
+            if not isinstance(shop_cfg, dict):
+                return []
+            items_preview = []
+            for item_id, item_cfg in list(shop_cfg.items())[:100]:
+                if not isinstance(item_cfg, dict):
+                    continue
+                name = _compact_text(_safe_first(item_cfg, ["name", "title"])) or f"商品{_safe_text(item_id)}"
+                desc = _compact_text(_safe_first(item_cfg, ["description", "desc", "remark"]))
+                cost = _compact_text(_format_cost_text(item_cfg)) or "未记录"
+                weekly_limit = _safe_first(item_cfg, ["weekly_limit", "daily_limit", "limit", "stock"])
+                limit = f"限制：{_safe_text(weekly_limit)}" if weekly_limit not in (None, "") else "未记录"
+                requirement = _compact_text(_format_requirement_text(item_cfg)) or "条件未知"
+                items_preview.append({
+                    "name": name,
+                    "description": desc,
+                    "cost": cost,
+                    "limit": limit,
+                    "requirement": requirement,
+                    "status": "可查看",
+                })
+            return items_preview
+        except Exception:
+            return []
+
+    join_open = _safe_get(sect, "join_open")
+    if join_open is None:
+        join_open = _safe_get(sect, "is_join_open")
+
+    closed = _safe_get(sect, "closed")
+    if closed is None:
+        closed = _safe_get(sect, "is_closed")
+
+    combat_power = _safe_get(sect, "combat_power")
+    if combat_power is None:
+        combat_power = _safe_get(sect, "power")
+
+    members_list = []
+    try:
+        if columns:
+            name_col = next((c for c in ("user_name", "username", "name") if c in columns), None)
+            level_col = next((c for c in ("level", "realm", "jingjie", "境界") if c in columns), None)
+            contribution_col = next((c for c in ("sect_contribution", "contribution") if c in columns), None)
+            position_col = "sect_position" if "sect_position" in columns else None
+
+            select_fields = ["user_id"]
+            if name_col:
+                select_fields.append(name_col)
+            if level_col:
+                select_fields.append(level_col)
+            if position_col:
+                select_fields.append(position_col)
+            if contribution_col:
+                select_fields.append(contribution_col)
+
+            order_parts = []
+            if position_col:
+                order_parts.append("sect_position ASC")
+            if contribution_col:
+                order_parts.append(f"{contribution_col} DESC")
+
+            sql = f"SELECT {', '.join(select_fields)} FROM user_xiuxian WHERE sect_id = ?"
+            if order_parts:
+                sql += " ORDER BY " + ", ".join(order_parts)
+            sql += " LIMIT 100"
+
+            member_rows = execute_sql(DATABASE, sql, (sect_id,)) or []
+            for row in member_rows:
+                if not isinstance(row, dict):
+                    continue
+                raw_position = row.get(position_col) if position_col else None
+                try:
+                    pos_num = int(raw_position) if raw_position is not None and raw_position != "" else 4
+                except Exception:
+                    pos_num = 4
+                members_list.append({
+                    "user_id": int(row.get("user_id") or 0),
+                    "user_name": (row.get(name_col) if name_col else None) or "",
+                    "level": (row.get(level_col) if level_col else None) or None,
+                    "sect_position": pos_num,
+                    "position_title": jsondata.sect_config_data().get(str(pos_num), {}).get("title", "弟子"),
+                "contribution": _safe_int(row.get(contribution_col)) if contribution_col else None,
+                })
+    except Exception:
+        members_list = []
+
+    position_stats = {"has_data": False, "items": [], "total": 0}
+    try:
+        if "sect_position" in columns:
+            stats_rows = execute_sql(
+                DATABASE,
+                """
+                SELECT sect_position, COUNT(*) as c
+                FROM user_xiuxian
+                WHERE sect_id = ?
+                GROUP BY sect_position
+                ORDER BY sect_position ASC
+                LIMIT 20
+                """,
+                (sect_id,)
+            ) or []
+
+            sect_position_cfg = jsondata.sect_config_data() or {}
+            items = []
+            total = 0
+            for row in stats_rows:
+                if not isinstance(row, dict):
+                    continue
+                raw_position = row.get("sect_position")
+                try:
+                    position_val = int(raw_position)
+                except Exception:
+                    position_val = raw_position
+                try:
+                    count_val = int(row.get("c") or 0)
+                except Exception:
+                    count_val = 0
+                total += count_val
+                items.append({
+                    "position": position_val,
+                    "title": sect_position_cfg.get(str(position_val), {}).get("title", "未知职位"),
+                    "count": count_val,
+                })
+
+            position_stats = {
+                "has_data": len(items) > 0,
+                "items": items,
+                "total": total,
+            }
+    except Exception:
+        position_stats = {"has_data": False, "items": [], "total": 0}
+
+    task_info = {
+        "has_task": False,
+        "name": "",
+        "type": "",
+        "description": "",
+        "progress": "",
+        "status": "",
+        "times": "",
+        "cd": "",
+        "raw": "",
+    }
+    try:
+        task_columns = [
+            "sect_task",
+            "sect_task_status",
+            "sect_task_progress",
+            "sect_task_count",
+            "sect_task_cd",
+            "sect_task_refresh_cd",
+            "sect_task_complete_num",
+            "sect_task_times",
+        ]
+        exist_task_columns = [c for c in task_columns if c in columns]
+        if exist_task_columns:
+            sql = f"SELECT {', '.join(exist_task_columns)} FROM user_xiuxian WHERE user_id = ? LIMIT 1"
+            task_rows = execute_sql(DATABASE, sql, (user_id,)) or []
+            task_row = task_rows[0] if task_rows and isinstance(task_rows[0], dict) else {}
+
+            raw_task = task_row.get("sect_task") if "sect_task" in task_row else None
+            raw_text = "" if raw_task in (None, "") else str(raw_task)
+            if len(raw_text) > 300:
+                raw_text = raw_text[:300] + "..."
+            parsed_task = raw_task
+            if isinstance(raw_task, str):
+                raw_parse_text = raw_task.strip()
+                if raw_parse_text:
+                    try:
+                        parsed_task = json.loads(raw_parse_text)
+                    except Exception:
+                        parsed_task = raw_task
+                else:
+                    parsed_task = ""
+
+            name = ""
+            task_type = ""
+            description = ""
+            progress = task_row.get("sect_task_progress") if "sect_task_progress" in task_row else ""
+            status = task_row.get("sect_task_status") if "sect_task_status" in task_row else ""
+
+            if isinstance(parsed_task, dict):
+                name = parsed_task.get("name") or parsed_task.get("task_name") or parsed_task.get("title") or ""
+                task_type = parsed_task.get("type") or parsed_task.get("task_type") or ""
+                description = parsed_task.get("description") or parsed_task.get("desc") or parsed_task.get("target") or ""
+                if not progress:
+                    progress = parsed_task.get("progress") or parsed_task.get("current_progress") or ""
+                if not status:
+                    status = parsed_task.get("status") or ""
+            elif parsed_task not in (None, ""):
+                description = str(parsed_task)
+
+            times_parts = []
+            count_val = task_row.get("sect_task_count") if "sect_task_count" in task_row else None
+            complete_num_val = task_row.get("sect_task_complete_num") if "sect_task_complete_num" in task_row else None
+            times_val = task_row.get("sect_task_times") if "sect_task_times" in task_row else None
+            if count_val not in (None, ""):
+                times_parts.append(f"今日次数：{count_val}")
+            if complete_num_val not in (None, ""):
+                times_parts.append(f"剩余次数：{complete_num_val}")
+            if times_val not in (None, ""):
+                times_parts.append(f"次数：{times_val}")
+            times_text = " / ".join(times_parts)
+
+            cd_parts = []
+            cd_val = task_row.get("sect_task_cd") if "sect_task_cd" in task_row else None
+            refresh_cd_val = task_row.get("sect_task_refresh_cd") if "sect_task_refresh_cd" in task_row else None
+            if cd_val not in (None, ""):
+                cd_parts.append(f"CD：{cd_val}")
+            if refresh_cd_val not in (None, ""):
+                cd_parts.append(f"刷新CD：{refresh_cd_val}")
+            cd_text = " / ".join(cd_parts)
+
+            has_task = any(v not in (None, "") for v in [raw_task, name, task_type, description, progress, status])
+            task_info = {
+                "has_task": bool(has_task),
+                "name": str(name or ""),
+                "type": str(task_type or ""),
+                "description": str(description or ""),
+                "progress": str(progress or ""),
+                "status": str(status or ""),
+                "times": str(times_text or ""),
+                "raw": raw_text,
+            }
+    except Exception:
+        task_info = {
+            "has_task": False,
+            "name": "",
+            "type": "",
+            "description": "",
+            "progress": "",
+            "status": "",
+            "times": "",
+            "cd": "",
+            "raw": "",
+        }
+
+    elixir_room_info = {
+        "has_data": False,
+        "level": "",
+        "get_num": "",
+        "cd": "",
+        "status": "暂无丹房数据",
+        "message": "暂无丹房数据",
+    }
+    try:
+        sect_level_candidates = ["elixir_room_level", "sect_elixir_room_level", "elixir_level", "elixir_room"]
+        user_get_num_candidates = ["sect_elixir_get", "sect_elixir_get_num", "elixir_get_num"]
+        user_cd_candidates = ["sect_elixir_cd", "sect_elixir_time"]
+
+        level_val = None
+        for field in sect_level_candidates:
+            if field == "elixir_room_level":
+                v = _safe_get(sect, field)
+                if v not in (None, ""):
+                    level_val = v
+                    break
+            elif field in sect_columns:
+                rows = execute_sql(DATABASE, f"SELECT {field} FROM sects WHERE sect_id = ? LIMIT 1", (sect_id,)) or []
+                row = rows[0] if rows and isinstance(rows[0], dict) else {}
+                v = row.get(field)
+                if v not in (None, ""):
+                    level_val = v
+                    break
+
+        user_extra_fields = [c for c in (user_get_num_candidates + user_cd_candidates) if c in columns]
+        user_extra_row = {}
+        if user_extra_fields:
+            sql = f"SELECT {', '.join(user_extra_fields)} FROM user_xiuxian WHERE user_id = ? LIMIT 1"
+            user_rows = execute_sql(DATABASE, sql, (user_id,)) or []
+            user_extra_row = user_rows[0] if user_rows and isinstance(user_rows[0], dict) else {}
+
+        get_num_val = None
+        get_num_field = None
+        for field in user_get_num_candidates:
+            if field in user_extra_row and user_extra_row.get(field) not in (None, ""):
+                get_num_field = field
+                get_num_val = user_extra_row.get(field)
+                break
+
+        cd_val = None
+        cd_field = None
+        for field in user_cd_candidates:
+            if field in user_extra_row and user_extra_row.get(field) not in (None, ""):
+                cd_field = field
+                cd_val = user_extra_row.get(field)
+                break
+
+        level_text = ""
+        if level_val not in (None, ""):
+            level_num = _safe_int(level_val)
+            level_text = str(level_num) if level_num is not None else _safe_text(level_val)
+
+        get_num_text = ""
+        if get_num_val not in (None, ""):
+            if get_num_field == "sect_elixir_get":
+                bool_val = _safe_bool(get_num_val)
+                if bool_val is True:
+                    get_num_text = "今日已领取"
+                elif bool_val is False:
+                    get_num_text = "今日未领取"
+                else:
+                    get_num_text = _safe_text(get_num_val)
+            else:
+                get_num_text = _safe_text(get_num_val)
+
+        cd_text = _safe_text(cd_val) if cd_val not in (None, "") else ""
+
+        has_data = any(v not in (None, "") for v in [level_text, get_num_text, cd_text])
+        status_text = "可查看" if has_data else "暂无丹房数据"
+        message_text = "丹房信息仅供查看" if has_data else "暂无丹房数据"
+
+        elixir_room_info = {
+            "has_data": bool(has_data),
+            "level": level_text,
+            "get_num": get_num_text,
+            "cd": cd_text,
+            "status": status_text,
+            "message": message_text,
+        }
+    except Exception:
+        elixir_room_info = {
+            "has_data": False,
+            "level": "",
+            "get_num": "",
+            "cd": "",
+            "status": "暂无丹房数据",
+            "message": "暂无丹房数据",
+        }
+
+    owner_value = sect.get("sect_owner") or sect.get("owner") or sect.get("sect_owner_id") or sect.get("owner_id") or "未知"
+    owner_display = owner_value
+    try:
+        owner_text = str(owner_value).strip()
+        owner_id = ""
+        if owner_text.isdigit():
+            owner_id = owner_text
+        else:
+            match = re.search(r"(\d+)", owner_text)
+            if match:
+                owner_id = match.group(1)
+
+        if owner_id:
+            owner_name_rows = execute_sql(
+                DATABASE,
+                "SELECT user_name AS owner_name FROM user_xiuxian WHERE user_id = ? LIMIT 1",
+                (owner_id,)
+            )
+            owner_name = ((owner_name_rows or [{}])[0]).get("owner_name")
+            if owner_name not in (None, ""):
+                owner_display = f"{owner_name}（{owner_id}）"
+    except Exception:
+        owner_display = owner_value
+
     return {
         "joined": True,
         "sect_id": sect_id,
         "sect_name": sect.get("sect_name") or "未知宗门",
-        "owner": sect.get("sect_owner") or "未知",
+        "owner": owner_value,
+        "owner_display": owner_display,
         "level": sect.get("sect_level") or 0,
         "materials": int(sect.get("sect_materials") or 0),
         "scale": int(sect.get("sect_scale") or 0),
         "elixir_room_level": int(sect.get("elixir_room_level") or 0),
         "members": int((members[0] or {}).get("c") or 0),
         "position": jsondata.sect_config_data().get(str(user.get("sect_position")), {}).get("title", "弟子"),
+        "join_open": _safe_bool(join_open),
+        "closed": _safe_bool(closed),
+        "combat_power": _safe_int(combat_power),
+        "members_list": members_list,
+        "position_stats": position_stats,
+        "task_info": task_info,
+        "elixir_room_info": elixir_room_info,
+        "shop_items": _build_shop_items_preview(),
     }
 
 
@@ -2541,6 +3018,118 @@ def game_api_social_action():
 def game_api_sect():
     player_id = _current_player_id()
     return _ok(sect=_build_sect_info(player_id))
+
+
+@app.route('/game/api/sect/donate', methods=['POST'])
+@game_login_required
+def game_api_sect_donate():
+    player_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    amount_raw = payload.get("amount")
+    if isinstance(amount_raw, bool):
+        return _err("amount 必须是整数")
+    try:
+        amount = int(amount_raw)
+    except (TypeError, ValueError):
+        return _err("amount 必须是整数")
+
+    if amount <= 0:
+        return _err("amount 必须大于 0")
+    if amount > 2147483647:
+        return _err("amount 超出允许范围")
+
+    user = game_sql.get_user_info_with_id(player_id)
+    if not user:
+        return _err("当前用户不存在", 404)
+
+    sect_id = user.get("sect_id")
+    if not sect_id:
+        return _err("当前未加入宗门")
+
+    sect = game_sql.get_sect_info(sect_id)
+    if not sect:
+        return _err("当前宗门不存在", 404)
+
+    conn = None
+    try:
+        conn = sqlite3.connect(DATABASE, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        user_cols = {str(r["name"]) for r in cur.execute("PRAGMA table_info(user_xiuxian)").fetchall() if r and r["name"]}
+        sect_cols = {str(r["name"]) for r in cur.execute("PRAGMA table_info(sects)").fetchall() if r and r["name"]}
+        if "sect_contribution" not in user_cols:
+            return _err("数据库缺少列：user_xiuxian.sect_contribution")
+        if "sect_used_stone" not in sect_cols:
+            return _err("数据库缺少列：sects.sect_used_stone")
+        if "sect_scale" not in sect_cols:
+            return _err("数据库缺少列：sects.sect_scale")
+
+        conn.execute("BEGIN")
+        cur.execute(
+            "UPDATE user_xiuxian SET stone = stone - ? WHERE user_id = ? AND stone >= ?",
+            (amount, player_id, amount),
+        )
+        if cur.rowcount <= 0:
+            conn.rollback()
+            return _err("灵石不足")
+
+        cur.execute(
+            "UPDATE sects SET sect_used_stone = COALESCE(sect_used_stone,0) + ?, sect_scale = COALESCE(sect_scale,0) + ? WHERE sect_id = ?",
+            (amount, amount, sect_id),
+        )
+        if cur.rowcount <= 0:
+            conn.rollback()
+            return _err("宗门不存在或更新失败")
+
+        cur.execute(
+            "UPDATE user_xiuxian SET sect_contribution = COALESCE(sect_contribution,0) + ? WHERE user_id = ?",
+            (amount, player_id),
+        )
+        if cur.rowcount <= 0:
+            conn.rollback()
+            return _err("个人贡献更新失败")
+
+        row = cur.execute(
+            """
+            SELECT u.stone AS stone_left,
+                   COALESCE(u.sect_contribution,0) AS sect_contribution,
+                   COALESCE(s.sect_scale,0) AS sect_scale,
+                   COALESCE(s.sect_used_stone,0) AS sect_used_stone
+              FROM user_xiuxian u
+              LEFT JOIN sects s ON s.sect_id = ?
+             WHERE u.user_id = ?
+             LIMIT 1
+            """,
+            (sect_id, player_id),
+        ).fetchone()
+        if not row:
+            conn.rollback()
+            return _err("捐献成功但读取结果失败")
+
+        conn.commit()
+        return _ok(
+            message="捐献成功",
+            amount=amount,
+            stone_left=int(row["stone_left"] or 0),
+            sect_contribution=int(row["sect_contribution"] or 0),
+            sect_scale=int(row["sect_scale"] or 0),
+            sect_used_stone=int(row["sect_used_stone"] or 0),
+        )
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.exception(f"sect donate failed: user_id={player_id}, error={e}")
+        return _err("宗门捐献失败，请稍后重试")
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 @app.route('/game/api/rift/explore', methods=['POST'])
