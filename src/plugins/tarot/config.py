@@ -13,11 +13,35 @@ except ModuleNotFoundError:
     import json
 
 
+PLUGIN_DIR: Path = Path(__file__).resolve().parent
+PROJECT_ROOT: Path = PLUGIN_DIR.parent.parent.parent
+EXTERNAL_TAROT_ROOT: Path = PROJECT_ROOT / "data" / "resources" / "tarot"
+BUNDLED_TAROT_ROOT: Path = PLUGIN_DIR
+
+
+def get_tarot_root() -> Path:
+    return EXTERNAL_TAROT_ROOT if EXTERNAL_TAROT_ROOT.exists() else BUNDLED_TAROT_ROOT
+
+
+def get_tarot_image_root() -> Path:
+    external_image_root: Path = EXTERNAL_TAROT_ROOT / "resource"
+    if external_image_root.exists():
+        return external_image_root
+    return BUNDLED_TAROT_ROOT / "resource"
+
+
+def get_tarot_json_path() -> Path:
+    external_json_path: Path = EXTERNAL_TAROT_ROOT / "tarot.json"
+    if external_json_path.exists():
+        return external_json_path
+    return BUNDLED_TAROT_ROOT / "tarot.json"
+
+
 class PluginConfig(BaseModel, extra=Extra.ignore):
     '''
         Path of tarot images resource
     '''
-    tarot_path: Path = Path(__file__).parent / "resource"
+    tarot_path: Path = get_tarot_image_root()
     chain_reply: bool = True
     tarot_auto_update: bool = False
     nickname: Set[str] = {"Bot"}
@@ -80,7 +104,9 @@ async def tarot_version_check() -> None:
     if not tarot_config.tarot_path.exists():
         tarot_config.tarot_path.mkdir(parents=True, exist_ok=True)
 
-    tarot_json_path: Path = Path(__file__).parent / "tarot.json"
+    tarot_json_path: Path = get_tarot_json_path()
+    logger.info(f"Tarot resource path: {tarot_config.tarot_path}")
+    logger.info(f"Tarot json path: {tarot_json_path}")
 
     cur_version: float = 0
     if tarot_json_path.exists():
