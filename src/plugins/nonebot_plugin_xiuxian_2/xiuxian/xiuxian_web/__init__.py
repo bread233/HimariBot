@@ -1032,6 +1032,12 @@ def _build_sect_info(user_id):
         return {"joined": False, "message": "尚未加入宗门"}
     sect = game_sql.get_sect_info(sect_id) or {}
     members = execute_sql(DATABASE, "SELECT COUNT(*) as c FROM user_xiuxian WHERE sect_id = ?", (sect_id,)) or [{"c": 0}]
+    try:
+        pragma_rows = execute_sql(DATABASE, "PRAGMA table_info(user_xiuxian)") or []
+        columns = {str((r or {}).get("name") or "") for r in pragma_rows if isinstance(r, dict)}
+        columns.discard("")
+    except Exception:
+        columns = set()
 
     def _safe_get(obj, key, default=None):
         if isinstance(obj, dict):
@@ -1081,10 +1087,6 @@ def _build_sect_info(user_id):
 
     members_list = []
     try:
-        pragma_rows = execute_sql(DATABASE, "PRAGMA table_info(user_xiuxian)") or []
-        columns = {str((r or {}).get("name") or "") for r in pragma_rows if isinstance(r, dict)}
-        columns.discard("")
-
         if columns:
             name_col = next((c for c in ("user_name", "username", "name") if c in columns), None)
             level_col = next((c for c in ("level", "realm", "jingjie", "境界") if c in columns), None)
@@ -1132,6 +1134,111 @@ def _build_sect_info(user_id):
     except Exception:
         members_list = []
 
+    task_info = {
+        "has_task": False,
+        "name": "",
+        "type": "",
+        "description": "",
+        "progress": "",
+        "status": "",
+        "times": "",
+        "cd": "",
+        "raw": "",
+    }
+    try:
+        task_columns = [
+            "sect_task",
+            "sect_task_status",
+            "sect_task_progress",
+            "sect_task_count",
+            "sect_task_cd",
+            "sect_task_refresh_cd",
+            "sect_task_complete_num",
+            "sect_task_times",
+        ]
+        exist_task_columns = [c for c in task_columns if c in columns]
+        if exist_task_columns:
+            sql = f"SELECT {', '.join(exist_task_columns)} FROM user_xiuxian WHERE user_id = ? LIMIT 1"
+            task_rows = execute_sql(DATABASE, sql, (user_id,)) or []
+            task_row = task_rows[0] if task_rows and isinstance(task_rows[0], dict) else {}
+
+            raw_task = task_row.get("sect_task") if "sect_task" in task_row else None
+            raw_text = "" if raw_task in (None, "") else str(raw_task)
+            if len(raw_text) > 300:
+                raw_text = raw_text[:300] + "..."
+            parsed_task = raw_task
+            if isinstance(raw_task, str):
+                raw_parse_text = raw_task.strip()
+                if raw_parse_text:
+                    try:
+                        parsed_task = json.loads(raw_parse_text)
+                    except Exception:
+                        parsed_task = raw_task
+                else:
+                    parsed_task = ""
+
+            name = ""
+            task_type = ""
+            description = ""
+            progress = task_row.get("sect_task_progress") if "sect_task_progress" in task_row else ""
+            status = task_row.get("sect_task_status") if "sect_task_status" in task_row else ""
+
+            if isinstance(parsed_task, dict):
+                name = parsed_task.get("name") or parsed_task.get("task_name") or parsed_task.get("title") or ""
+                task_type = parsed_task.get("type") or parsed_task.get("task_type") or ""
+                description = parsed_task.get("description") or parsed_task.get("desc") or parsed_task.get("target") or ""
+                if not progress:
+                    progress = parsed_task.get("progress") or parsed_task.get("current_progress") or ""
+                if not status:
+                    status = parsed_task.get("status") or ""
+            elif parsed_task not in (None, ""):
+                description = str(parsed_task)
+
+            times_parts = []
+            count_val = task_row.get("sect_task_count") if "sect_task_count" in task_row else None
+            complete_num_val = task_row.get("sect_task_complete_num") if "sect_task_complete_num" in task_row else None
+            times_val = task_row.get("sect_task_times") if "sect_task_times" in task_row else None
+            if count_val not in (None, ""):
+                times_parts.append(f"今日次数：{count_val}")
+            if complete_num_val not in (None, ""):
+                times_parts.append(f"剩余次数：{complete_num_val}")
+            if times_val not in (None, ""):
+                times_parts.append(f"次数：{times_val}")
+            times_text = " / ".join(times_parts)
+
+            cd_parts = []
+            cd_val = task_row.get("sect_task_cd") if "sect_task_cd" in task_row else None
+            refresh_cd_val = task_row.get("sect_task_refresh_cd") if "sect_task_refresh_cd" in task_row else None
+            if cd_val not in (None, ""):
+                cd_parts.append(f"CD：{cd_val}")
+            if refresh_cd_val not in (None, ""):
+                cd_parts.append(f"刷新CD：{refresh_cd_val}")
+            cd_text = " / ".join(cd_parts)
+
+            has_task = any(v not in (None, "") for v in [raw_task, name, task_type, description, progress, status])
+            task_info = {
+                "has_task": bool(has_task),
+                "name": str(name or ""),
+                "type": str(task_type or ""),
+                "description": str(description or ""),
+                "progress": str(progress or ""),
+                "status": str(status or ""),
+                "times": str(times_text or ""),
+                "raw": raw_text,
+            }
+    except Exception:
+        task_info = {
+            "has_task": False,
+            "name": "",
+            "type": "",
+            "description": "",
+            "progress": "",
+            "status": "",
+            "times": "",
+            "cd": "",
+            "raw": "",
+        }
+
     return {
         "joined": True,
         "sect_id": sect_id,
@@ -1147,6 +1254,7 @@ def _build_sect_info(user_id):
         "closed": _safe_bool(closed),
         "combat_power": _safe_int(combat_power),
         "members_list": members_list,
+        "task_info": task_info,
     }
 
 
