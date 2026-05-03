@@ -46,3 +46,5 @@ cache/
 
 # 文档
 README*.md
+
+src/plugins_disabled/

@@ -10,7 +10,8 @@ from nonebot.adapters.onebot.v11.event import (GroupMessageEvent, MessageEvent,
 from nonebot.matcher import Matcher
 from PIL import Image
 
-from .config import EventNotSupport, ResourceError, get_tarot, tarot_config
+from .config import (EventNotSupport, ResourceError, get_tarot,
+                     get_tarot_json_path, tarot_config)
 
 try:
     import ujson as json
@@ -69,7 +70,7 @@ def pick_sub_types(theme: str) -> List[str]:
 
 class Tarot:
     def __init__(self):
-        self.tarot_json: Path = Path(__file__).parent / "tarot.json"
+        self.tarot_json: Path = get_tarot_json_path()
         self.is_chain_reply: bool = tarot_config.chain_reply
 
     async def divine(self, bot: Bot, matcher: Matcher, event: MessageEvent) -> None:
