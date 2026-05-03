@@ -4794,6 +4794,24 @@
             const sectLevelText = escapeHtml(sect.level);
             const sectElixirRoomLevelText = escapeHtml(sect.elixir_room_level);
             const sectMembersText = escapeHtml(sect.members);
+            const currentUserIdRaw = (state && state.profile && (state.profile.user_id != null ? state.profile.user_id : state.profile.id)) != null
+                ? (state.profile.user_id != null ? state.profile.user_id : state.profile.id)
+                : (state && state.user_id != null ? state.user_id : null);
+            const currentMember = currentUserIdRaw != null
+                ? membersList.find(m => m && m.user_id != null && String(m.user_id) === String(currentUserIdRaw))
+                : null;
+            const currentContributionText = currentMember && currentMember.contribution != null
+                ? escapeHtml(formatLargeNumber(currentMember.contribution))
+                : '未记录';
+            const profileStone = state && state.profile ? state.profile.stone : null;
+            let currentStoneDisplay = null;
+            if ((typeof profileStone === 'number' && Number.isFinite(profileStone)) || (typeof profileStone === 'string' && profileStone.trim() !== '' && Number.isFinite(Number(profileStone)))) {
+                currentStoneDisplay = formatLargeNumber(profileStone);
+            } else {
+                const stoneText = (($('res-stone') && $('res-stone').textContent) || '').trim();
+                currentStoneDisplay = stoneText || '未记录';
+            }
+            const currentStoneText = escapeHtml(currentStoneDisplay);
             const taskContentHtml = hasTask
                 ? `
                     <div class="sect-member-item">
@@ -4834,6 +4852,10 @@
                 </div>
                 <div class="card" style="grid-column: 1/-1; margin-top: 8px;">
                     <h4 style="margin:0 0 8px;">宗门捐献</h4>
+                    <p class="hint sect-member-line2" style="margin:0 0 8px;">
+                        <span class="sect-member-meta">当前灵石：${currentStoneText}</span>
+                        <span class="sect-member-meta">当前贡献：${currentContributionText}</span>
+                    </p>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                         <input class="input" id="sect-donate-amount" type="number" min="1" step="1" placeholder="输入灵石数量" style="flex:1 1 180px; min-width:0;">
                         <button class="btn" type="button" onclick="fillMaxSectDonate()">最大</button>
