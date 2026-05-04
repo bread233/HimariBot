@@ -3105,6 +3105,220 @@ def game_api_sect_task_accept():
     return _ok(message="宗门任务接取成功", sect=_build_sect_info(player_id))
 
 
+@app.route('/game/api/sect/task/complete', methods=['POST'])
+@game_login_required
+def game_api_sect_task_complete():
+    player_id = _current_player_id()
+    user = game_sql.get_user_info_with_id(player_id)
+    if not user:
+        return _err("当前用户不存在", 404)
+
+    sect_id = user.get("sect_id")
+    if not sect_id:
+        return _err("当前未加入宗门")
+
+    sect = game_sql.get_sect_info(sect_id)
+    if not sect:
+        return _err("当前宗门不存在", 404)
+
+    try:
+        from ..xiuxian_sect import isUserTask, userstask
+    except Exception:
+        return _err("宗门任务模块加载失败", 500)
+
+    if not isUserTask(player_id):
+        return _err("当前没有进行中的宗门任务")
+
+    task_content = userstask[player_id]["任务内容"]
+    try:
+        task_type = int(task_content["type"])
+        cost = task_content["cost"]
+        give = task_content["give"]
+        sect_stone = int(task_content["sect"])
+    except Exception:
+        return _err("宗门任务数据有误", 500)
+
+    user_exp = int(user.get("exp") or 0)
+    user_hp = int(user.get("hp") or 0)
+    user_mp = int(user.get("mp") or 0)
+    user_stone = int(user.get("stone") or 0)
+    sect_position = user.get("sect_position")
+    if sect_position is None:
+        max_exp_limit = 4
+    else:
+        max_exp_limit = sect_position
+    speeds = jsondata.sect_config_data()[str(max_exp_limit)]["speeds"]
+
+    get_exp = int(user_exp * float(give))
+    max_exp = int(sect.get("sect_scale") or 0) * 100
+    if max_exp >= 100000000000000:
+        max_exp = 100000000000000
+    max_exp = max_exp * speeds
+    if get_exp >= max_exp:
+        get_exp = max_exp
+
+    max_exp_next = int(int(OtherSet().set_closing_type(user["level"])) * XiuConfig().closing_exp_upper_limit)
+    msg = ""
+    if int(get_exp + user_exp) > max_exp_next:
+        get_exp = 1
+        msg = "检测到修为将要到达上限，"
+
+    conn = None
+    try:
+        conn = sqlite3.connect(DATABASE, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        conn.execute("BEGIN")
+
+        if task_type == 1:
+            costhp = int((user_exp / 2) * float(cost))
+            if user_hp < user_exp / 10 or costhp >= user_hp:
+                conn.rollback()
+                return _err("当前气血不足，宗门任务完成失败")
+
+            cur.execute(
+                "UPDATE user_xiuxian SET hp=?, mp=? WHERE user_id=?",
+                (user_hp - costhp, user_mp, player_id),
+            )
+            if cur.rowcount <= 0:
+                conn.rollback()
+                return _err("气血更新失败", 500)
+
+            cur.execute(
+                "UPDATE user_xiuxian SET exp = exp + ? WHERE user_id = ?",
+                (get_exp, player_id),
+            )
+            if cur.rowcount <= 0:
+                conn.rollback()
+                return _err("修为更新失败", 500)
+
+            cur.execute(
+                "UPDATE sects SET sect_used_stone = COALESCE(sect_used_stone,0) + ?, sect_scale = COALESCE(sect_scale,0) + ? WHERE sect_id = ?",
+                (sect_stone, sect_stone, sect_id),
+            )
+            if cur.rowcount <= 0:
+                conn.rollback()
+                return _err("宗门建设更新失败", 500)
+
+            cur.execute(
+                "UPDATE sects SET sect_materials = COALESCE(sect_materials,0) + ? WHERE sect_id = ?",
+                (sect_stone * 10, sect_id),
+            )
+            if cur.rowcount <= 0:
+                conn.rollback()
+                return _err("宗门资材更新失败", 500)
+
+            cur.execute(
+                "UPDATE user_xiuxian SET sect_task = COALESCE(sect_task,0) + 1 WHERE user_id = ?",
+                (player_id,),
+            )
+            if cur.rowcount <= 0:
+                conn.rollback()
+                return _err("宗门任务次数更新失败", 500)
+
+            cur.execute(
+                "UPDATE user_xiuxian SET sect_contribution = COALESCE(sect_contribution,0) + ? WHERE user_id = ?",
+                (sect_stone, player_id),
+            )
+            if cur.rowcount <= 0:
+                conn.rollback()
+                return _err("宗门贡献更新失败", 500)
+
+            message = (
+                f"气血减少 {number_to(costhp)}，获得修为 {number_to(get_exp)}，"
+                f"宗门建设度增加 {number_to(sect_stone)}，资材增加 {number_to(sect_stone * 10)}，"
+                f"宗门贡献增加 {number_to(int(sect_stone))}"
+            )
+            if msg:
+                message = msg + message
+        elif task_type == 2:
+            costls = int(cost)
+            if costls > user_stone:
+                conn.rollback()
+                return _err("灵石不足，宗门任务完成失败")
+
+            cur.execute(
+                "UPDATE user_xiuxian SET stone = stone - ? WHERE user_id = ? AND stone >= ?",
+                (costls, player_id, costls),
+            )
+            if cur.rowcount <= 0:
+                conn.rollback()
+                return _err("灵石扣除失败", 500)
+
+            cur.execute(
+                "UPDATE user_xiuxian SET exp = exp + ? WHERE user_id = ?",
+                (get_exp, player_id),
+            )
+            if cur.rowcount <= 0:
+                conn.rollback()
+                return _err("修为更新失败", 500)
+
+            cur.execute(
+                "UPDATE sects SET sect_used_stone = COALESCE(sect_used_stone,0) + ?, sect_scale = COALESCE(sect_scale,0) + ? WHERE sect_id = ?",
+                (sect_stone, sect_stone, sect_id),
+            )
+            if cur.rowcount <= 0:
+                conn.rollback()
+                return _err("宗门建设更新失败", 500)
+
+            cur.execute(
+                "UPDATE sects SET sect_materials = COALESCE(sect_materials,0) + ? WHERE sect_id = ?",
+                (sect_stone * 10, sect_id),
+            )
+            if cur.rowcount <= 0:
+                conn.rollback()
+                return _err("宗门资材更新失败", 500)
+
+            cur.execute(
+                "UPDATE user_xiuxian SET sect_task = COALESCE(sect_task,0) + 1 WHERE user_id = ?",
+                (player_id,),
+            )
+            if cur.rowcount <= 0:
+                conn.rollback()
+                return _err("宗门任务次数更新失败", 500)
+
+            cur.execute(
+                "UPDATE user_xiuxian SET sect_contribution = COALESCE(sect_contribution,0) + ? WHERE user_id = ?",
+                (sect_stone, player_id),
+            )
+            if cur.rowcount <= 0:
+                conn.rollback()
+                return _err("宗门贡献更新失败", 500)
+
+            message = (
+                f"灵石消耗 {number_to(costls)}，获得修为 {number_to(get_exp)}，"
+                f"宗门建设度增加 {number_to(sect_stone)}，资材增加 {number_to(sect_stone * 10)}，"
+                f"宗门贡献增加 {number_to(int(sect_stone))}"
+            )
+            if msg:
+                message = msg + message
+        else:
+            conn.rollback()
+            return _err("宗门任务类型有误", 500)
+
+        conn.commit()
+        userstask[player_id] = {}
+        try:
+            update_statistics_value(player_id, "宗门任务")
+        except Exception:
+            pass
+        return _ok(message=message, sect=_build_sect_info(player_id))
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.exception(f"sect task complete failed: player_id={player_id}, error={e}")
+        return _err("宗门任务完成失败")
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 @app.route('/game/api/sect/donate', methods=['POST'])
 @game_login_required
 def game_api_sect_donate():

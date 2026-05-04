@@ -3252,6 +3252,31 @@
             }
         }
 
+        async function completeSectTask() {
+            const btn = $('btn-sect-task-complete');
+            const oldText = btn ? btn.textContent : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = '完成中...';
+            }
+            try {
+                const data = await api('/game/api/sect/task/complete', {
+                    method: 'POST',
+                    body: JSON.stringify({})
+                });
+                toast(data.message || '宗门任务完成成功');
+                await loadProfileOnly();
+                await loadSectInfo();
+            } catch (err) {
+                toast(err.message || '宗门任务完成失败');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = oldText || '完成任务';
+                }
+            }
+        }
+
         function fillMaxSectDonate() {
             const input = $('sect-donate-amount');
             if (!input) return;
@@ -4789,6 +4814,7 @@
             const taskGive = escapeHtml(taskInfo.give || '未记录');
             const taskSect = escapeHtml(taskInfo.sect || '未记录');
             const taskCanAccept = !!taskInfo.can_accept;
+            const taskCanComplete = !!taskInfo.can_complete;
             const elixirRoomInfo = (sect && typeof sect.elixir_room_info === 'object' && sect.elixir_room_info) ? sect.elixir_room_info : {};
             const elixirHasData = !!elixirRoomInfo.has_data;
             const elixirLevel = escapeHtml(elixirRoomInfo.level || '未记录');
@@ -4853,7 +4879,7 @@
                         <p class="hint sect-member-line2"><span class="sect-member-meta">消耗：${taskCost}</span><span class="sect-member-meta">奖励倍率：${taskGive}</span><span class="sect-member-meta">宗门收益：${taskSect}</span></p>
                         ${taskRaw ? `<p class="hint sect-member-line2"><span class="sect-member-meta">原始信息：${taskRaw}</span></p>` : ''}
                         <div style="display:flex; gap:8px; margin-top:8px;">
-                            <button class="btn" disabled title="待接入宗门任务完成接口">完成任务</button>
+                            <button id="btn-sect-task-complete" class="btn" ${taskCanComplete ? 'onclick="completeSectTask()"' : 'disabled'}>完成任务</button>
                         </div>
                     </div>
                 `
