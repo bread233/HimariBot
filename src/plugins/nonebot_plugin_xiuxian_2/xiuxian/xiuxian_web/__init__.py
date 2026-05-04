@@ -1383,6 +1383,46 @@ def _build_sect_info(user_id):
             "raw": "",
         }
 
+    # --- QQ 侧内存任务 userstask 覆盖 + can_accept/can_complete/cost/give/sect ---
+    try:
+        from ..xiuxian_sect import isUserTask, userstask
+        from ..xiuxian_sect.sectconfig import get_config as _get_sect_config
+        _sect_cfg = _get_sect_config() or {}
+        daily_limit = int(_sect_cfg.get("每日宗门任务次上限", 3))
+        today_count = int(user.get("sect_task") or user.get("sect_task_count") or user.get("sect_task_complete_num") or 0)
+        has_sect = bool(sect_id)
+
+        if isUserTask(user_id):
+            mt = userstask.get(user_id, {})
+            task_content = mt.get("任务内容", {}) or {}
+            desc_val = task_content.get("desc") or task_content.get("description") or ""
+            task_info.update({
+                "has_task": True,
+                "name": str(mt.get("任务名称") or ""),
+                "type": str(task_content.get("type") or ""),
+                "description": str(desc_val),
+                "cost": str(task_content.get("cost") or ""),
+                "give": str(task_content.get("give") or ""),
+                "sect": str(task_content.get("sect") or ""),
+                "can_accept": False,
+                "can_complete": True,
+            })
+        else:
+            task_info.update({
+                "has_task": task_info.get("has_task", False),
+                "cost": "",
+                "give": "",
+                "sect": "",
+                "can_accept": bool(has_sect and today_count < daily_limit and not task_info.get("has_task")),
+                "can_complete": False,
+            })
+    except Exception:
+        task_info.setdefault("cost", "")
+        task_info.setdefault("give", "")
+        task_info.setdefault("sect", "")
+        task_info.setdefault("can_accept", False)
+        task_info.setdefault("can_complete", False)
+
     elixir_room_info = {
         "has_data": False,
         "level": "",
@@ -3018,6 +3058,51 @@ def game_api_social_action():
 def game_api_sect():
     player_id = _current_player_id()
     return _ok(sect=_build_sect_info(player_id))
+
+
+@app.route('/game/api/sect/task/accept', methods=['POST'])
+@game_login_required
+def game_api_sect_task_accept():
+    player_id = _current_player_id()
+    user = game_sql.get_user_info_with_id(player_id)
+    if not user:
+        return _err("当前用户不存在", 404)
+
+    sect_id = user.get("sect_id")
+    if not sect_id:
+        return _err("当前未加入宗门")
+
+    sect = game_sql.get_sect_info(sect_id)
+    if not sect:
+        return _err("当前宗门不存在", 404)
+
+    try:
+        from ..xiuxian_sect import create_user_sect_task, isUserTask, userstask
+        from ..xiuxian_sect.sectconfig import get_config as _get_sect_config
+    except Exception:
+        return _err("宗门任务模块加载失败", 500)
+
+    try:
+        daily_limit = int((_get_sect_config() or {}).get("每日宗门任务次上限", 3))
+    except Exception:
+        daily_limit = 3
+    try:
+        today_count = int(user.get("sect_task") or user.get("sect_task_count") or user.get("sect_task_complete_num") or 0)
+    except Exception:
+        today_count = 0
+
+    if today_count >= daily_limit:
+        return _err(f"今日宗门任务次数已达上限（{today_count}/{daily_limit}）")
+
+    if isUserTask(player_id):
+        return _ok(message="已有进行中的宗门任务", sect=_build_sect_info(player_id))
+
+    userstask.setdefault(player_id, {})
+    create_user_sect_task(player_id)
+    if not isUserTask(player_id):
+        return _err("宗门任务接取失败", 500)
+
+    return _ok(message="宗门任务接取成功", sect=_build_sect_info(player_id))
 
 
 @app.route('/game/api/sect/donate', methods=['POST'])

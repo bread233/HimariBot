@@ -3228,6 +3228,30 @@
             }
         }
 
+        async function acceptSectTask() {
+            const btn = $('btn-sect-task-accept');
+            const oldText = btn ? btn.textContent : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = '接取中...';
+            }
+            try {
+                const data = await api('/game/api/sect/task/accept', {
+                    method: 'POST',
+                    body: JSON.stringify({})
+                });
+                toast(data.message || '宗门任务接取成功');
+                await loadSectInfo();
+            } catch (err) {
+                toast(err.message || '宗门任务接取失败');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = oldText || '接取任务';
+                }
+            }
+        }
+
         function fillMaxSectDonate() {
             const input = $('sect-donate-amount');
             if (!input) return;
@@ -4761,6 +4785,10 @@
             const taskTimes = escapeHtml(taskInfo.times || '未记录');
             const taskCd = escapeHtml(taskInfo.cd || '未记录');
             const taskRaw = escapeHtml(taskInfo.raw || '');
+            const taskCost = escapeHtml(taskInfo.cost || '未记录');
+            const taskGive = escapeHtml(taskInfo.give || '未记录');
+            const taskSect = escapeHtml(taskInfo.sect || '未记录');
+            const taskCanAccept = !!taskInfo.can_accept;
             const elixirRoomInfo = (sect && typeof sect.elixir_room_info === 'object' && sect.elixir_room_info) ? sect.elixir_room_info : {};
             const elixirHasData = !!elixirRoomInfo.has_data;
             const elixirLevel = escapeHtml(elixirRoomInfo.level || '未记录');
@@ -4812,6 +4840,9 @@
                 currentStoneDisplay = stoneText || '未记录';
             }
             const currentStoneText = escapeHtml(currentStoneDisplay);
+            const taskActionHtml = taskCanAccept
+                ? `<div style="display:flex; gap:8px; margin-top:8px;"><button id="btn-sect-task-accept" class="btn" onclick="acceptSectTask()">接取任务</button></div>`
+                : '';
             const taskContentHtml = hasTask
                 ? `
                     <div class="sect-member-item">
@@ -4819,14 +4850,19 @@
                         <p class="hint sect-member-line2"><span class="sect-member-meta">任务描述：${taskDescription}</span></p>
                         <p class="hint sect-member-line2"><span class="sect-member-meta">进度：${taskProgress}</span><span class="sect-member-meta">状态：${taskStatus}</span></p>
                         <p class="hint sect-member-line2"><span class="sect-member-meta">次数：${taskTimes}</span><span class="sect-member-meta">CD：${taskCd}</span></p>
+                        <p class="hint sect-member-line2"><span class="sect-member-meta">消耗：${taskCost}</span><span class="sect-member-meta">奖励倍率：${taskGive}</span><span class="sect-member-meta">宗门收益：${taskSect}</span></p>
                         ${taskRaw ? `<p class="hint sect-member-line2"><span class="sect-member-meta">原始信息：${taskRaw}</span></p>` : ''}
                         <div style="display:flex; gap:8px; margin-top:8px;">
-                            <button class="btn" disabled title="待接入宗门任务接取接口">接取任务</button>
                             <button class="btn" disabled title="待接入宗门任务完成接口">完成任务</button>
                         </div>
                     </div>
                 `
-                : `<div class="card muted">暂无宗门任务</div>`;
+                : `
+                    <div class="card muted">
+                        <p style="margin:0 0 8px;">暂无宗门任务</p>
+                        ${taskActionHtml}
+                    </div>
+                `;
             const elixirRoomContentHtml = elixirHasData
                 ? `
                     <div class="sect-member-item">
