@@ -205,6 +205,74 @@ WHERE last_check_info_time = '0' OR last_check_info_time IS NULL
 
         self.conn.commit()
 
+    def ensure_user_runtime_state_table(self):
+        """确保运行状态表存在"""
+        cur = self.conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS user_runtime_state (
+                user_id INTEGER NOT NULL,
+                state_key TEXT NOT NULL,
+                state_json TEXT NOT NULL,
+                updated_at TEXT,
+                PRIMARY KEY (user_id, state_key)
+            )
+        """)
+        self.conn.commit()
+
+    def get_user_runtime_state(self, user_id, state_key):
+        """获取用户运行状态"""
+        self.ensure_user_runtime_state_table()
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT state_json FROM user_runtime_state WHERE user_id = ? AND state_key = ? LIMIT 1",
+            (user_id, state_key),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        state_json = row[0]
+        if state_json in (None, ""):
+            return None
+        try:
+            return json.loads(state_json)
+        except Exception:
+            return None
+
+    def set_user_runtime_state(self, user_id, state_key, state):
+        """保存用户运行状态"""
+        self.ensure_user_runtime_state_table()
+        state_json = json.dumps(state, ensure_ascii=False)
+        updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT OR REPLACE INTO user_runtime_state (user_id, state_key, state_json, updated_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, state_key, state_json, updated_at),
+        )
+        self.conn.commit()
+
+    def delete_user_runtime_state(self, user_id, state_key):
+        """删除指定用户的运行状态"""
+        self.ensure_user_runtime_state_table()
+        cur = self.conn.cursor()
+        cur.execute(
+            "DELETE FROM user_runtime_state WHERE user_id = ? AND state_key = ?",
+            (user_id, state_key),
+        )
+        self.conn.commit()
+
+    def delete_runtime_state_by_key(self, state_key):
+        """按状态键删除全部运行状态"""
+        self.ensure_user_runtime_state_table()
+        cur = self.conn.cursor()
+        cur.execute(
+            "DELETE FROM user_runtime_state WHERE state_key = ?",
+            (state_key,),
+        )
+        self.conn.commit()
+
     @classmethod
     def close_dbs(cls):
         XiuxianDateManage().close()
