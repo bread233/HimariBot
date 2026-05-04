@@ -4820,6 +4820,10 @@
                         <p class="hint sect-member-line2"><span class="sect-member-meta">进度：${taskProgress}</span><span class="sect-member-meta">状态：${taskStatus}</span></p>
                         <p class="hint sect-member-line2"><span class="sect-member-meta">次数：${taskTimes}</span><span class="sect-member-meta">CD：${taskCd}</span></p>
                         ${taskRaw ? `<p class="hint sect-member-line2"><span class="sect-member-meta">原始信息：${taskRaw}</span></p>` : ''}
+                        <div style="display:flex; gap:8px; margin-top:8px;">
+                            <button class="btn" disabled title="待接入宗门任务接取接口">接取任务</button>
+                            <button class="btn" disabled title="待接入宗门任务完成接口">完成任务</button>
+                        </div>
                     </div>
                 `
                 : `<div class="card muted">暂无宗门任务</div>`;
