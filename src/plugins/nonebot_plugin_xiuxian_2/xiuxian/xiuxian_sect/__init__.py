@@ -187,6 +187,10 @@ async def materialsupdate_():
 async def resetusertask():
     sql_message.sect_task_reset()
     sql_message.sect_elixir_get_num_reset()
+    try:
+        sql_message.delete_runtime_state_by_key(SECT_TASK_STATE_KEY)
+    except Exception as e:
+        logger.warning(f"clear all sect task state failed: error={e}")
     all_sects = sql_message.get_all_sects_id_scale()
     for s in all_sects:
         sect_info = sql_message.get_sect_info(s[0])
@@ -1398,7 +1402,7 @@ async def sect_task_complete_(bot: Bot, event: GroupMessageEvent | PrivateMessag
             sql_message.update_user_sect_task(user_id, 1)
             sql_message.update_user_sect_contribution(user_id, user_info['sect_contribution'] + int(sect_stone))
             msg += f"道友大战一番，气血减少：{number_to(costhp)}，获得修为：{number_to(get_exp)}，所在宗门建设度增加：{number_to(sect_stone)}，资材增加：{number_to(sect_stone * 10)}, 宗门贡献度增加：{int(sect_stone)}"
-            userstask[user_id] = {}
+            _clear_user_sect_task_state(user_id)
             update_statistics_value(user_id, "宗门任务")
             await handle_send(bot, event, msg)
             await sect_task_complete.finish()
@@ -1438,7 +1442,7 @@ async def sect_task_complete_(bot: Bot, event: GroupMessageEvent | PrivateMessag
             sql_message.update_user_sect_task(user_id, 1)
             sql_message.update_user_sect_contribution(user_id, user_info['sect_contribution'] + int(sect_stone))
             msg = f"道友为了完成任务购买宝物消耗灵石：{number_to(costls)}枚，获得修为：{number_to(get_exp)}，所在宗门建设度增加：{number_to(sect_stone)}，资材增加：{number_to(sect_stone * 10)}, 宗门贡献度增加：{int(sect_stone)}"
-            userstask[user_id] = {}
+            _clear_user_sect_task_state(user_id)
             update_statistics_value(user_id, "宗门任务")
             await handle_send(bot, event, msg)
             await sect_task_complete.finish()
