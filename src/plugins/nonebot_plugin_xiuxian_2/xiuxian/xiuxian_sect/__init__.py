@@ -36,6 +36,37 @@ config = get_config()
 LEVLECOST = config["LEVLECOST"]
 cache_help = {}
 userstask = {}
+SECT_TASK_STATE_KEY = "sect_task"
+
+
+def _save_user_sect_task_state(user_id):
+    try:
+        state = userstask.get(user_id, {}) or {}
+        if state:
+            sql_message.set_user_runtime_state(user_id, SECT_TASK_STATE_KEY, state)
+        else:
+            sql_message.delete_user_runtime_state(user_id, SECT_TASK_STATE_KEY)
+    except Exception as e:
+        logger.warning(f"save sect task state failed: user_id={user_id}, error={e}")
+
+
+def _load_user_sect_task_state(user_id):
+    try:
+        state = sql_message.get_user_runtime_state(user_id, SECT_TASK_STATE_KEY)
+        if isinstance(state, dict) and state:
+            userstask[user_id] = state
+            return True
+    except Exception as e:
+        logger.warning(f"load sect task state failed: user_id={user_id}, error={e}")
+    return False
+
+
+def _clear_user_sect_task_state(user_id):
+    try:
+        userstask[user_id] = {}
+        sql_message.delete_user_runtime_state(user_id, SECT_TASK_STATE_KEY)
+    except Exception as e:
+        logger.warning(f"clear sect task state failed: user_id={user_id}, error={e}")
 
 buffrankkey = {
     "人阶下品": 1,
@@ -156,6 +187,10 @@ async def materialsupdate_():
 async def resetusertask():
     sql_message.sect_task_reset()
     sql_message.sect_elixir_get_num_reset()
+    try:
+        sql_message.delete_runtime_state_by_key(SECT_TASK_STATE_KEY)
+    except Exception as e:
+        logger.warning(f"clear all sect task state failed: error={e}")
     all_sects = sql_message.get_all_sects_id_scale()
     for s in all_sects:
         sect_info = sql_message.get_sect_info(s[0])
@@ -1367,7 +1402,7 @@ async def sect_task_complete_(bot: Bot, event: GroupMessageEvent | PrivateMessag
             sql_message.update_user_sect_task(user_id, 1)
             sql_message.update_user_sect_contribution(user_id, user_info['sect_contribution'] + int(sect_stone))
             msg += f"道友大战一番，气血减少：{number_to(costhp)}，获得修为：{number_to(get_exp)}，所在宗门建设度增加：{number_to(sect_stone)}，资材增加：{number_to(sect_stone * 10)}, 宗门贡献度增加：{int(sect_stone)}"
-            userstask[user_id] = {}
+            _clear_user_sect_task_state(user_id)
             update_statistics_value(user_id, "宗门任务")
             await handle_send(bot, event, msg)
             await sect_task_complete.finish()
@@ -1407,7 +1442,7 @@ async def sect_task_complete_(bot: Bot, event: GroupMessageEvent | PrivateMessag
             sql_message.update_user_sect_task(user_id, 1)
             sql_message.update_user_sect_contribution(user_id, user_info['sect_contribution'] + int(sect_stone))
             msg = f"道友为了完成任务购买宝物消耗灵石：{number_to(costls)}枚，获得修为：{number_to(get_exp)}，所在宗门建设度增加：{number_to(sect_stone)}，资材增加：{number_to(sect_stone * 10)}, 宗门贡献度增加：{int(sect_stone)}"
-            userstask[user_id] = {}
+            _clear_user_sect_task_state(user_id)
             update_statistics_value(user_id, "宗门任务")
             await handle_send(bot, event, msg)
             await sect_task_complete.finish()
@@ -2443,20 +2478,18 @@ def create_user_sect_task(user_id):
     key = random.choices(list(tasklist))[0]
     userstask[user_id]['任务名称'] = key
     userstask[user_id]['任务内容'] = tasklist[key]      
+    _save_user_sect_task_state(user_id)
 
 
 def isUserTask(user_id):
     """判断用户是否已有任务 True:有任务"""
-    Flag = False
-    try:
-        userstask[user_id]
-    except:
+    if user_id not in userstask:
         userstask[user_id] = {}
-
     if userstask[user_id] != {}:
-        Flag = True
-
-    return Flag
+        return True
+    if _load_user_sect_task_state(user_id):
+        return True
+    return False
 
 
 def get_sect_mainbuff_id_list(sect_id):

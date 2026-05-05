@@ -3122,7 +3122,7 @@ def game_api_sect_task_complete():
         return _err("当前宗门不存在", 404)
 
     try:
-        from ..xiuxian_sect import isUserTask, userstask
+        from ..xiuxian_sect import isUserTask, userstask, _clear_user_sect_task_state
     except Exception:
         return _err("宗门任务模块加载失败", 500)
 
@@ -3297,7 +3297,7 @@ def game_api_sect_task_complete():
             return _err("宗门任务类型有误", 500)
 
         conn.commit()
-        userstask[player_id] = {}
+        _clear_user_sect_task_state(player_id)
         try:
             update_statistics_value(player_id, "宗门任务")
         except Exception:
