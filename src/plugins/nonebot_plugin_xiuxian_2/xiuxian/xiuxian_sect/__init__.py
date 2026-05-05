@@ -36,6 +36,37 @@ config = get_config()
 LEVLECOST = config["LEVLECOST"]
 cache_help = {}
 userstask = {}
+SECT_TASK_STATE_KEY = "sect_task"
+
+
+def _save_user_sect_task_state(user_id):
+    try:
+        state = userstask.get(user_id, {}) or {}
+        if state:
+            sql_message.set_user_runtime_state(user_id, SECT_TASK_STATE_KEY, state)
+        else:
+            sql_message.delete_user_runtime_state(user_id, SECT_TASK_STATE_KEY)
+    except Exception as e:
+        logger.warning(f"save sect task state failed: user_id={user_id}, error={e}")
+
+
+def _load_user_sect_task_state(user_id):
+    try:
+        state = sql_message.get_user_runtime_state(user_id, SECT_TASK_STATE_KEY)
+        if isinstance(state, dict) and state:
+            userstask[user_id] = state
+            return True
+    except Exception as e:
+        logger.warning(f"load sect task state failed: user_id={user_id}, error={e}")
+    return False
+
+
+def _clear_user_sect_task_state(user_id):
+    try:
+        userstask[user_id] = {}
+        sql_message.delete_user_runtime_state(user_id, SECT_TASK_STATE_KEY)
+    except Exception as e:
+        logger.warning(f"clear sect task state failed: user_id={user_id}, error={e}")
 
 buffrankkey = {
     "人阶下品": 1,
@@ -2443,20 +2474,18 @@ def create_user_sect_task(user_id):
     key = random.choices(list(tasklist))[0]
     userstask[user_id]['任务名称'] = key
     userstask[user_id]['任务内容'] = tasklist[key]      
+    _save_user_sect_task_state(user_id)
 
 
 def isUserTask(user_id):
     """判断用户是否已有任务 True:有任务"""
-    Flag = False
-    try:
-        userstask[user_id]
-    except:
+    if user_id not in userstask:
         userstask[user_id] = {}
-
     if userstask[user_id] != {}:
-        Flag = True
-
-    return Flag
+        return True
+    if _load_user_sect_task_state(user_id):
+        return True
+    return False
 
 
 def get_sect_mainbuff_id_list(sect_id):
