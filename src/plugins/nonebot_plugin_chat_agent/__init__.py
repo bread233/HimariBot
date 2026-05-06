@@ -93,9 +93,6 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         memory_context = format_memories_for_prompt(memories)
         if memory_context:
             messages.append({"role": "system", "content": memory_context})
-        memory_reminder = build_memory_reminder_for_user(memories, prompt)
-        if memory_reminder:
-            messages.append({"role": "user", "content": memory_reminder})
     if config.chat_agent_enable_history:
         try:
             history = await load_recent_messages(config, session_info["session_id"], config.chat_agent_history_max_messages)
@@ -108,6 +105,10 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 nick = item.get("nickname") or "用户"
                 content = f"{nick}：{content}"
             messages.append({"role": role, "content": content})
+    if config.chat_agent_enable_feedback_memory:
+        memory_reminder = build_memory_reminder_for_user(memories, prompt)
+        if memory_reminder:
+            messages.append({"role": "user", "content": memory_reminder})
     messages.append({"role": "user", "content": prompt})
 
     if config.chat_agent_enable_history:
