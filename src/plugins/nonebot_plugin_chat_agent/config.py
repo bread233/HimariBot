@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 class ChatAgentConfig(BaseModel):
     chat_agent_enable: bool = Field(default=True)
     chat_agent_enable_history: bool = Field(default=True)
+    chat_agent_enable_feedback_memory: bool = Field(default=False)
+    chat_agent_enable_fact_guard: bool = Field(default=True)
     chat_agent_base_url: str = Field(default="http://127.0.0.1:11434/v1")
     chat_agent_api_key: str = Field(default="ollama")
     chat_agent_model: str = Field(default="qwen3:1.7b")
@@ -18,6 +20,8 @@ class ChatAgentConfig(BaseModel):
     chat_agent_max_reply_length: int = Field(default=500)
     chat_agent_history_max_messages: int = Field(default=10)
     chat_agent_history_max_rows_per_session: int = Field(default=200)
+    chat_agent_memory_max_results: int = Field(default=5)
+    chat_agent_memory_max_rows: int = Field(default=500)
     chat_agent_db_path: Path = Field(default=Path("data/nonebot_chat_agent/agent.sqlite3"))
     chat_agent_data_dir: Path = Field(default=Path("data/nonebot_chat_agent"))
 
@@ -54,6 +58,8 @@ def get_chat_agent_config() -> ChatAgentConfig:
     _cached_config = ChatAgentConfig(
         chat_agent_enable=_as_bool(getattr(config, "chat_agent_enable", True), True),
         chat_agent_enable_history=_as_bool(getattr(config, "chat_agent_enable_history", True), True),
+        chat_agent_enable_feedback_memory=_as_bool(getattr(config, "chat_agent_enable_feedback_memory", False), False),
+        chat_agent_enable_fact_guard=_as_bool(getattr(config, "chat_agent_enable_fact_guard", True), True),
         chat_agent_base_url=str(getattr(config, "chat_agent_base_url", "http://127.0.0.1:11434/v1")),
         chat_agent_api_key=str(getattr(config, "chat_agent_api_key", "ollama")),
         chat_agent_model=str(getattr(config, "chat_agent_model", "qwen3:1.7b")),
@@ -63,6 +69,8 @@ def get_chat_agent_config() -> ChatAgentConfig:
         chat_agent_max_reply_length=int(getattr(config, "chat_agent_max_reply_length", 500)),
         chat_agent_history_max_messages=int(getattr(config, "chat_agent_history_max_messages", 10)),
         chat_agent_history_max_rows_per_session=int(getattr(config, "chat_agent_history_max_rows_per_session", 200)),
+        chat_agent_memory_max_results=int(getattr(config, "chat_agent_memory_max_results", 5)),
+        chat_agent_memory_max_rows=int(getattr(config, "chat_agent_memory_max_rows", 500)),
         chat_agent_db_path=Path(getattr(config, "chat_agent_db_path", "data/nonebot_chat_agent/agent.sqlite3")),
         chat_agent_data_dir=Path(data_dir),
     )
