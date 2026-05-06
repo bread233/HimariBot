@@ -931,6 +931,18 @@
             text-decoration: none;
             cursor: pointer;
         }
+        .top-reminder-summary {
+            display: none;
+            max-width: 220px;
+            overflow: hidden;
+            white-space: nowrap;
+            vertical-align: middle;
+        }
+        .top-reminder-summary-inner {
+            display: inline-block;
+            white-space: nowrap;
+        }
+        .top-reminder-summary-inner.marquee { animation: topReminderMarquee 14s linear infinite; }
         .top-reminder-count {
             min-width: 18px;
             height: 18px;
@@ -944,6 +956,7 @@
             align-items: center;
             display: none;
         }
+        @keyframes topReminderMarquee { from { transform: translateX(0); } to { transform: translateX(-100%); } }
         @media (min-width: 769px) {
             .top-reminder-row {
                 display: none;
@@ -2499,7 +2512,7 @@
                 <div class="brand-title">修仙模拟器 · 仙途绘卷</div>
                 <div class="hint">当前角色：{{ player.user_name or player.user_id }} · <a href="#" id="link-settings" style="color:var(--gold);">设置</a> · <a href="{{ url_for('game_logout') }}"
                         style="color:var(--gold);">退出登录</a></div>
-                <div class="hint top-reminder-row"><a href="#" id="top-reminder-link" class="top-reminder-link">🔔 提醒 <span id="top-reminder-count" class="top-reminder-count"></span></a></div>
+                <div class="hint top-reminder-row"><a href="#" id="top-reminder-link" class="top-reminder-link">🔔 提醒 <span id="top-reminder-summary" class="top-reminder-summary"><span id="top-reminder-summary-inner" class="top-reminder-summary-inner"></span></span><span id="top-reminder-count" class="top-reminder-count"></span></a></div>
             </div>
             <div class="resource-strip">
                 <div class="resource">灵石<strong id="res-stone">--</strong></div>
@@ -3372,6 +3385,8 @@
         }
         function updateReminderBadgeCount() {
             const badge = document.getElementById('top-reminder-count');
+            const summary = document.getElementById('top-reminder-summary');
+            const summaryInner = document.getElementById('top-reminder-summary-inner');
             if (!badge) return;
             const items = [
                 document.getElementById('daily-reminder'),
@@ -3379,10 +3394,22 @@
                 document.getElementById('retreat-reminder'),
                 document.getElementById('world-boss-reminder')
             ];
+            const notices = [];
             const count = items.filter(el => {
                 if (!el) return false;
                 return getComputedStyle(el).display !== 'none';
             }).length;
+            if (summary && summaryInner) {
+                [['daily-reminder','daily-reminder-text'],['social-request-reminder','social-request-reminder-text'],['world-boss-reminder','world-boss-reminder-text'],['retreat-reminder','retreat-reminder-text']].forEach(([boxId, textId]) => {
+                    const box = document.getElementById(boxId), textEl = document.getElementById(textId);
+                    if (box && getComputedStyle(box).display !== 'none' && textEl && textEl.textContent.trim()) notices.push(textEl.textContent.trim());
+                });
+                summaryInner.textContent = notices.join(' ｜ ');
+                summary.style.display = notices.length ? 'inline-block' : 'none';
+                summaryInner.classList.toggle('marquee', notices.length > 1);
+            } else if (summary) {
+                summary.style.display = 'none';
+            }
             badge.textContent = count > 0 ? String(count) : '';
             badge.style.display = count > 0 ? 'inline-flex' : 'none';
         }
