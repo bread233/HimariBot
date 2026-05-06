@@ -90,6 +90,30 @@ def _load_recent_messages_sync(db_path: Path, session_id: str, limit: int) -> li
     return [{"role": role, "content": content, "nickname": nickname} for role, content, nickname in rows]
 
 
+def _prune_session_messages_sync(db_path: Path, session_id: str, max_rows: int) -> None:
+    if max_rows <= 0:
+        return
+    _ensure_parent(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            DELETE FROM chat_agent_messages
+            WHERE session_id = ?
+            AND id NOT IN (
+                SELECT id FROM chat_agent_messages
+                WHERE session_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+            )
+            """,
+            (session_id, session_id, max_rows),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 async def init_storage(config) -> None:
     await asyncio.to_thread(_init_storage_sync, config.chat_agent_db_path)
 
@@ -115,6 +139,8 @@ def build_session_info(event) -> dict:
 
 async def save_message(config, session_info: dict, role: str, content: str) -> None:
     await asyncio.to_thread(_save_message_sync, config.chat_agent_db_path, session_info, role, content)
+    max_rows = int(getattr(config, "chat_agent_history_max_rows_per_session", 200))
+    await asyncio.to_thread(_prune_session_messages_sync, config.chat_agent_db_path, session_info["session_id"], max_rows)
 
 
 async def load_recent_messages(config, session_id: str, limit: int) -> list[dict]:
