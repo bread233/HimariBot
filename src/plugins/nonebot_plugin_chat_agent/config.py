@@ -17,6 +17,7 @@ class ChatAgentConfig(BaseModel):
     chat_agent_max_tokens: int = Field(default=512)
     chat_agent_max_reply_length: int = Field(default=500)
     chat_agent_history_max_messages: int = Field(default=10)
+    chat_agent_history_max_rows_per_session: int = Field(default=200)
     chat_agent_db_path: Path = Field(default=Path("data/nonebot_chat_agent/agent.sqlite3"))
     chat_agent_data_dir: Path = Field(default=Path("data/nonebot_chat_agent"))
 
@@ -61,6 +62,7 @@ def get_chat_agent_config() -> ChatAgentConfig:
         chat_agent_max_tokens=int(getattr(config, "chat_agent_max_tokens", 512)),
         chat_agent_max_reply_length=int(getattr(config, "chat_agent_max_reply_length", 500)),
         chat_agent_history_max_messages=int(getattr(config, "chat_agent_history_max_messages", 10)),
+        chat_agent_history_max_rows_per_session=int(getattr(config, "chat_agent_history_max_rows_per_session", 200)),
         chat_agent_db_path=Path(getattr(config, "chat_agent_db_path", "data/nonebot_chat_agent/agent.sqlite3")),
         chat_agent_data_dir=Path(data_dir),
     )
