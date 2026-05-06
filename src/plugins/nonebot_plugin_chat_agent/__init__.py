@@ -6,11 +6,12 @@ from nonebot.rule import Rule
 from nonebot.typing import T_State
 
 from .config import get_chat_agent_config
-from .fact_guard import detect_fact_sensitive_question
+from .context_pack import build_context_pack
 from .llm_client import chat_completions
-from .memory import build_memory_reminder_for_user, detect_feedback, format_memories_for_prompt
+from .memory import detect_feedback
 from .prompt import build_system_prompt
-from .storage import build_session_info, init_storage, load_memories, load_recent_messages, save_memory, save_message
+from .runtime_state import get_chat_agent_lock
+from .storage import build_session_info, init_storage, save_memory, save_message
 from .utils import extract_group_prompt, extract_private_prompt, get_bot_nicknames, get_original_plain_text, strip_thinking, truncate_reply
 
 
@@ -40,7 +41,6 @@ async def chat_agent_rule(bot: Bot, event: MessageEvent, state: T_State) -> bool
 
 chat_agent = on_message(rule=Rule(chat_agent_rule), priority=4, block=True)
 
-
 driver = get_driver()
 
 
@@ -55,82 +55,79 @@ async def _init_chat_agent_storage() -> None:
 @chat_agent.handle()
 async def _(bot: Bot, event: MessageEvent, state: T_State):
     config = get_chat_agent_config()
-    prompt = state.get("chat_agent_prompt", "")
+    prompt = state.get("chat_agent_prompt", "").strip()
     is_group = bool(state.get("chat_agent_is_group", isinstance(event, GroupMessageEvent)))
     session_info = build_session_info(event)
 
-    prompt = prompt.strip()
     if not prompt:
-        reply = "叫我有什么事？" if is_group else "你想聊什么？"
-        await chat_agent.finish(reply)
+        await chat_agent.finish("叫我有什么事？" if is_group else "你想聊什么呀？")
         return
 
-    feedback = detect_feedback(prompt) if config.chat_agent_enable_feedback_memory else None
-    if feedback is not None:
-        try:
-            await save_memory(config, session_info, feedback)
-        except Exception:
-            pass
+    lock = get_chat_agent_lock()
+    if lock.locked():
+        await chat_agent.finish(config.chat_agent_locked_reply)
+        return
 
-    if config.chat_agent_enable_fact_guard:
-        guard = detect_fact_sensitive_question(prompt)
-        if guard:
+    await lock.acquire()
+    try:
+        await chat_agent.send(config.chat_agent_busy_reply)
+
+        feedback = detect_feedback(prompt) if config.chat_agent_enable_feedback_memory else None
+        if feedback is not None:
+            try:
+                await save_memory(config, session_info, feedback)
+            except Exception:
+                pass
+
+        context_pack = await build_context_pack(config, session_info, prompt)
+        if context_pack.get("direct_reply"):
+            reply = context_pack["direct_reply"]
             if config.chat_agent_enable_history:
                 try:
                     await save_message(config, session_info, "user", prompt)
-                    await save_message(config, session_info, "assistant", guard["reply"])
+                    await save_message(config, session_info, "assistant", reply)
                 except Exception:
                     pass
-            await chat_agent.finish(guard["reply"])
+            await chat_agent.finish(reply)
             return
 
-    messages = [{"role": "system", "content": build_system_prompt()}]
-    if config.chat_agent_enable_feedback_memory:
-        try:
-            memories = await load_memories(config, session_info["session_id"], config.chat_agent_memory_max_results)
-        except Exception:
-            memories = []
-        memory_context = format_memories_for_prompt(memories)
-        if memory_context:
-            messages.append({"role": "system", "content": memory_context})
-    if config.chat_agent_enable_history:
-        try:
-            history = await load_recent_messages(config, session_info["session_id"], config.chat_agent_history_max_messages)
-        except Exception:
-            history = []
-        for item in history:
-            role = item.get("role")
-            content = item.get("content", "")
-            if role == "user" and session_info["session_type"] == "group":
-                nick = item.get("nickname") or "用户"
-                content = f"{nick}：{content}"
-            messages.append({"role": role, "content": content})
-    if config.chat_agent_enable_feedback_memory:
-        memory_reminder = build_memory_reminder_for_user(memories, prompt)
-        if memory_reminder:
-            messages.append({"role": "user", "content": memory_reminder})
-    messages.append({"role": "user", "content": prompt})
+        messages = [{"role": "system", "content": build_system_prompt()}]
+        if context_pack.get("memory_context"):
+            messages.append({"role": "system", "content": context_pack["memory_context"]})
+        if context_pack.get("history_context"):
+            messages.append({"role": "system", "content": "最近对话：\n" + context_pack["history_context"]})
+        if context_pack.get("web_context"):
+            messages.append({"role": "system", "content": "联网查询结果：\n" + context_pack["web_context"]})
+        if context_pack.get("tool_notes"):
+            messages.append({"role": "system", "content": "工具状态：\n" + context_pack["tool_notes"]})
+        messages.append({"role": "user", "content": prompt})
 
-    if config.chat_agent_enable_history:
-        try:
-            await save_message(config, session_info, "user", prompt)
-        except Exception:
-            pass
+        if config.chat_agent_enable_history:
+            try:
+                await save_message(config, session_info, "user", prompt)
+            except Exception:
+                pass
 
-    try:
-        reply = await chat_completions(messages, config)
-        reply = truncate_reply(strip_thinking(reply), config.chat_agent_max_reply_length)
-    except Exception:
-        await chat_agent.finish("模型接口暂时没有响应。")
+        reply = ""
+        should_save_assistant = False
+        try:
+            reply = await chat_completions(messages, config)
+            reply = truncate_reply(strip_thinking(reply), config.chat_agent_max_reply_length)
+            should_save_assistant = bool(reply)
+        except Exception:
+            if context_pack.get("web_context"):
+                reply = "我查到了一些相关资料，但模型接口暂时没有响应，稍后可以再试。"
+            else:
+                reply = config.chat_agent_llm_timeout_reply
+
+        if config.chat_agent_enable_history and reply and should_save_assistant:
+            try:
+                await save_message(config, session_info, "assistant", reply)
+            except Exception:
+                pass
+
+        await chat_agent.finish(reply or config.chat_agent_llm_timeout_reply)
         return
-
-    if config.chat_agent_enable_history:
-        try:
-            await save_message(config, session_info, "assistant", reply)
-        except Exception:
-            pass
-
-    await chat_agent.finish(reply or "模型接口暂时没有响应。")
-
-
-get_chat_agent_config().ensure_data_dir()
+    finally:
+        if lock.locked():
+            lock.release()
