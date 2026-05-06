@@ -934,15 +934,24 @@
         .top-reminder-summary {
             display: none;
             max-width: 220px;
+            height: 1.4em;
+            line-height: 1.4;
             overflow: hidden;
             white-space: nowrap;
             vertical-align: middle;
         }
         .top-reminder-summary-inner {
-            display: inline-block;
+            display: block;
+        }
+        .top-reminder-summary-item {
+            display: block;
+            height: 1.4em;
+            line-height: 1.4;
+            overflow: hidden;
+            text-overflow: ellipsis;
             white-space: nowrap;
         }
-        .top-reminder-summary-inner.marquee { animation: topReminderMarquee 14s linear infinite; }
+        .top-reminder-summary-inner.marquee { animation: topReminderVerticalMarquee 12s linear infinite; }
         .top-reminder-count {
             min-width: 18px;
             height: 18px;
@@ -956,7 +965,7 @@
             align-items: center;
             display: none;
         }
-        @keyframes topReminderMarquee { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+        @keyframes topReminderVerticalMarquee { from { transform: translateY(0); } to { transform: translateY(-50%); } }
         @media (min-width: 769px) {
             .top-reminder-row {
                 display: none;
@@ -3404,9 +3413,23 @@
                     const box = document.getElementById(boxId), textEl = document.getElementById(textId);
                     if (box && getComputedStyle(box).display !== 'none' && textEl && textEl.textContent.trim()) notices.push(textEl.textContent.trim());
                 });
-                summaryInner.textContent = notices.join(' ｜ ');
+                summaryInner.textContent = '';
                 summary.style.display = notices.length ? 'inline-block' : 'none';
                 summaryInner.classList.toggle('marquee', notices.length > 1);
+                notices.forEach((notice) => {
+                    const item = document.createElement('span');
+                    item.className = 'top-reminder-summary-item';
+                    item.textContent = notice;
+                    summaryInner.appendChild(item);
+                });
+                if (notices.length > 1) {
+                    notices.forEach((notice) => {
+                        const item = document.createElement('span');
+                        item.className = 'top-reminder-summary-item';
+                        item.textContent = notice;
+                        summaryInner.appendChild(item);
+                    });
+                }
             } else if (summary) {
                 summary.style.display = 'none';
             }
