@@ -3787,6 +3787,9 @@
             if (!box || !text || !badge || !btn) return;
             const req = (state.socialRequestStatus && state.socialRequestStatus.requests) ? state.socialRequestStatus.requests : {};
             const pending = Number(req.pending_count || 0);
+            const hasPending = req.has_pending === true;
+            const showReminder = pending > 0 || hasPending;
+            box.style.display = showReminder ? '' : 'none';
             if (pending > 0) {
                 box.classList.add('pulse');
                 badge.textContent = String(pending);
