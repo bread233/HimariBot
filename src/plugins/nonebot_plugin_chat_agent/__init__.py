@@ -8,7 +8,7 @@ from nonebot.typing import T_State
 from .config import get_chat_agent_config
 from .llm_client import chat_completions
 from .prompt import build_system_prompt
-from .utils import extract_group_prompt, extract_private_prompt, get_bot_nicknames, strip_thinking, truncate_reply
+from .utils import extract_group_prompt, extract_private_prompt, get_bot_nicknames, get_original_plain_text, strip_thinking, truncate_reply
 
 
 async def chat_agent_rule(bot: Bot, event: MessageEvent, state: T_State) -> bool:
@@ -25,7 +25,7 @@ async def chat_agent_rule(bot: Bot, event: MessageEvent, state: T_State) -> bool
         return True
 
     if isinstance(event, PrivateMessageEvent):
-        prompt = extract_private_prompt(event.message.extract_plain_text(), get_bot_nicknames())
+        prompt = extract_private_prompt(get_original_plain_text(event), get_bot_nicknames())
         if prompt is None:
             return False
         state["chat_agent_prompt"] = prompt
@@ -35,7 +35,7 @@ async def chat_agent_rule(bot: Bot, event: MessageEvent, state: T_State) -> bool
     return False
 
 
-chat_agent = on_message(rule=Rule(chat_agent_rule), priority=90, block=True)
+chat_agent = on_message(rule=Rule(chat_agent_rule), priority=4, block=True)
 
 
 @chat_agent.handle()
