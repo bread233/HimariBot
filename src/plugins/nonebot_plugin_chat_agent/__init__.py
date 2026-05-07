@@ -92,7 +92,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             except Exception:
                 pass
 
-        context_pack = await build_context_pack(config, session_info, prompt)
+        context_pack = await build_context_pack(config, session_info, prompt, bot=bot, event=event)
         if context_pack.get("direct_reply"):
             reply = context_pack["direct_reply"]
             if config.chat_agent_enable_history:
@@ -107,6 +107,8 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         messages = [{"role": "system", "content": build_system_prompt()}]
         if context_pack.get("profile_context"):
             messages.append({"role": "system", "content": context_pack["profile_context"]})
+        if context_pack.get("group_context"):
+            messages.append({"role": "system", "content": context_pack["group_context"]})
         if context_pack.get("memory_context"):
             messages.append({"role": "system", "content": context_pack["memory_context"]})
         if context_pack.get("history_context"):

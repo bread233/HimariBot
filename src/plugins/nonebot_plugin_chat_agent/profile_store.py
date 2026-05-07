@@ -218,11 +218,79 @@ def _load_user_profile_context_sync(db_path: Path, session_info: dict) -> str:
         _append_line(lines, "当前群昵称", current_group_card)
     if current_group_name:
         _append_line(lines, "当前群名", current_group_name)
+    if group_id:
+        current_display_name = current_group_card or display_name or nickname
+        _append_line(lines, "当前群显示名", current_display_name)
     _append_line(lines, "常聊话题", common_topics)
     _append_line(lines, "口头禅", catchphrases)
     _append_line(lines, "偏好/备注", preference_notes or interaction_notes)
     _append_line(lines, "摘要", summary)
     return _truncate_text("\n".join(lines), 800)
+
+
+def _upsert_group_member_alias_from_info_sync(db_path: Path, group_id: str, member: dict, group_name: str = "") -> None:
+    user_id = str(member.get("user_id") or "").strip()
+    if not user_id or not group_id:
+        return
+    nickname = str(member.get("nickname") or "").strip()
+    group_card = str(member.get("card") or nickname).strip()
+    role = str(member.get("role") or "").strip()
+    conn = _connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT display_name, aliases FROM chat_agent_user_profiles WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        display_name = nickname or group_card
+        merged_aliases: list[str] = []
+        if row:
+            existing_display_name, existing_aliases = row
+            display_name = str(existing_display_name or "").strip() or display_name
+            merged_aliases.extend(_load_aliases(existing_aliases))
+        for value in [nickname, group_card]:
+            text = str(value or "").strip()
+            if text and text not in merged_aliases:
+                merged_aliases.append(text)
+        conn.execute(
+            """
+            INSERT INTO chat_agent_user_profiles
+                (user_id, display_name, aliases, common_topics, catchphrases, interaction_notes, preference_notes, summary, updated_at)
+            VALUES (?, ?, ?, '', '', ?, '', '', ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                display_name = CASE
+                    WHEN chat_agent_user_profiles.display_name = '' AND excluded.display_name != '' THEN excluded.display_name
+                    ELSE chat_agent_user_profiles.display_name
+                END,
+                aliases = excluded.aliases,
+                interaction_notes = CASE
+                    WHEN excluded.interaction_notes != '' THEN
+                        CASE
+                            WHEN chat_agent_user_profiles.interaction_notes = '' THEN excluded.interaction_notes
+                            WHEN instr(chat_agent_user_profiles.interaction_notes, excluded.interaction_notes) = 0 THEN chat_agent_user_profiles.interaction_notes || '；' || excluded.interaction_notes
+                            ELSE chat_agent_user_profiles.interaction_notes
+                        END
+                    ELSE chat_agent_user_profiles.interaction_notes
+                END,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, display_name, _dump_aliases(merged_aliases), f"群内身份：{role}" if role else "", _now()),
+        )
+        conn.execute(
+            """
+            INSERT INTO chat_agent_user_group_aliases
+                (user_id, group_id, group_name, group_card, nickname, last_seen_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, group_id) DO UPDATE SET
+                group_name = excluded.group_name,
+                group_card = excluded.group_card,
+                nickname = excluded.nickname,
+                last_seen_at = excluded.last_seen_at
+            """,
+            (user_id, str(group_id), str(group_name or ""), group_card, nickname, _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 async def init_profile_storage(config) -> None:
@@ -235,3 +303,7 @@ async def upsert_user_seen(config, session_info: dict) -> None:
 
 async def load_user_profile_context(config, session_info: dict) -> str:
     return await asyncio.to_thread(_load_user_profile_context_sync, config.chat_agent_db_path, session_info)
+
+
+async def upsert_group_member_alias_from_info(config, group_id: str, member: dict, group_name: str = "") -> None:
+    await asyncio.to_thread(_upsert_group_member_alias_from_info_sync, config.chat_agent_db_path, group_id, member, group_name)
