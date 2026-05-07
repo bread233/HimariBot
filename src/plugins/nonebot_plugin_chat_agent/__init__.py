@@ -9,6 +9,7 @@ from .config import get_chat_agent_config
 from .context_pack import build_context_pack
 from .llm_client import chat_completions
 from .memory import detect_feedback
+from .profile_store import init_profile_storage, upsert_user_seen
 from .prompt import build_system_prompt
 from .runtime_state import get_chat_agent_lock
 from .storage import build_session_info, init_storage, save_memory, save_message
@@ -56,6 +57,7 @@ async def _init_chat_agent_storage() -> None:
     config.ensure_data_dir()
     if config.chat_agent_enable_history or config.chat_agent_enable_feedback_memory:
         await init_storage(config)
+    await init_profile_storage(config)
 
 
 @chat_agent.handle()
@@ -64,6 +66,11 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
     prompt = state.get("chat_agent_prompt", "").strip()
     is_group = bool(state.get("chat_agent_is_group", isinstance(event, GroupMessageEvent)))
     session_info = build_session_info(event)
+
+    try:
+        await upsert_user_seen(config, session_info)
+    except Exception:
+        pass
 
     if not prompt:
         await chat_agent.finish("叫我有什么事？" if is_group else "你想聊什么呀？")
@@ -98,6 +105,8 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             return
 
         messages = [{"role": "system", "content": build_system_prompt()}]
+        if context_pack.get("profile_context"):
+            messages.append({"role": "system", "content": context_pack["profile_context"]})
         if context_pack.get("memory_context"):
             messages.append({"role": "system", "content": context_pack["memory_context"]})
         if context_pack.get("history_context"):

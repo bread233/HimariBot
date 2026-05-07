@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .fact_guard import detect_fact_sensitive_question
 from .memory import build_memory_reminder_for_user, format_memories_for_prompt
+from .profile_store import load_user_profile_context
 from .storage import load_memories, load_recent_messages
 from .tool_router import should_use_web_tool
 from .web_tools import build_web_context
@@ -60,6 +61,11 @@ async def build_context_pack(config, session_info: dict, prompt: str) -> dict:
     web_enabled = bool(getattr(config, "chat_agent_enable_web", False))
 
     try:
+        profile_context = await load_user_profile_context(config, session_info)
+    except Exception:
+        profile_context = ""
+
+    try:
         history = await load_recent_messages(config, session_id, history_limit)
     except Exception:
         history = []
@@ -71,6 +77,7 @@ async def build_context_pack(config, session_info: dict, prompt: str) -> dict:
                 "direct_reply": f"你刚才说：{last_user}",
                 "should_call_llm": False,
                 "web_used": False,
+                "profile_context": profile_context,
                 "history_context": "",
                 "memory_context": "",
                 "web_context": "",
@@ -130,6 +137,7 @@ async def build_context_pack(config, session_info: dict, prompt: str) -> dict:
         "direct_reply": None,
         "should_call_llm": True,
         "web_used": web_used,
+        "profile_context": profile_context,
         "history_context": history_context,
         "memory_context": memory_context,
         "web_context": web_context,
