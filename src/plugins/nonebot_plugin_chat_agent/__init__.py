@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from nonebot import get_driver, on_message
-from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, PrivateMessageEvent
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, MessageSegment, PrivateMessageEvent
 from nonebot.rule import Rule
 from nonebot.typing import T_State
 
@@ -44,6 +44,12 @@ chat_agent = on_message(rule=Rule(chat_agent_rule), priority=4, block=True)
 driver = get_driver()
 
 
+def _with_group_at(event: MessageEvent, is_group: bool, text: str):
+    if not is_group:
+        return text
+    return MessageSegment.at(event.user_id) + MessageSegment.text(" " + text)
+
+
 @driver.on_startup
 async def _init_chat_agent_storage() -> None:
     config = get_chat_agent_config()
@@ -65,12 +71,12 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
 
     lock = get_chat_agent_lock()
     if lock.locked():
-        await chat_agent.finish(config.chat_agent_locked_reply)
+        await chat_agent.finish(_with_group_at(event, is_group, config.chat_agent_locked_reply))
         return
 
     await lock.acquire()
     try:
-        await chat_agent.send(config.chat_agent_busy_reply)
+        await chat_agent.send(_with_group_at(event, is_group, config.chat_agent_busy_reply))
 
         feedback = detect_feedback(prompt) if config.chat_agent_enable_feedback_memory else None
         if feedback is not None:
@@ -88,7 +94,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     await save_message(config, session_info, "assistant", reply)
                 except Exception:
                     pass
-            await chat_agent.finish(reply)
+            await chat_agent.finish(_with_group_at(event, is_group, reply))
             return
 
         messages = [{"role": "system", "content": build_system_prompt()}]
@@ -126,7 +132,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             except Exception:
                 pass
 
-        await chat_agent.finish(reply or config.chat_agent_llm_timeout_reply)
+        await chat_agent.finish(_with_group_at(event, is_group, reply or config.chat_agent_llm_timeout_reply))
         return
     finally:
         if lock.locked():
