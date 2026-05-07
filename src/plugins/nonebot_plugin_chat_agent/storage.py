@@ -225,15 +225,21 @@ def build_session_info(event) -> dict:
             "session_type": "group",
             "session_id": f"group:{event.group_id}",
             "group_id": str(event.group_id),
+            "group_name": str(getattr(event, "group_name", "") or ""),
+            "group_card": str(getattr(event.sender, "card", None) or nickname or ""),
             "user_id": str(event.user_id),
             "nickname": nickname,
+            "raw_nickname": getattr(event.sender, "nickname", None),
         }
     return {
         "session_type": "private",
         "session_id": f"private:{event.user_id}",
         "group_id": None,
+        "group_name": "",
+        "group_card": "",
         "user_id": str(event.user_id),
         "nickname": getattr(event.sender, "nickname", None),
+        "raw_nickname": getattr(event.sender, "nickname", None),
     }
 
 
