@@ -127,6 +127,8 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             return
 
         messages = [{"role": "system", "content": build_system_prompt()}]
+        if context_pack.get("time_context"):
+            messages.append({"role": "system", "content": context_pack["time_context"]})
         if context_pack.get("profile_context"):
             messages.append({"role": "system", "content": context_pack["profile_context"]})
         if context_pack.get("group_context"):
