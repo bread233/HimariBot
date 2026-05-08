@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from .embedding_client import cosine_similarity, embed_texts
 
 _STOPWORDS = {
     "用户",
@@ -116,3 +117,106 @@ def build_retrieval_context(prompt: str, profile_context: str, group_context: st
             "notes": f"best_source={best_name}",
         }
     return {"score": best_score, "source": "none", "content": "", "notes": f"best_source={best_name}"}
+
+
+def build_embedding_query(prompt: str) -> str:
+    return f"为这个问题检索最相关的历史纠错、用户画像或聊天记录：{prompt}"
+
+
+def build_embedding_doc(source: str, content: str) -> str:
+    if source in {"correction", "memory"}:
+        return f"历史纠错规则：{content}"
+    if source == "profile":
+        return f"用户画像：{content}"
+    if source == "group":
+        return f"当前群信息：{content}"
+    if source == "history":
+        return f"聊天记录：{content}"
+    if source == "web":
+        return f"网页资料：{content}"
+    return f"资料不足说明：{content}"
+
+
+def source_bonus(source: str) -> float:
+    if source in {"correction", "memory"}:
+        return 0.04
+    if source in {"profile", "group"}:
+        return 0.02
+    if source == "history":
+        return 0.01
+    return 0.0
+
+
+async def build_embedding_retrieval_context(config, prompt: str, candidates: list[dict]) -> dict:
+    usable = []
+    for item in candidates:
+        source = str(item.get("source", "")).strip()
+        content = str(item.get("content", "")).strip()
+        if source and content:
+            usable.append({"source": source, "content": content})
+    if not usable:
+        return {"status": "empty", "score": 0.0, "weighted_score": 0.0, "margin": 0.0, "source": "", "content": "", "candidate_content": "", "notes": "embedding_empty"}
+
+    query = build_embedding_query(prompt)
+    docs = [build_embedding_doc(item["source"], item["content"]) for item in usable]
+    try:
+        vectors = await embed_texts(config, [query] + docs)
+    except Exception as e:
+        return {"status": "error", "score": 0.0, "weighted_score": 0.0, "margin": 0.0, "source": "", "content": "", "candidate_content": "", "notes": f"embedding_error={type(e).__name__}"}
+
+    if len(vectors) < 2:
+        return {"status": "error", "score": 0.0, "weighted_score": 0.0, "margin": 0.0, "source": "", "content": "", "candidate_content": "", "notes": "embedding_invalid_response"}
+
+    qv = vectors[0]
+    scored = []
+    for idx, item in enumerate(usable, start=1):
+        score = cosine_similarity(qv, vectors[idx])
+        weighted = score + source_bonus(item["source"])
+        scored.append((item, score, weighted))
+    scored.sort(key=lambda x: x[2], reverse=True)
+    top1 = scored[0]
+    top2_score = scored[1][1] if len(scored) > 1 else 0.0
+    margin = top1[1] - top2_score
+
+    reliable_score = float(getattr(config, "chat_agent_embedding_reliable_score", 0.68))
+    candidate_score = float(getattr(config, "chat_agent_embedding_candidate_score", 0.60))
+    min_margin = float(getattr(config, "chat_agent_embedding_min_margin", 0.05))
+
+    notes = (
+        f"embedding_top1={top1[0]['source']} "
+        f"embedding_score={top1[1]:.4f} "
+        f"embedding_weighted={top1[2]:.4f} "
+        f"margin={margin:.4f}"
+    )
+    if top1[1] >= reliable_score and margin >= min_margin:
+        return {
+            "status": "reliable",
+            "score": top1[1],
+            "weighted_score": top1[2],
+            "margin": margin,
+            "source": top1[0]["source"],
+            "content": top1[0]["content"],
+            "candidate_content": "",
+            "notes": notes,
+        }
+    if top1[1] >= candidate_score:
+        return {
+            "status": "candidate",
+            "score": top1[1],
+            "weighted_score": top1[2],
+            "margin": margin,
+            "source": top1[0]["source"],
+            "content": "",
+            "candidate_content": top1[0]["content"],
+            "notes": notes,
+        }
+    return {
+        "status": "low",
+        "score": top1[1],
+        "weighted_score": top1[2],
+        "margin": margin,
+        "source": top1[0]["source"],
+        "content": "",
+        "candidate_content": "",
+        "notes": notes,
+    }
