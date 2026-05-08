@@ -8,6 +8,7 @@ from .profile_store import load_user_profile_context
 from .retrieval import build_embedding_retrieval_context, build_retrieval_context, score_text_overlap
 from .storage import load_memories, load_recent_messages
 from .tool_router import should_use_web_tool
+from .url_tools import build_direct_url_context, extract_urls
 from .web_tools import build_web_context
 
 
@@ -59,7 +60,6 @@ def _is_creative_or_chat_prompt(prompt: str) -> bool:
             "鼓励我",
             "吐槽一下",
             "自我介绍",
-            "介绍一下",
         ]
     )
 
@@ -157,7 +157,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             "身份回答要求：",
             "- 用户正在问自己的身份/昵称。",
             "- 请只基于本轮提供的“说话者画像”和“当前发言人在群内”资料回答。",
-            "- 如果问题是“我在群里叫什么”，请优先回答当前群昵称/群名片；若群名片为空，请说明当前显示的是 QQ 昵称。",
+            "- 如果问题是“我在群里叫什么”，请优先回答当前群昵称/群名片；如果群名片为空，请回答当前显示的是 QQ 昵称。",
             "- 不要推测群里有没有其他人。",
             "- 不要编造没有提供的信息。",
             "- 不要回答“不知道”，除非上下文里完全没有 QQ、昵称、群昵称信息。",
@@ -214,6 +214,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         memory_context = f"{memory_context}\n\n{memory_reminder}".strip() if memory_context else memory_reminder
 
     math_result = detect_numeric_compare(prompt)
+    urls = extract_urls(prompt)
 
     history_lines = []
     for item in history:
@@ -280,6 +281,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         retrieval = build_retrieval_context(prompt, profile_context, group_context, memory_context, history_context)
         retrieval_context = retrieval["content"] if retrieval["source"] == "db" else ""
         retrieval_score = float(retrieval.get("score", 0.0) or 0.0)
+
     web_relevance_threshold = float(getattr(config, "chat_agent_web_relevance_min_score", 0.35))
     should_web, web_query, route_like = _should_web_mode(config, prompt)
     needs_reliable_context = _needs_reliable_context(prompt)
@@ -289,7 +291,24 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     tool_notes.extend(tool_notes_embed)
     web_used = False
 
-    if math_result is not None:
+    if urls and math_result is None:
+        try:
+            direct_url_context = await build_direct_url_context(config, prompt, urls)
+        except Exception:
+            direct_url_context = ""
+        if direct_url_context:
+            web_context = direct_url_context
+            web_used = True
+            tool_notes.append("direct_url_read=1")
+            tool_notes.append(f"direct_url_count={len(urls[:2])}")
+        else:
+            web_context = "直接 URL 读取失败：未获取到可用页面信息。"
+            tool_notes.append("direct_url_read=1")
+            tool_notes.append(f"direct_url_count={len(urls[:2])}")
+
+    if urls and math_result is None:
+        tool_notes.append("direct_url_mode=1")
+    elif math_result is not None:
         tool_notes.append("math_tool=numeric_compare")
     elif is_identity_question:
         tool_notes.append("identity_question_no_web")
