@@ -56,6 +56,7 @@ analysis_bili = on_regex(
     r"(\[\[QQ小程序\]哔哩哔哩\])|(QQ小程序&amp;#93;哔哩哔哩)|(QQ小程序&#93;哔哩哔哩)",
     flags=re.I,
     rule=is_normal,
+    block=False,
 )
 
 rule = Rule(is_enable_search, is_normal)

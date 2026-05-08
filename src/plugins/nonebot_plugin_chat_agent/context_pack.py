@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from .fact_guard import detect_fact_sensitive_question
-from .memory import build_memory_reminder_for_user, format_memories_for_prompt
 from .group_tools import get_group_info_context, get_group_member_seen_context
+from .memory import build_memory_reminder_for_user, format_memories_for_prompt
+from .math_tools import detect_numeric_compare
 from .profile_store import load_user_profile_context
+from .retrieval import build_embedding_retrieval_context, build_retrieval_context, score_text_overlap
 from .storage import load_memories, load_recent_messages
 from .tool_router import should_use_web_tool
-from .web_tools import build_web_context
+from .tool_intent import classify_tool_intent
+from .url_tools import build_direct_url_context, extract_urls
+from .web_tools import build_web_context, build_web_results, render_web_results_context
+from datetime import datetime
+import re
+from urllib.parse import urlparse
 
 
 def _is_context_question(prompt: str) -> bool:
@@ -14,11 +21,11 @@ def _is_context_question(prompt: str) -> bool:
     return any(
         token in text
         for token in [
-            "刚才说了什么",
-            "刚刚说了什么",
-            "之前说了什么",
-            "刚才在测什么",
-            "刚刷了啥",
+            "我刚才说了什么",
+            "我刚刚说了什么",
+            "我之前说了什么",
+            "我刚才在测什么",
+            "我刚刷了啥",
             "在测什么",
         ]
     )
@@ -35,6 +42,74 @@ def _is_self_identity_question(prompt: str) -> bool:
         "我在群里叫什么",
     ]
     return any(pattern in text for pattern in patterns)
+
+
+def _is_creative_or_chat_prompt(prompt: str) -> bool:
+    text = (prompt or "").strip()
+    return any(
+        token in text
+        for token in [
+            "写个",
+            "讲个",
+            "来个",
+            "编个",
+            "冷笑话",
+            "笑话",
+            "故事",
+            "段子",
+            "安慰我",
+            "陪我聊",
+            "聊聊",
+            "夸夸我",
+            "鼓励我",
+            "吐槽一下",
+            "自我介绍",
+        ]
+    )
+
+
+def _needs_reliable_context(prompt: str) -> bool:
+    text = (prompt or "").strip()
+    if _is_creative_or_chat_prompt(text):
+        return False
+    return any(
+        token in text
+        for token in [
+            "我是谁",
+            "我叫什么",
+            "我在群里叫什么",
+            "刚才",
+            "刚刚",
+            "之前",
+            "说了什么",
+            "在测什么",
+            "什么",
+            "多少",
+            "多少钱",
+            "价格",
+            "参数",
+            "配置",
+            "规格",
+            "显存",
+            "内存",
+            "发布",
+            "发售",
+            "最新",
+            "现在",
+            "当前",
+            "属于",
+            "系列",
+            "支持",
+            "区别",
+            "对比",
+            "是真的吗",
+            "有吗",
+            "存在",
+            "查",
+            "搜索",
+            "资料",
+        ]
+    )
 
 
 def _extract_last_user_message(history: list[dict], current_prompt: str) -> str | None:
@@ -68,7 +143,201 @@ def _should_web_mode(config, prompt: str) -> tuple[bool, str, bool]:
     return False, prompt, False
 
 
+def _extract_domain(url: str) -> str:
+    try:
+        host = (urlparse(str(url or "").strip()).netloc or "").lower()
+    except Exception:
+        return ""
+    return host[4:] if host.startswith("www.") else host
+
+
+def _extract_result_blocks(raw_context: str) -> list[dict]:
+    lines = (raw_context or "").splitlines()
+    if not lines:
+        return []
+    blocks: list[dict] = []
+    current: list[str] = []
+    for line in lines[1:]:
+        if re.match(r"^\[\d+\]\s*", line.strip()):
+            if current:
+                blocks.append({"lines": current[:]})
+            current = [line]
+        elif current:
+            current.append(line)
+    if current:
+        blocks.append({"lines": current[:]})
+    parsed: list[dict] = []
+    for idx, block in enumerate(blocks):
+        block_lines = block.get("lines", [])
+        text = "\n".join(block_lines)
+        text_norm = text.replace("\uFF1A", ":")
+        m = (
+            re.search(r"URL:\s*(\S+)", text_norm, re.IGNORECASE)
+            or re.search(r"url:\s*(\S+)", text_norm)
+            or re.search(r"source-domain:\s*(\S+)", text_norm, re.IGNORECASE)
+            or re.search(r"source:\s*(\S+)", text_norm, re.IGNORECASE)
+            or re.search(r"domain:\s*(\S+)", text_norm, re.IGNORECASE)
+        )
+        url = m.group(1).strip() if m else ""
+        parsed.append(
+            {
+                "idx": idx,
+                "lines": block_lines[:],
+                "title_line": block_lines[0] if block_lines else "",
+                "url": url,
+                "domain": _extract_domain(url),
+                "snippet": text,
+            }
+        )
+    return parsed
+
+
+def _build_source_keywords(intent, prompt: str, web_query: str) -> set[str]:
+    merged = " ".join(
+        [
+            str(getattr(intent, "subject", "") or ""),
+            str(getattr(intent, "query_terms", "") or ""),
+            str(web_query or ""),
+            str(prompt or ""),
+        ]
+    ).lower()
+    return {tok for tok in re.findall(r"[\w.-]{2,}", merged, flags=re.UNICODE) if len(tok) > 1}
+
+
+def _score_web_source(block: dict, keywords: set[str], current_year: int) -> float:
+    domain = str(block.get("domain", "") or "").lower()
+    url = str(block.get("url", "") or "").lower()
+    title = str(block.get("title_line", "") or "").lower()
+    snippet = str(block.get("snippet", "") or "").lower()
+    score = 0.0
+    if domain:
+        score += 0.03
+
+    token_bonus = 0.0
+    for field in (domain, url, title, snippet):
+        if field and any(k in field for k in keywords):
+            token_bonus += 0.05
+    score += min(0.20, token_bonus)
+
+    hi_signals = [
+        "official", "docs", "documentation", "help", "support", "developer", "developers",
+        "blog", "news", "release", "releases", "announcement", "update", "version",
+        "changelog", "patch-notes", "status",
+    ]
+    low_signals = ["wiki", "fandom", "reddit", "forum", "zhihu", "csdn", "game8"]
+    bag = f"{url}\n{title}\n{snippet}"
+    if any(s in bag for s in hi_signals):
+        score += 0.08
+    if any(s in bag for s in low_signals):
+        score -= 0.08
+
+    years = [int(y) for y in re.findall(r"20\d{2}", bag)]
+    if years:
+        gap = current_year - max(years)
+        if gap >= 4:
+            score -= 0.20
+        elif gap >= 2:
+            score -= 0.10
+
+    return max(0.0, min(1.0, score))
+
+
+def _rank_web_context_lines(raw_context: str, intent, prompt: str, web_query: str) -> tuple[str, list[str], float, str]:
+    lines = (raw_context or "").splitlines()
+    if not lines:
+        return raw_context, [], 0.0, "neutral"
+    header = lines[0]
+    blocks = _extract_result_blocks(raw_context)
+    if not blocks:
+        return raw_context, [], 0.0, "neutral"
+    keywords = _build_source_keywords(intent, prompt, web_query)
+    current_year = datetime.now().year
+    for block in blocks:
+        block["source_score"] = _score_web_source(block, keywords, current_year)
+    blocks.sort(key=lambda b: (float(b.get("source_score", 0.0)), -int(b.get("idx", 0))), reverse=True)
+
+    top_domains = [str(b.get("domain", "")) for b in blocks if b.get("domain")][:5]
+    top_source_score = float(blocks[0].get("source_score", 0.0)) if blocks else 0.0
+    source_rank = "generic_ranked" if blocks else "neutral"
+
+    out = [header]
+    for i, block in enumerate(blocks, 1):
+        body = [ln for ln in block.get("lines", []) if not ln.startswith("Source-Domain:") and not ln.startswith("Source-Score:")]
+        if body:
+            body[0] = re.sub(r"^\[\d+\]", f"[{i}]", body[0], count=1)
+        out.extend(body)
+        out.append(f"Source-Domain: {block.get('domain') or 'unknown'}")
+        out.append(f"Source-Score: {float(block.get('source_score', 0.0)):.2f}")
+        out.append("")
+    return "\n".join(out).strip(), top_domains, top_source_score, source_rank
+
+
+def _apply_web_source_ranking(raw_context: str, intent, prompt: str, web_query: str, tool_notes: list[str]) -> tuple[str, float]:
+    ranked_context, top_domains, top_source_score, source_rank = _rank_web_context_lines(raw_context, intent, prompt, web_query)
+    tool_notes.append(f"web_source_rank={source_rank}")
+    tool_notes.append(f"web_source_domains={','.join(top_domains)}")
+    tool_notes.append(f"web_top_source_score={top_source_score:.2f}")
+    return ranked_context, top_source_score
+
+
+async def _build_ranked_web_context(config, query: str, intent, prompt: str, tool_notes: list[str]) -> tuple[str, float]:
+    try:
+        results = await build_web_results(config, query)
+    except Exception:
+        results = []
+    if results:
+        keywords = _build_source_keywords(intent, prompt, query)
+        current_year = datetime.now().year
+        scored = []
+        for idx, row in enumerate(results):
+            block = {
+                "idx": idx,
+                "domain": str(row.get("domain", "") or ""),
+                "url": str(row.get("url", "") or ""),
+                "title_line": str(row.get("title", "") or ""),
+                "snippet": f"{row.get('snippet', '')}\n{row.get('excerpt', '')}",
+            }
+            source_score = _score_web_source(block, keywords, current_year)
+            item = dict(row)
+            item["weighted_score"] = source_score
+            item["_idx"] = idx
+            scored.append(item)
+        scored.sort(key=lambda x: (-float(x.get("weighted_score", 0.0)), int(x.get("_idx", 0))))
+        top_domains = [str(x.get("domain", "")) for x in scored if x.get("domain")][:5]
+        top_score = float(scored[0].get("weighted_score", 0.0)) if scored else 0.0
+        tool_notes.append("web_source_rank=structured_generic_ranked")
+        tool_notes.append(f"web_source_domains={','.join(top_domains)}")
+        tool_notes.append(f"web_top_source_score={top_score:.2f}")
+        return render_web_results_context(scored, max_items=3), top_score
+
+    try:
+        raw_context = await build_web_context(config, query)
+    except Exception:
+        raw_context = ""
+    if raw_context:
+        ranked, top_domains, top_score, _ = _rank_web_context_lines(raw_context, intent, prompt, query)
+        tool_notes.append("web_source_rank=fallback_text_ranked")
+        tool_notes.append(f"web_source_domains={','.join(top_domains)}")
+        tool_notes.append(f"web_top_source_score={top_score:.2f}")
+        return ranked, top_score
+    tool_notes.append("web_source_rank=neutral")
+    tool_notes.append("web_source_domains=")
+    tool_notes.append("web_top_source_score=0.00")
+    return "", 0.0
+
+
 async def build_context_pack(config, session_info: dict, prompt: str, bot=None, event=None) -> dict:
+    intent = classify_tool_intent(prompt)
+    if intent.needs_time:
+        now = datetime.now()
+        time_context = (
+            "当前时间信息：\n"
+            f"- 当前日期：{now:%Y-%m-%d}\n"
+            f"- 当前年份：{now:%Y}\n"
+            f"- 当前本地时间：{now:%Y-%m-%d %H:%M:%S}"
+        )
+    else:
+        time_context = ""
     session_id = session_info["session_id"]
     history_limit = int(getattr(config, "chat_agent_history_max_messages", 10))
     memory_limit = int(getattr(config, "chat_agent_memory_max_results", 5))
@@ -89,7 +358,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             "- 如果问题是“我在群里叫什么”，请优先回答当前群昵称/群名片；如果群名片为空，请回答当前显示的是 QQ 昵称。",
             "- 不要推测群里有没有其他人。",
             "- 不要编造没有提供的信息。",
-            "- 不要回答“我不知道”，除非上下文里完全没有 QQ、昵称、群昵称信息。",
+            "- 不要回答“不知道”，除非上下文里完全没有 QQ、昵称、群昵称信息。",
             "- 回答要简短。",
         ]
         profile_context = profile_context.rstrip() + "\n" + "\n".join(identity_hint_lines)
@@ -123,8 +392,10 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "direct_reply": f"你刚才说：{last_user}",
                 "should_call_llm": False,
                 "web_used": False,
+                "time_context": time_context,
                 "profile_context": profile_context,
                 "group_context": group_context,
+                "retrieval_context": "",
                 "history_context": "",
                 "memory_context": "",
                 "web_context": "",
@@ -140,6 +411,9 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     memory_reminder = build_memory_reminder_for_user(memories, prompt)
     if memory_reminder:
         memory_context = f"{memory_context}\n\n{memory_reminder}".strip() if memory_context else memory_reminder
+
+    math_result = detect_numeric_compare(prompt)
+    urls = extract_urls(prompt)
 
     history_lines = []
     for item in history:
@@ -158,30 +432,185 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         history_lines.append(content)
     history_context = "\n".join(history_lines[-history_limit:]).strip()
 
-    should_web = False
-    web_query = prompt
-    route_like = False
+    retrieval_context = ""
+    retrieval_score = 0.0
+    retrieval_threshold = float(getattr(config, "chat_agent_retrieval_min_score", 0.45))
+    embedding_status = "empty"
+    if math_result is not None:
+        retrieval_context = "确定性计算结果：" + str(math_result.get("result_text", "")).strip()
+        retrieval_score = 1.0
+        tool_notes_embed = [
+            "math_tool=numeric_compare",
+            f"math_result={math_result.get('comparison', '')}",
+        ]
+        embedding_status = "math"
+    elif bool(getattr(config, "chat_agent_enable_embedding_retrieval", True)):
+        embedding_candidates = [
+            {"source": "profile", "content": profile_context},
+            {"source": "group", "content": group_context},
+        ]
+        for item in memories:
+            content = str(item.get("content", "")).strip()
+            if not content:
+                continue
+            row_type = str(item.get("memory_type", "memory") or "memory")
+            source = "correction" if row_type == "correction" else "memory"
+            embedding_candidates.append({"source": source, "content": content})
+        if not any(c["source"] in {"memory", "correction"} and c["content"] for c in embedding_candidates):
+            embedding_candidates.append({"source": "memory", "content": memory_context})
+        embedding_candidates.append({"source": "history", "content": history_context})
+        embedding_result = await build_embedding_retrieval_context(config, prompt, embedding_candidates)
+        embedding_status = str(embedding_result.get("status", "error"))
+        tool_note = embedding_result.get("notes") or ""
+        if tool_note:
+            tool_notes_embed = [f"embedding_retrieval={embedding_status}", tool_note]
+        else:
+            tool_notes_embed = [f"embedding_retrieval={embedding_status}"]
+        if embedding_status in {"reliable", "candidate"}:
+            tool_notes_embed.append(f"embedding_source={embedding_result.get('source', '')}")
+            tool_notes_embed.append(f"embedding_score={float(embedding_result.get('score', 0.0)):.4f}")
+            tool_notes_embed.append(f"embedding_margin={float(embedding_result.get('margin', 0.0)):.4f}")
+        retrieval_score = float(embedding_result.get("score", 0.0) or 0.0)
+        if embedding_status == "reliable":
+            retrieval_context = str(embedding_result.get("content", "")).strip()
+    else:
+        tool_notes_embed = ["embedding_retrieval=disabled"]
+
+    if not retrieval_context:
+        retrieval = build_retrieval_context(
+            prompt,
+            profile_context,
+            group_context,
+            memory_context,
+            history_context,
+            min_score=retrieval_threshold,
+        )
+        retrieval_context = retrieval["content"] if retrieval["source"] == "db" else ""
+        retrieval_score = float(retrieval.get("score", 0.0) or 0.0)
+
+    web_relevance_threshold = float(getattr(config, "chat_agent_web_relevance_min_score", 0.35))
+    web_final_threshold = float(getattr(config, "chat_agent_web_final_min_score", 0.30))
+    should_web, web_query, route_like = _should_web_mode(config, prompt)
+    needs_reliable_context = _needs_reliable_context(prompt)
+
     web_context = ""
     tool_notes = []
+    tool_notes.extend(tool_notes_embed)
+    tool_notes.append(f"intent={intent.kind}")
+    tool_notes.append(f"subject={intent.subject}")
+    tool_notes.append(f"time_hint={intent.time_hint}")
+    tool_notes.append(f"intent_reason={intent.reason}")
+    if intent.needs_freshness:
+        now = datetime.now()
+        tool_notes.append("freshness_required")
+        tool_notes.append(f"current_date={now:%Y-%m-%d}")
+        tool_notes.append(f"freshness_days={intent.freshness_days}")
+    if intent.prefer_official:
+        tool_notes.append("prefer_official=true")
     web_used = False
 
-    if not is_identity_question:
-        should_web, web_query, route_like = _should_web_mode(config, prompt)
-        if should_web and web_enabled:
-            try:
-                web_context = await build_web_context(config, web_query)
-            except Exception:
-                web_context = ""
-            if web_context:
-                web_used = True
-            else:
-                tool_notes.append("web_search_failed")
-                if str(getattr(config, "chat_agent_web_mode", "auto")).lower() == "auto" and route_like:
-                    tool_notes.append("fact_sensitive_no_web")
-        elif should_web and not web_enabled:
-            tool_notes.append("web_disabled")
-    else:
+    if urls and math_result is None:
+        try:
+            direct_url_context = await build_direct_url_context(config, prompt, urls)
+        except Exception:
+            direct_url_context = ""
+        if direct_url_context:
+            web_context = direct_url_context
+            web_used = True
+            tool_notes.append("direct_url_read=1")
+            tool_notes.append(f"direct_url_count={len(urls[:2])}")
+        else:
+            web_context = "直接 URL 读取失败：未获取到可用页面信息。"
+            tool_notes.append("direct_url_read=1")
+            tool_notes.append(f"direct_url_count={len(urls[:2])}")
+
+    if urls and math_result is None:
+        tool_notes.append("direct_url_mode=1")
+    elif math_result is not None:
+        tool_notes.append("math_tool=numeric_compare")
+    elif is_identity_question:
         tool_notes.append("identity_question_no_web")
+    elif intent.kind == "current_fact":
+        if web_enabled:
+            web_context, top_source_score = await _build_ranked_web_context(config, web_query, intent, prompt, tool_notes)
+            if web_context:
+                web_relevance_score = score_text_overlap(prompt, web_context)
+                years = [int(y) for y in re.findall(r"20\d{2}", web_context)]
+                current_year = datetime.now().year
+                if not intent.freshness_days:
+                    freshness_score = 1.0
+                elif current_year in years:
+                    freshness_score = 1.0
+                elif (current_year - 1) in years:
+                    freshness_score = 0.7
+                elif years and min(years) <= current_year - 2:
+                    freshness_score = 0.3
+                else:
+                    freshness_score = 0.6
+                web_final_score = web_relevance_score * freshness_score
+                web_final_score = min(1.0, web_final_score + min(0.10, top_source_score * 0.10))
+                tool_notes.append(f"web_relevance_score={web_relevance_score:.2f}")
+                tool_notes.append(f"web_freshness_score={freshness_score:.2f}")
+                tool_notes.append(f"web_final_score={web_final_score:.2f}")
+                if freshness_score < 0.7:
+                    tool_notes.append("web_may_be_stale")
+                if web_final_score >= web_final_threshold:
+                    web_used = True
+                    tool_notes.append(f"web_score={web_relevance_score:.2f}")
+                else:
+                    web_context = ""
+                    tool_notes.append("web_low_relevance_or_stale")
+            if not web_context:
+                tool_notes.append("web_search_failed")
+        else:
+            tool_notes.append("web_disabled")
+    elif needs_reliable_context:
+        if retrieval_context and retrieval_score >= retrieval_threshold:
+            tool_notes.append("retrieval_source=db")
+            tool_notes.append(f"retrieval_score={retrieval_score:.2f}")
+            if should_web and web_enabled and route_like and embedding_status != "reliable":
+                web_context, _ = await _build_ranked_web_context(config, web_query, intent, prompt, tool_notes)
+                if web_context:
+                    web_score = score_text_overlap(prompt, web_context)
+                    web_final_score = web_score
+                    if web_score >= web_relevance_threshold and web_final_score >= web_final_threshold:
+                        web_used = True
+                        tool_notes.append(f"web_score={web_score:.2f}")
+                    else:
+                        web_context = ""
+                        tool_notes.append("web_low_relevance_or_stale")
+                if not web_context:
+                    tool_notes.append("web_search_failed")
+        else:
+            if should_web and web_enabled:
+                web_context, _ = await _build_ranked_web_context(config, web_query, intent, prompt, tool_notes)
+                if web_context:
+                    web_score = score_text_overlap(prompt, web_context)
+                    web_final_score = web_score
+                    if web_score >= web_relevance_threshold and web_final_score >= web_final_threshold:
+                        web_used = True
+                        tool_notes.append(f"web_score={web_score:.2f}")
+                    else:
+                        web_context = ""
+                        tool_notes.append("web_low_relevance_or_stale")
+                if not web_context:
+                    tool_notes.append("web_search_failed")
+                    if str(getattr(config, "chat_agent_web_mode", "auto")).lower() == "auto" and route_like:
+                        tool_notes.append("fact_sensitive_no_web")
+            elif should_web and not web_enabled:
+                tool_notes.append("web_disabled")
+    else:
+        tool_notes.append("free_generation_no_web")
+
+    if (
+        intent.needs_reliable_context
+        and not time_context
+        and retrieval_score < retrieval_threshold
+        and not web_context
+        and not retrieval_context
+    ):
+        tool_notes.append("reliable_context_not_found")
+        tool_notes.append("没有找到足够可靠的资料，请直接说明资料不足，不要编造。")
 
     if memory_reminder:
         tool_notes.append("memory_reminder_ready")
@@ -190,8 +619,10 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         "direct_reply": None,
         "should_call_llm": True,
         "web_used": web_used,
+        "time_context": time_context,
         "profile_context": profile_context,
         "group_context": group_context,
+        "retrieval_context": retrieval_context,
         "history_context": history_context,
         "memory_context": memory_context,
         "web_context": web_context,

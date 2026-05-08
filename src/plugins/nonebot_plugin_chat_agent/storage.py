@@ -254,12 +254,21 @@ async def load_recent_messages(config, session_id: str, limit: int) -> list[dict
 
 
 async def save_memory(config, session_info: dict, memory: dict) -> None:
+    memory_type = str(memory.get("memory_type", "correction") or "correction")
+    if memory_type != "praise":
+        memory_type = "correction"
+    content = str(memory.get("content", "")).strip()
+    if memory_type == "correction" and content and not content.startswith("用户纠正："):
+        content = (
+            f"用户纠正：{content}\n"
+            "使用规则：以后遇到相关问题时，应优先遵守这条纠正，不要重复原错误。"
+        )
     await asyncio.to_thread(
         _save_memory_sync,
         config.chat_agent_db_path,
         session_info,
-        memory.get("memory_type", "correction"),
-        memory.get("content", ""),
+        memory_type,
+        content,
         memory.get("keywords"),
         int(memory.get("importance", 3)),
     )

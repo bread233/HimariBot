@@ -34,6 +34,16 @@ class ChatAgentConfig(BaseModel):
     chat_agent_web_max_results: int = Field(default=3)
     chat_agent_web_read_max_chars: int = Field(default=6000)
     chat_agent_web_user_agent: str = Field(default="Mozilla/5.0 HimariBot/1.0")
+    chat_agent_retrieval_min_score: float = Field(default=0.45)
+    chat_agent_web_relevance_min_score: float = Field(default=0.35)
+    chat_agent_web_final_min_score: float = Field(default=0.30)
+    chat_agent_enable_embedding_retrieval: bool = Field(default=True)
+    chat_agent_embedding_base_url: str = Field(default="http://192.168.0.112:11434")
+    chat_agent_embedding_model: str = Field(default="hf.co/Qwen/Qwen3-Embedding-0.6B-GGUF:Q8_0")
+    chat_agent_embedding_timeout: int = Field(default=30)
+    chat_agent_embedding_reliable_score: float = Field(default=0.68)
+    chat_agent_embedding_candidate_score: float = Field(default=0.60)
+    chat_agent_embedding_min_margin: float = Field(default=0.05)
     chat_agent_db_path: Path = Field(default=Path("data/nonebot_chat_agent/agent.sqlite3"))
     chat_agent_data_dir: Path = Field(default=Path("data/nonebot_chat_agent"))
 
@@ -95,6 +105,16 @@ def get_chat_agent_config() -> ChatAgentConfig:
         chat_agent_web_max_results=int(getattr(config, "chat_agent_web_max_results", 3)),
         chat_agent_web_read_max_chars=int(getattr(config, "chat_agent_web_read_max_chars", 6000)),
         chat_agent_web_user_agent=str(getattr(config, "chat_agent_web_user_agent", "Mozilla/5.0 HimariBot/1.0")),
+        chat_agent_retrieval_min_score=float(getattr(config, "chat_agent_retrieval_min_score", 0.45)),
+        chat_agent_web_relevance_min_score=float(getattr(config, "chat_agent_web_relevance_min_score", 0.35)),
+        chat_agent_web_final_min_score=float(getattr(config, "chat_agent_web_final_min_score", 0.30)),
+        chat_agent_enable_embedding_retrieval=_as_bool(getattr(config, "chat_agent_enable_embedding_retrieval", True), True),
+        chat_agent_embedding_base_url=str(getattr(config, "chat_agent_embedding_base_url", "http://192.168.0.112:11434")),
+        chat_agent_embedding_model=str(getattr(config, "chat_agent_embedding_model", "hf.co/Qwen/Qwen3-Embedding-0.6B-GGUF:Q8_0")),
+        chat_agent_embedding_timeout=int(getattr(config, "chat_agent_embedding_timeout", 30)),
+        chat_agent_embedding_reliable_score=float(getattr(config, "chat_agent_embedding_reliable_score", 0.68)),
+        chat_agent_embedding_candidate_score=float(getattr(config, "chat_agent_embedding_candidate_score", 0.60)),
+        chat_agent_embedding_min_margin=float(getattr(config, "chat_agent_embedding_min_margin", 0.05)),
         chat_agent_db_path=Path(getattr(config, "chat_agent_db_path", "data/nonebot_chat_agent/agent.sqlite3")),
         chat_agent_data_dir=Path(data_dir),
     )
