@@ -79,7 +79,14 @@ def score_text_overlap(query: str, text: str) -> float:
     return max(0.0, min(1.0, score))
 
 
-def build_retrieval_context(prompt: str, profile_context: str, group_context: str, memory_context: str, history_context: str) -> dict:
+def build_retrieval_context(
+    prompt: str,
+    profile_context: str,
+    group_context: str,
+    memory_context: str,
+    history_context: str,
+    min_score: float = 0.45,
+) -> dict:
     candidates = [
         ("profile", profile_context or "", score_text_overlap(prompt, profile_context or "")),
         ("group", group_context or "", score_text_overlap(prompt, group_context or "")),
@@ -109,7 +116,7 @@ def build_retrieval_context(prompt: str, profile_context: str, group_context: st
             best_name = name
             best_text = text
             best_score = score
-    if best_score >= 0.45 and best_text:
+    if best_score >= float(min_score) and best_text:
         return {
             "score": best_score,
             "source": "db",

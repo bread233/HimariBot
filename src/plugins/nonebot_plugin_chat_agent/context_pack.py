@@ -278,11 +278,19 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         tool_notes_embed = ["embedding_retrieval=disabled"]
 
     if not retrieval_context:
-        retrieval = build_retrieval_context(prompt, profile_context, group_context, memory_context, history_context)
+        retrieval = build_retrieval_context(
+            prompt,
+            profile_context,
+            group_context,
+            memory_context,
+            history_context,
+            min_score=retrieval_threshold,
+        )
         retrieval_context = retrieval["content"] if retrieval["source"] == "db" else ""
         retrieval_score = float(retrieval.get("score", 0.0) or 0.0)
 
     web_relevance_threshold = float(getattr(config, "chat_agent_web_relevance_min_score", 0.35))
+    web_final_threshold = float(getattr(config, "chat_agent_web_final_min_score", 0.30))
     should_web, web_query, route_like = _should_web_mode(config, prompt)
     needs_reliable_context = _needs_reliable_context(prompt)
 
@@ -323,12 +331,13 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     web_context = ""
                 if web_context:
                     web_score = score_text_overlap(prompt, web_context)
-                    if web_score >= web_relevance_threshold:
+                    web_final_score = web_score
+                    if web_score >= web_relevance_threshold and web_final_score >= web_final_threshold:
                         web_used = True
                         tool_notes.append(f"web_score={web_score:.2f}")
                     else:
                         web_context = ""
-                        tool_notes.append("web_low_relevance")
+                        tool_notes.append("web_low_relevance_or_stale")
                 if not web_context:
                     tool_notes.append("web_search_failed")
         else:
@@ -339,12 +348,13 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     web_context = ""
                 if web_context:
                     web_score = score_text_overlap(prompt, web_context)
-                    if web_score >= web_relevance_threshold:
+                    web_final_score = web_score
+                    if web_score >= web_relevance_threshold and web_final_score >= web_final_threshold:
                         web_used = True
                         tool_notes.append(f"web_score={web_score:.2f}")
                     else:
                         web_context = ""
-                        tool_notes.append("web_low_relevance")
+                        tool_notes.append("web_low_relevance_or_stale")
                 if not web_context:
                     tool_notes.append("web_search_failed")
                     if str(getattr(config, "chat_agent_web_mode", "auto")).lower() == "auto" and route_like:
