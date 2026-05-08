@@ -7,7 +7,10 @@ import ast
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from .storage import get_log_import_file, insert_log_message, upsert_log_import_file
+try:
+    from .storage import get_log_import_file, insert_log_message, upsert_log_import_file
+except ImportError:
+    from storage import get_log_import_file, insert_log_message, upsert_log_import_file
 
 
 def iter_info_log_files(log_dir: str, target_date: date | None = None) -> list[Path]:
