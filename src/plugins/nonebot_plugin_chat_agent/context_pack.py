@@ -3,6 +3,7 @@ from __future__ import annotations
 from .fact_guard import detect_fact_sensitive_question
 from .group_tools import get_group_info_context, get_group_member_seen_context
 from .memory import build_memory_reminder_for_user, format_memories_for_prompt
+from .math_tools import detect_numeric_compare
 from .profile_store import load_user_profile_context
 from .retrieval import build_embedding_retrieval_context, build_retrieval_context, score_text_overlap
 from .storage import load_memories, load_recent_messages
@@ -212,6 +213,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     if memory_reminder:
         memory_context = f"{memory_context}\n\n{memory_reminder}".strip() if memory_context else memory_reminder
 
+    math_result = detect_numeric_compare(prompt)
+
     history_lines = []
     for item in history:
         role = item.get("role")
@@ -233,7 +236,15 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     retrieval_score = 0.0
     retrieval_threshold = float(getattr(config, "chat_agent_retrieval_min_score", 0.45))
     embedding_status = "empty"
-    if bool(getattr(config, "chat_agent_enable_embedding_retrieval", True)):
+    if math_result is not None:
+        retrieval_context = "确定性计算结果：" + str(math_result.get("result_text", "")).strip()
+        retrieval_score = 1.0
+        tool_notes_embed = [
+            "math_tool=numeric_compare",
+            f"math_result={math_result.get('comparison', '')}",
+        ]
+        embedding_status = "math"
+    elif bool(getattr(config, "chat_agent_enable_embedding_retrieval", True)):
         embedding_candidates = [
             {"source": "profile", "content": profile_context},
             {"source": "group", "content": group_context},
@@ -278,7 +289,9 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     tool_notes.extend(tool_notes_embed)
     web_used = False
 
-    if is_identity_question:
+    if math_result is not None:
+        tool_notes.append("math_tool=numeric_compare")
+    elif is_identity_question:
         tool_notes.append("identity_question_no_web")
     elif needs_reliable_context:
         if retrieval_context and retrieval_score >= retrieval_threshold:
