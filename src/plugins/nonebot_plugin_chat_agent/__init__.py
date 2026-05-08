@@ -14,7 +14,7 @@ from .prompt import build_system_prompt
 from .retrieval_store import init_retrieval_storage
 from .runtime_state import get_chat_agent_lock
 from .storage import build_session_info, init_storage, save_memory, save_message
-from .utils import extract_group_prompt, extract_private_prompt, get_bot_nicknames, get_original_plain_text, strip_thinking, truncate_reply
+from .utils import extract_group_prompt, extract_private_prompt, get_bot_nicknames, get_original_plain_text, sanitize_task_reply, strip_thinking, truncate_reply
 
 
 async def chat_agent_rule(bot: Bot, event: MessageEvent, state: T_State) -> bool:
@@ -50,6 +50,24 @@ def _with_group_at(event: MessageEvent, is_group: bool, text: str):
     if not is_group:
         return text
     return MessageSegment.at(event.user_id) + MessageSegment.text(" " + text)
+
+
+def _should_sanitize_task_reply(prompt: str, context_pack: dict) -> bool:
+    text = (prompt or "").strip()
+    if any(token in text for token in ["你是谁", "自我介绍", "可爱语气", "安慰", "陪聊", "角色扮演"]):
+        return False
+    if context_pack.get("retrieval_context") or context_pack.get("web_context"):
+        return True
+    notes = str(context_pack.get("tool_notes", "") or "")
+    return any(
+        token in notes
+        for token in [
+            "embedding_retrieval=reliable",
+            "web_score=",
+            "reliable_context_not_found",
+            "memory_reminder_ready",
+        ]
+    )
 
 
 @driver.on_startup
@@ -97,6 +115,8 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         context_pack = await build_context_pack(config, session_info, prompt, bot=bot, event=event)
         if context_pack.get("direct_reply"):
             reply = context_pack["direct_reply"]
+            if _should_sanitize_task_reply(prompt, context_pack):
+                reply = sanitize_task_reply(reply) or reply
             if config.chat_agent_enable_history:
                 try:
                     await save_message(config, session_info, "user", prompt)
@@ -140,6 +160,9 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 reply = "我查到了一些相关资料，但模型接口暂时没有响应，稍后可以再试。"
             else:
                 reply = config.chat_agent_llm_timeout_reply
+
+        if reply and _should_sanitize_task_reply(prompt, context_pack):
+            reply = sanitize_task_reply(reply) or reply
 
         if config.chat_agent_enable_history and reply and should_save_assistant:
             try:

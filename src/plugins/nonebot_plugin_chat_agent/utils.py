@@ -21,6 +21,43 @@ def truncate_reply(text: str, max_length: int) -> str:
     return text
 
 
+def sanitize_task_reply(text: str) -> str:
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    original = raw
+
+    def _count_cjk(value: str) -> int:
+        return len(re.findall(r"[\u4e00-\u9fff]", value or ""))
+
+    # Remove common emoji blocks.
+    raw = re.sub(r"[\U0001F300-\U0001FAFF\U00002700-\U000027BF\U000024C2-\U0001F251]", "", raw)
+    # Remove simple kaomoji / emoticons.
+    raw = re.sub(r"[\(（][^()\n]{1,12}[\)）]", "", raw)
+    raw = re.sub(r"(?:\^_\^|T_T|QAQ|QwQ|>_<|=\s*=|:D|:\)|:-\)|:\(|:-\()", "", raw, flags=re.I)
+
+    # Remove obvious cutesy fillers.
+    raw = re.sub(r"(嘿嘿+|啦+|嘛+|哟+|呀+)", "", raw)
+    raw = re.sub(r"哦[~～]+", "哦", raw)
+
+    # Trim chatty tails often appended to task answers.
+    raw = re.sub(r"(记得哦|轻松搞定[~～]?|有需要再聊[~～]?|随时找我[~～]?|一起加油[~～]?|继续加油[~～]?)$", "", raw)
+
+    raw = re.sub(r"[ \t]{2,}", " ", raw)
+    raw = re.sub(r"\n{3,}", "\n\n", raw)
+    cleaned = raw.strip(" \n\t~～")
+
+    if len(cleaned) < 6 and len(original) >= 20:
+        return original.strip()
+
+    orig_cjk = _count_cjk(original)
+    cleaned_cjk = _count_cjk(cleaned)
+    if orig_cjk > 0 and cleaned_cjk < max(1, int(orig_cjk * 0.3)):
+        return original.strip()
+
+    return cleaned
+
+
 def get_bot_nicknames() -> list[str]:
     nick = getattr(get_driver().config, "nickname", None)
     if not nick:
