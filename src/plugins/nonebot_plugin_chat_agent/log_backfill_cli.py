@@ -3,11 +3,17 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-from .log_ingestor import backfill_logs, iter_info_log_files, should_import_log_file
-from .storage import init_storage
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from log_ingestor import backfill_logs, iter_info_log_files, should_import_log_file
+    from storage import init_storage
+else:
+    from .log_ingestor import backfill_logs, iter_info_log_files, should_import_log_file
+    from .storage import init_storage
 
 
 def _build_parser() -> argparse.ArgumentParser:
