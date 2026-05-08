@@ -10,7 +10,7 @@ from .storage import load_memories, load_recent_messages
 from .tool_router import should_use_web_tool
 from .tool_intent import classify_tool_intent
 from .url_tools import build_direct_url_context, extract_urls
-from .web_tools import build_web_context
+from .web_tools import build_web_context, build_web_results, render_web_results_context
 from datetime import datetime
 import re
 from urllib.parse import urlparse
@@ -280,6 +280,52 @@ def _apply_web_source_ranking(raw_context: str, intent, prompt: str, web_query: 
     return ranked_context, top_source_score
 
 
+async def _build_ranked_web_context(config, query: str, intent, prompt: str, tool_notes: list[str]) -> tuple[str, float]:
+    try:
+        results = await build_web_results(config, query)
+    except Exception:
+        results = []
+    if results:
+        keywords = _build_source_keywords(intent, prompt, query)
+        current_year = datetime.now().year
+        scored = []
+        for idx, row in enumerate(results):
+            block = {
+                "idx": idx,
+                "domain": str(row.get("domain", "") or ""),
+                "url": str(row.get("url", "") or ""),
+                "title_line": str(row.get("title", "") or ""),
+                "snippet": f"{row.get('snippet', '')}\n{row.get('excerpt', '')}",
+            }
+            source_score = _score_web_source(block, keywords, current_year)
+            item = dict(row)
+            item["weighted_score"] = source_score
+            item["_idx"] = idx
+            scored.append(item)
+        scored.sort(key=lambda x: (-float(x.get("weighted_score", 0.0)), int(x.get("_idx", 0))))
+        top_domains = [str(x.get("domain", "")) for x in scored if x.get("domain")][:5]
+        top_score = float(scored[0].get("weighted_score", 0.0)) if scored else 0.0
+        tool_notes.append("web_source_rank=structured_generic_ranked")
+        tool_notes.append(f"web_source_domains={','.join(top_domains)}")
+        tool_notes.append(f"web_top_source_score={top_score:.2f}")
+        return render_web_results_context(scored, max_items=3), top_score
+
+    try:
+        raw_context = await build_web_context(config, query)
+    except Exception:
+        raw_context = ""
+    if raw_context:
+        ranked, top_domains, top_score, _ = _rank_web_context_lines(raw_context, intent, prompt, query)
+        tool_notes.append("web_source_rank=fallback_text_ranked")
+        tool_notes.append(f"web_source_domains={','.join(top_domains)}")
+        tool_notes.append(f"web_top_source_score={top_score:.2f}")
+        return ranked, top_score
+    tool_notes.append("web_source_rank=neutral")
+    tool_notes.append("web_source_domains=")
+    tool_notes.append("web_top_source_score=0.00")
+    return "", 0.0
+
+
 async def build_context_pack(config, session_info: dict, prompt: str, bot=None, event=None) -> dict:
     intent = classify_tool_intent(prompt)
     if intent.needs_time:
@@ -486,12 +532,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         tool_notes.append("identity_question_no_web")
     elif intent.kind == "current_fact":
         if web_enabled:
-            try:
-                web_context = await build_web_context(config, web_query)
-            except Exception:
-                web_context = ""
+            web_context, top_source_score = await _build_ranked_web_context(config, web_query, intent, prompt, tool_notes)
             if web_context:
-                web_context, top_source_score = _apply_web_source_ranking(web_context, intent, prompt, web_query, tool_notes)
                 web_relevance_score = score_text_overlap(prompt, web_context)
                 years = [int(y) for y in re.findall(r"20\d{2}", web_context)]
                 current_year = datetime.now().year
@@ -527,12 +569,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             tool_notes.append("retrieval_source=db")
             tool_notes.append(f"retrieval_score={retrieval_score:.2f}")
             if should_web and web_enabled and route_like and embedding_status != "reliable":
-                try:
-                    web_context = await build_web_context(config, web_query)
-                except Exception:
-                    web_context = ""
+                web_context, _ = await _build_ranked_web_context(config, web_query, intent, prompt, tool_notes)
                 if web_context:
-                    web_context, _ = _apply_web_source_ranking(web_context, intent, prompt, web_query, tool_notes)
                     web_score = score_text_overlap(prompt, web_context)
                     web_final_score = web_score
                     if web_score >= web_relevance_threshold and web_final_score >= web_final_threshold:
@@ -545,12 +583,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     tool_notes.append("web_search_failed")
         else:
             if should_web and web_enabled:
-                try:
-                    web_context = await build_web_context(config, web_query)
-                except Exception:
-                    web_context = ""
+                web_context, _ = await _build_ranked_web_context(config, web_query, intent, prompt, tool_notes)
                 if web_context:
-                    web_context, _ = _apply_web_source_ranking(web_context, intent, prompt, web_query, tool_notes)
                     web_score = score_text_overlap(prompt, web_context)
                     web_final_score = web_score
                     if web_score >= web_relevance_threshold and web_final_score >= web_final_threshold:

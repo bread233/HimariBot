@@ -312,7 +312,87 @@ async def read_url(config, url: str) -> dict | None:
     return {"url": url, "title": title, "text": text, "meta_description": meta_description}
 
 
+def _extract_domain(url: str) -> str:
+    try:
+        host = (urlparse(str(url or "").strip()).netloc or "").lower()
+    except Exception:
+        return ""
+    return host[4:] if host.startswith("www.") else host
+
+
+async def build_web_results(config, query: str) -> list[dict]:
+    try:
+        results = await search_web(config, query)
+    except Exception:
+        return []
+    if not results:
+        return []
+    max_results = max(1, int(getattr(config, "chat_agent_web_max_results", 3)))
+    snippet_max = int(getattr(config, "chat_agent_web_snippet_max_chars", 260))
+    excerpt_max = int(getattr(config, "chat_agent_web_excerpt_max_chars", 400))
+    rows: list[dict] = []
+    for item in results[:max_results]:
+        title = _clean_text(item.get("title", ""))
+        url = _clean_text(item.get("url", ""))
+        snippet = _clean_text(item.get("snippet", ""))
+        if snippet_max > 0 and len(snippet) > snippet_max:
+            snippet = snippet[:snippet_max].rstrip()
+        page = None
+        if url:
+            try:
+                page = await read_url(config, url)
+            except Exception:
+                page = None
+        excerpt = ""
+        if page:
+            excerpt = _clean_text(f"{page.get('meta_description', '')} {page.get('text', '')}")
+            if excerpt_max > 0 and len(excerpt) > excerpt_max:
+                excerpt = excerpt[:excerpt_max].rstrip()
+        score = float(item.get("score", 0.0) or 0.0)
+        weighted_score = float(item.get("weighted_score", 0.0) or 0.0)
+        rows.append(
+            {
+                "title": title,
+                "url": url,
+                "domain": _extract_domain(url),
+                "snippet": snippet,
+                "excerpt": excerpt,
+                "score": score,
+                "weighted_score": weighted_score,
+            }
+        )
+    return rows
+
+
+def render_web_results_context(results: list[dict], *, max_items: int = 3) -> str:
+    if not results:
+        return ""
+    lines = ["Web results:"]
+    for i, row in enumerate(results[:max_items], 1):
+        title = _clean_text(row.get("title", ""))
+        url = _clean_text(row.get("url", ""))
+        domain = _clean_text(row.get("domain", ""))
+        snippet = _clean_text(row.get("snippet", ""))
+        excerpt = _clean_text(row.get("excerpt", ""))
+        score = float(row.get("weighted_score", 0.0) or row.get("score", 0.0) or 0.0)
+        lines.extend(
+            [
+                f"[{i}] {title or url}",
+                f"Domain: {domain or 'unknown'}",
+                f"URL: {url}",
+                f"Snippet: {snippet}",
+                f"Excerpt: {excerpt}",
+                f"Source-Score: {score:.2f}",
+                "",
+            ]
+        )
+    return "\n".join(lines).strip()
+
+
 async def build_web_context(config, query: str) -> str:
+    structured = await build_web_results(config, query)
+    if structured:
+        return render_web_results_context(structured, max_items=max(1, int(getattr(config, "chat_agent_web_max_results", 3))))
     try:
         results = await search_web(config, query)
     except Exception:
