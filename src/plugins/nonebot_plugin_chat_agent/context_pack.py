@@ -237,9 +237,17 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         embedding_candidates = [
             {"source": "profile", "content": profile_context},
             {"source": "group", "content": group_context},
-            {"source": "memory", "content": memory_context},
-            {"source": "history", "content": history_context},
         ]
+        for item in memories:
+            content = str(item.get("content", "")).strip()
+            if not content:
+                continue
+            row_type = str(item.get("memory_type", "memory") or "memory")
+            source = "correction" if row_type == "correction" else "memory"
+            embedding_candidates.append({"source": source, "content": content})
+        if not any(c["source"] in {"memory", "correction"} and c["content"] for c in embedding_candidates):
+            embedding_candidates.append({"source": "memory", "content": memory_context})
+        embedding_candidates.append({"source": "history", "content": history_context})
         embedding_result = await build_embedding_retrieval_context(config, prompt, embedding_candidates)
         embedding_status = str(embedding_result.get("status", "error"))
         tool_note = embedding_result.get("notes") or ""

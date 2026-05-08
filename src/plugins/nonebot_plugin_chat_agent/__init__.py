@@ -11,6 +11,7 @@ from .llm_client import chat_completions
 from .memory import detect_feedback
 from .profile_store import init_profile_storage, upsert_user_seen
 from .prompt import build_system_prompt
+from .retrieval_store import init_retrieval_storage
 from .runtime_state import get_chat_agent_lock
 from .storage import build_session_info, init_storage, save_memory, save_message
 from .utils import extract_group_prompt, extract_private_prompt, get_bot_nicknames, get_original_plain_text, strip_thinking, truncate_reply
@@ -58,6 +59,7 @@ async def _init_chat_agent_storage() -> None:
     if config.chat_agent_enable_history or config.chat_agent_enable_feedback_memory:
         await init_storage(config)
     await init_profile_storage(config)
+    await init_retrieval_storage(config)
 
 
 @chat_agent.handle()

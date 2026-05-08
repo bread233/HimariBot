@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from .embedding_client import cosine_similarity, embed_texts
+from .embedding_client import cosine_similarity, embed_texts_with_cache
 
 _STOPWORDS = {
     "用户",
@@ -159,8 +159,11 @@ async def build_embedding_retrieval_context(config, prompt: str, candidates: lis
 
     query = build_embedding_query(prompt)
     docs = [build_embedding_doc(item["source"], item["content"]) for item in usable]
+    embed_items = [{"source": "query", "content": query}] + [
+        {"source": usable[idx]["source"], "content": docs[idx]} for idx in range(len(usable))
+    ]
     try:
-        vectors = await embed_texts(config, [query] + docs)
+        vectors = await embed_texts_with_cache(config, embed_items)
     except Exception as e:
         return {"status": "error", "score": 0.0, "weighted_score": 0.0, "margin": 0.0, "source": "", "content": "", "candidate_content": "", "notes": f"embedding_error={type(e).__name__}"}
 

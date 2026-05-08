@@ -9,8 +9,8 @@ _CORRECTION_KEYWORDS = [
     "不是这样",
     "别瞎说",
     "你在胡说",
-    "你又编",
-    "实际上",
+    "你又错",
+    "实际是",
     "应该是",
     "以后",
     "记住",
@@ -111,9 +111,9 @@ def detect_feedback(text: str) -> dict | None:
     if matched:
         return {
             "memory_type": "correction",
-            "content": f"用户纠正或提醒：{raw}",
+            "content": f"用户纠正：{raw}\n使用规则：以后遇到相关问题时，应优先遵守这条纠正，不要重复原错误。",
             "keywords": ",".join(matched),
-            "importance": 5 if any(kw in raw for kw in {"你错了", "不对", "不是这样", "别瞎说", "你在胡说", "你又编", "明明是", "没查", "乱说", "别乱说", "不要乱说"}) else 4,
+            "importance": 5 if any(kw in raw for kw in {"你错了", "不对", "不是这样", "别瞎说", "你在胡说", "你又错", "明明是", "没查", "乱说", "别乱说", "不要乱说"}) else 4,
         }
 
     matched = [kw for kw in _PRAISE_KEYWORDS if kw in raw]

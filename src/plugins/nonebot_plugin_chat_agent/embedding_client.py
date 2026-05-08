@@ -4,6 +4,7 @@ import math
 
 import httpx
 
+from .retrieval_store import get_cached_embedding, set_cached_embedding
 
 async def embed_texts(config, texts: list[str]) -> list[list[float]]:
     base_url = str(getattr(config, "chat_agent_embedding_base_url", "http://192.168.0.112:11434")).rstrip("/")
@@ -17,7 +18,7 @@ async def embed_texts(config, texts: list[str]) -> list[list[float]]:
     embeddings = data.get("embeddings") or []
     if not isinstance(embeddings, list) or not embeddings:
         raise RuntimeError(f"empty embeddings response: {data}")
-    return embeddings
+    return [[float(x) for x in row] for row in embeddings]
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -30,3 +31,37 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     if na == 0.0 or nb == 0.0:
         return 0.0
     return dot / (na * nb)
+
+
+async def embed_texts_with_cache(config, items: list[dict]) -> list[list[float]]:
+    ordered: list[list[float] | None] = [None] * len(items)
+    missing_positions: list[int] = []
+    missing_texts: list[str] = []
+    missing_meta: list[tuple[str, str]] = []
+
+    for idx, item in enumerate(items):
+        source = str(item.get("source", "")).strip()
+        content = str(item.get("content", "")).strip()
+        if not content:
+            ordered[idx] = []
+            continue
+        cached = await get_cached_embedding(config, source, content)
+        if cached is not None:
+            ordered[idx] = cached
+            continue
+        missing_positions.append(idx)
+        missing_texts.append(content)
+        missing_meta.append((source, content))
+
+    if missing_texts:
+        computed = await embed_texts(config, missing_texts)
+        for i, vec in enumerate(computed):
+            pos = missing_positions[i]
+            source, content = missing_meta[i]
+            ordered[pos] = vec
+            try:
+                await set_cached_embedding(config, source, content, vec)
+            except Exception:
+                pass
+
+    return [vec or [] for vec in ordered]
