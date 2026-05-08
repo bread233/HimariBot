@@ -7,7 +7,7 @@ import ast
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from .storage import insert_log_message, upsert_log_import_file
+from .storage import get_log_import_file, insert_log_message, upsert_log_import_file
 
 
 def iter_info_log_files(log_dir: str, target_date: date | None = None) -> list[Path]:
@@ -297,10 +297,47 @@ async def import_log_file(config, path: Path) -> dict:
     }
 
 
-async def backfill_logs(config, target_date: date | None = None) -> dict:
+async def should_import_log_file(config, path: Path, changed_only: bool = True) -> bool:
+    if not changed_only:
+        return True
+    info = await get_log_import_file(config, str(path))
+    if not info:
+        return True
+    try:
+        stat = path.stat()
+    except Exception:
+        return False
+    old_size = info.get("file_size")
+    old_mtime = info.get("mtime")
+    if old_size is None or int(old_size) != int(stat.st_size):
+        return True
+    if old_mtime is None or float(old_mtime) != float(stat.st_mtime):
+        return True
+    return False
+
+
+async def backfill_logs(
+    config,
+    target_date: date | None = None,
+    changed_only: bool = True,
+    limit_files: int | None = None,
+) -> dict:
     files = iter_info_log_files(str(getattr(config, "chat_agent_log_dir", "/app/log")), target_date=target_date)
+    candidate_files: list[Path] = []
+    skipped_files_count = 0
+    for path in files:
+        if await should_import_log_file(config, path, changed_only=changed_only):
+            candidate_files.append(path)
+        else:
+            skipped_files_count += 1
+    if limit_files is not None and int(limit_files) >= 0:
+        candidate_files = candidate_files[: int(limit_files)]
+
     totals = {
         "files_count": len(files),
+        "candidate_files_count": len(candidate_files),
+        "skipped_files_count": skipped_files_count,
+        "imported_files_count": 0,
         "scanned_count": 0,
         "inserted_count": 0,
         "duplicate_count": 0,
@@ -308,9 +345,10 @@ async def backfill_logs(config, target_date: date | None = None) -> dict:
         "error_count": 0,
         "files": [],
     }
-    for path in files:
+    for path in candidate_files:
         result = await import_log_file(config, path)
         totals["files"].append(result)
+        totals["imported_files_count"] += 1
         totals["scanned_count"] += int(result.get("scanned_count", 0))
         totals["inserted_count"] += int(result.get("inserted_count", 0))
         totals["duplicate_count"] += int(result.get("duplicate_count", 0))

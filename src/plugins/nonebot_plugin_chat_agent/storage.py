@@ -423,6 +423,40 @@ def _upsert_log_import_file_sync(db_path: Path, row: dict) -> None:
         conn.close()
 
 
+def _get_log_import_file_sync(db_path: Path, file_path: str) -> dict | None:
+    if not db_path.exists():
+        return None
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.execute(
+            """
+            SELECT
+                file_path, file_size, mtime, sha256, imported_at,
+                message_count, skipped_count, status, error
+            FROM chat_agent_log_import_files
+            WHERE file_path = ?
+            LIMIT 1
+            """,
+            (str(file_path),),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "file_path": row[0],
+            "file_size": row[1],
+            "mtime": row[2],
+            "sha256": row[3],
+            "imported_at": row[4],
+            "message_count": row[5],
+            "skipped_count": row[6],
+            "status": row[7],
+            "error": row[8],
+        }
+    finally:
+        conn.close()
+
+
 async def init_storage(config) -> None:
     await asyncio.to_thread(_init_storage_sync, config.chat_agent_db_path)
 
@@ -495,3 +529,7 @@ async def insert_log_message(config, row: dict) -> bool:
 
 async def upsert_log_import_file(config, row: dict) -> None:
     await asyncio.to_thread(_upsert_log_import_file_sync, config.chat_agent_db_path, row)
+
+
+async def get_log_import_file(config, file_path: str) -> dict | None:
+    return await asyncio.to_thread(_get_log_import_file_sync, config.chat_agent_db_path, str(file_path))
