@@ -34,6 +34,7 @@ class ChatAgentConfig(BaseModel):
     chat_agent_web_max_results: int = Field(default=3)
     chat_agent_web_read_max_chars: int = Field(default=6000)
     chat_agent_web_user_agent: str = Field(default="Mozilla/5.0 HimariBot/1.0")
+    chat_agent_log_dir: str = Field(default="/app/log")
     chat_agent_retrieval_min_score: float = Field(default=0.45)
     chat_agent_web_relevance_min_score: float = Field(default=0.35)
     chat_agent_web_final_min_score: float = Field(default=0.30)
@@ -105,6 +106,7 @@ def get_chat_agent_config() -> ChatAgentConfig:
         chat_agent_web_max_results=int(getattr(config, "chat_agent_web_max_results", 3)),
         chat_agent_web_read_max_chars=int(getattr(config, "chat_agent_web_read_max_chars", 6000)),
         chat_agent_web_user_agent=str(getattr(config, "chat_agent_web_user_agent", "Mozilla/5.0 HimariBot/1.0")),
+        chat_agent_log_dir=str(getattr(config, "chat_agent_log_dir", "/app/log")),
         chat_agent_retrieval_min_score=float(getattr(config, "chat_agent_retrieval_min_score", 0.45)),
         chat_agent_web_relevance_min_score=float(getattr(config, "chat_agent_web_relevance_min_score", 0.35)),
         chat_agent_web_final_min_score=float(getattr(config, "chat_agent_web_final_min_score", 0.30)),
