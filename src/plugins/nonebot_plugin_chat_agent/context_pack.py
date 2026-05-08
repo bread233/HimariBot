@@ -13,6 +13,7 @@ from .url_tools import build_direct_url_context, extract_urls
 from .web_tools import build_web_context
 from datetime import datetime
 import re
+from urllib.parse import urlparse
 
 
 def _is_context_question(prompt: str) -> bool:
@@ -140,6 +141,143 @@ def _should_web_mode(config, prompt: str) -> tuple[bool, str, bool]:
     if route or guard:
         return web_enabled, (route or {}).get("query") or (guard.get("search_query") if guard else None) or prompt, True
     return False, prompt, False
+
+
+def _extract_domain(url: str) -> str:
+    try:
+        host = (urlparse(str(url or "").strip()).netloc or "").lower()
+    except Exception:
+        return ""
+    return host[4:] if host.startswith("www.") else host
+
+
+def _extract_result_blocks(raw_context: str) -> list[dict]:
+    lines = (raw_context or "").splitlines()
+    if not lines:
+        return []
+    blocks: list[dict] = []
+    current: list[str] = []
+    for line in lines[1:]:
+        if re.match(r"^\[\d+\]\s*", line.strip()):
+            if current:
+                blocks.append({"lines": current[:]})
+            current = [line]
+        elif current:
+            current.append(line)
+    if current:
+        blocks.append({"lines": current[:]})
+    parsed: list[dict] = []
+    for idx, block in enumerate(blocks):
+        block_lines = block.get("lines", [])
+        text = "\n".join(block_lines)
+        text_norm = text.replace("\uFF1A", ":")
+        m = (
+            re.search(r"URL:\s*(\S+)", text_norm, re.IGNORECASE)
+            or re.search(r"url:\s*(\S+)", text_norm)
+            or re.search(r"source-domain:\s*(\S+)", text_norm, re.IGNORECASE)
+            or re.search(r"source:\s*(\S+)", text_norm, re.IGNORECASE)
+            or re.search(r"domain:\s*(\S+)", text_norm, re.IGNORECASE)
+        )
+        url = m.group(1).strip() if m else ""
+        parsed.append(
+            {
+                "idx": idx,
+                "lines": block_lines[:],
+                "title_line": block_lines[0] if block_lines else "",
+                "url": url,
+                "domain": _extract_domain(url),
+                "snippet": text,
+            }
+        )
+    return parsed
+
+
+def _build_source_keywords(intent, prompt: str, web_query: str) -> set[str]:
+    merged = " ".join(
+        [
+            str(getattr(intent, "subject", "") or ""),
+            str(getattr(intent, "query_terms", "") or ""),
+            str(web_query or ""),
+            str(prompt or ""),
+        ]
+    ).lower()
+    return {tok for tok in re.findall(r"[\w.-]{2,}", merged, flags=re.UNICODE) if len(tok) > 1}
+
+
+def _score_web_source(block: dict, keywords: set[str], current_year: int) -> float:
+    domain = str(block.get("domain", "") or "").lower()
+    url = str(block.get("url", "") or "").lower()
+    title = str(block.get("title_line", "") or "").lower()
+    snippet = str(block.get("snippet", "") or "").lower()
+    score = 0.0
+    if domain:
+        score += 0.03
+
+    token_bonus = 0.0
+    for field in (domain, url, title, snippet):
+        if field and any(k in field for k in keywords):
+            token_bonus += 0.05
+    score += min(0.20, token_bonus)
+
+    hi_signals = [
+        "official", "docs", "documentation", "help", "support", "developer", "developers",
+        "blog", "news", "release", "releases", "announcement", "update", "version",
+        "changelog", "patch-notes", "status",
+    ]
+    low_signals = ["wiki", "fandom", "reddit", "forum", "zhihu", "csdn", "game8"]
+    bag = f"{url}\n{title}\n{snippet}"
+    if any(s in bag for s in hi_signals):
+        score += 0.08
+    if any(s in bag for s in low_signals):
+        score -= 0.08
+
+    years = [int(y) for y in re.findall(r"20\d{2}", bag)]
+    if years:
+        gap = current_year - max(years)
+        if gap >= 4:
+            score -= 0.20
+        elif gap >= 2:
+            score -= 0.10
+
+    return max(0.0, min(1.0, score))
+
+
+def _rank_web_context_lines(raw_context: str, intent, prompt: str, web_query: str) -> tuple[str, list[str], float, str]:
+    lines = (raw_context or "").splitlines()
+    if not lines:
+        return raw_context, [], 0.0, "neutral"
+    header = lines[0]
+    blocks = _extract_result_blocks(raw_context)
+    if not blocks:
+        return raw_context, [], 0.0, "neutral"
+    keywords = _build_source_keywords(intent, prompt, web_query)
+    current_year = datetime.now().year
+    for block in blocks:
+        block["source_score"] = _score_web_source(block, keywords, current_year)
+    blocks.sort(key=lambda b: (float(b.get("source_score", 0.0)), -int(b.get("idx", 0))), reverse=True)
+
+    top_domains = [str(b.get("domain", "")) for b in blocks if b.get("domain")][:5]
+    top_source_score = float(blocks[0].get("source_score", 0.0)) if blocks else 0.0
+    source_rank = "generic_ranked" if blocks else "neutral"
+
+    out = [header]
+    for i, block in enumerate(blocks, 1):
+        body = [ln for ln in block.get("lines", []) if not ln.startswith("Source-Domain:") and not ln.startswith("Source-Score:")]
+        if body:
+            body[0] = re.sub(r"^\[\d+\]", f"[{i}]", body[0], count=1)
+        out.extend(body)
+        out.append(f"Source-Domain: {block.get('domain') or 'unknown'}")
+        out.append(f"Source-Score: {float(block.get('source_score', 0.0)):.2f}")
+        out.append("")
+    return "\n".join(out).strip(), top_domains, top_source_score, source_rank
+
+
+def _apply_web_source_ranking(raw_context: str, intent, prompt: str, web_query: str, tool_notes: list[str]) -> tuple[str, float]:
+    ranked_context, top_domains, top_source_score, source_rank = _rank_web_context_lines(raw_context, intent, prompt, web_query)
+    tool_notes.append(f"web_source_rank={source_rank}")
+    tool_notes.append(f"web_source_domains={','.join(top_domains)}")
+    tool_notes.append(f"web_top_source_score={top_source_score:.2f}")
+    return ranked_context, top_source_score
 
 
 async def build_context_pack(config, session_info: dict, prompt: str, bot=None, event=None) -> dict:
@@ -353,6 +491,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             except Exception:
                 web_context = ""
             if web_context:
+                web_context, top_source_score = _apply_web_source_ranking(web_context, intent, prompt, web_query, tool_notes)
                 web_relevance_score = score_text_overlap(prompt, web_context)
                 years = [int(y) for y in re.findall(r"20\d{2}", web_context)]
                 current_year = datetime.now().year
@@ -367,6 +506,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 else:
                     freshness_score = 0.6
                 web_final_score = web_relevance_score * freshness_score
+                web_final_score = min(1.0, web_final_score + min(0.10, top_source_score * 0.10))
                 tool_notes.append(f"web_relevance_score={web_relevance_score:.2f}")
                 tool_notes.append(f"web_freshness_score={freshness_score:.2f}")
                 tool_notes.append(f"web_final_score={web_final_score:.2f}")
@@ -392,6 +532,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 except Exception:
                     web_context = ""
                 if web_context:
+                    web_context, _ = _apply_web_source_ranking(web_context, intent, prompt, web_query, tool_notes)
                     web_score = score_text_overlap(prompt, web_context)
                     web_final_score = web_score
                     if web_score >= web_relevance_threshold and web_final_score >= web_final_threshold:
@@ -409,6 +550,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 except Exception:
                     web_context = ""
                 if web_context:
+                    web_context, _ = _apply_web_source_ranking(web_context, intent, prompt, web_query, tool_notes)
                     web_score = score_text_overlap(prompt, web_context)
                     web_final_score = web_score
                     if web_score >= web_relevance_threshold and web_final_score >= web_final_threshold:
