@@ -55,6 +55,18 @@ def normalize_message_text(text: str) -> str:
     return s
 
 
+def _is_ascii_command_like(s: str) -> bool:
+    parts = s.split()
+    if not s.isascii() or not parts:
+        return False
+    first = parts[0].lower()
+    if first.startswith(("bf", "cs2")):
+        return True
+    if first in {"help", "stat", "recent", "bind", "init"} and len(parts) <= 3:
+        return True
+    return False
+
+
 def is_low_value_text(text: str) -> bool:
     s = normalize_message_text(text)
     if not s:
@@ -64,6 +76,8 @@ def is_low_value_text(text: str) -> bool:
     if len(s) < 2:
         return True
     if s.startswith("/"):
+        return True
+    if _is_ascii_command_like(s):
         return True
     low_fragments = (
         "[json:",
@@ -80,6 +94,20 @@ def is_low_value_text(text: str) -> bool:
         "[CQ:file",
     )
     if any(f in s for f in low_fragments):
+        return True
+    plugin_fragments = (
+        "成功绑定",
+        "更新渠道数据",
+        "尚未配置",
+        "服务器查询仅支持",
+        "图片渲染失败",
+        "Page.screenshot",
+        "插件使用帮助",
+        "命令:",
+        "Traceback",
+        "ERROR",
+    )
+    if any(f in s for f in plugin_fragments):
         return True
     if s in {"嗯", "啊", "哦", "草", "艹", "？", "?", "。"}:
         return True
@@ -186,6 +214,8 @@ def build_daily_summary_row(messages: list[dict]) -> dict | None:
             break
 
     sample_texts = _pick_representation_texts(messages_sorted, limit=20)
+    if not sample_texts:
+        return None
     keywords = _extract_keywords(sample_texts, limit=30)
 
     message_count = len(messages_sorted)
@@ -269,6 +299,7 @@ def load_log_messages_for_summary(config, date_from: str | None, date_to: str | 
                 source_file,
                 log_time_text,
                 event_time,
+                bot_id,
                 message_id,
                 message_type,
                 group_id,
@@ -294,14 +325,15 @@ def load_log_messages_for_summary(config, date_from: str | None, date_to: str | 
                     "source_file": r[1],
                     "log_time_text": r[2],
                     "event_time": r[3],
-                    "message_id": r[4],
-                    "message_type": r[5],
-                    "group_id": r[6],
-                    "group_name": r[7],
-                    "user_id": r[8],
-                    "nickname": r[9],
-                    "group_card": r[10],
-                    "plain_text": r[11],
+                    "bot_id": r[4],
+                    "message_id": r[5],
+                    "message_type": r[6],
+                    "group_id": r[7],
+                    "group_name": r[8],
+                    "user_id": r[9],
+                    "nickname": r[10],
+                    "group_card": r[11],
+                    "plain_text": r[12],
                 }
             )
         return out
@@ -330,6 +362,10 @@ async def build_daily_summaries(
         try:
             user_id = str(r.get("user_id", "") or "").strip()
             if not user_id:
+                skipped_count += 1
+                continue
+            bot_id = str(r.get("bot_id", "") or "").strip()
+            if bot_id and user_id == bot_id:
                 skipped_count += 1
                 continue
             group_id_norm = _safe_group_id(r.get("group_id"))
