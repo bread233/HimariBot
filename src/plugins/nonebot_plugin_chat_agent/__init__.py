@@ -135,6 +135,8 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             messages.append({"role": "system", "content": context_pack["group_context"]})
         if context_pack.get("retrieval_context"):
             messages.append({"role": "system", "content": "本地检索到的相关资料：\n" + context_pack["retrieval_context"]})
+        if context_pack.get("summary_retrieval_context"):
+            messages.append({"role": "system", "content": "历史聊天摘要检索结果：\n" + context_pack["summary_retrieval_context"]})
         if context_pack.get("memory_context"):
             messages.append({"role": "system", "content": context_pack["memory_context"]})
         if context_pack.get("history_context"):
