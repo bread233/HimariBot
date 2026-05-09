@@ -183,6 +183,25 @@ def _init_storage_sync(db_path: Path) -> None:
             ON chat_agent_user_daily_summaries(content_hash)
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_agent_user_style_profiles (
+                profile_key TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                group_id TEXT NOT NULL DEFAULT '',
+                message_count INTEGER NOT NULL DEFAULT 0,
+                peer_reply_count INTEGER NOT NULL DEFAULT 0,
+                sample_messages_json TEXT NOT NULL DEFAULT '[]',
+                sample_peer_replies_json TEXT NOT NULL DEFAULT '[]',
+                user_style_text TEXT NOT NULL DEFAULT '',
+                peer_response_style_text TEXT NOT NULL DEFAULT '',
+                recommended_bot_style TEXT NOT NULL DEFAULT '',
+                content_hash TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
         conn.commit()
     finally:
         conn.close()
@@ -776,3 +795,61 @@ async def get_user_daily_summary(config, summary_key: str) -> dict | None:
 
 async def list_user_daily_summaries(config, user_id: str | None = None, limit: int = 20) -> list[dict]:
     return await asyncio.to_thread(_list_user_daily_summaries_sync, config.chat_agent_db_path, user_id, limit)
+
+
+def _upsert_user_style_profile_sync(db_path: Path, profile: dict) -> None:
+    _ensure_parent(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """
+            INSERT INTO chat_agent_user_style_profiles (
+                profile_key, user_id, group_id,
+                message_count, peer_reply_count,
+                sample_messages_json, sample_peer_replies_json,
+                user_style_text, peer_response_style_text, recommended_bot_style,
+                content_hash, created_at, updated_at
+            ) VALUES (
+                ?, ?, ?,
+                ?, ?,
+                ?, ?,
+                ?, ?, ?,
+                ?, ?, ?
+            )
+            ON CONFLICT(profile_key) DO UPDATE SET
+                user_id=excluded.user_id,
+                group_id=excluded.group_id,
+                message_count=excluded.message_count,
+                peer_reply_count=excluded.peer_reply_count,
+                sample_messages_json=excluded.sample_messages_json,
+                sample_peer_replies_json=excluded.sample_peer_replies_json,
+                user_style_text=excluded.user_style_text,
+                peer_response_style_text=excluded.peer_response_style_text,
+                recommended_bot_style=excluded.recommended_bot_style,
+                content_hash=excluded.content_hash,
+                updated_at=excluded.updated_at
+            """,
+            (
+                profile.get("profile_key", ""),
+                profile.get("user_id", ""),
+                profile.get("group_id", "") or "",
+                int(profile.get("message_count", 0) or 0),
+                int(profile.get("peer_reply_count", 0) or 0),
+                profile.get("sample_messages_json", "[]"),
+                profile.get("sample_peer_replies_json", "[]"),
+                profile.get("user_style_text", ""),
+                profile.get("peer_response_style_text", ""),
+                profile.get("recommended_bot_style", ""),
+                profile.get("content_hash", ""),
+                profile.get("created_at", now),
+                profile.get("updated_at", now),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+async def upsert_user_style_profile(config, profile: dict) -> None:
+    await asyncio.to_thread(_upsert_user_style_profile_sync, config.chat_agent_db_path, profile)
