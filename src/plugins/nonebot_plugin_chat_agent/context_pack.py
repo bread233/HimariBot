@@ -15,6 +15,11 @@ from datetime import datetime
 import re
 from urllib.parse import urlparse
 
+try:
+    from .summary_retrieval import retrieve_daily_summaries
+except ImportError:
+    retrieve_daily_summaries = None
+
 
 def _is_context_question(prompt: str) -> bool:
     text = (prompt or "").strip()
@@ -326,6 +331,52 @@ async def _build_ranked_web_context(config, query: str, intent, prompt: str, too
     return "", 0.0
 
 
+def _render_summary_retrieval_context(result: dict, max_items: int = 3) -> str:
+    if not result or not result.get("reliable"):
+        return ""
+    candidates = result.get("results") or []
+    if not candidates:
+        return ""
+
+    lines = ["Historical chat memory candidates:"]
+    for i, row in enumerate(candidates[:max_items], start=1):
+        score = float(row.get("score", 0.0))
+        overlap = int(row.get("overlap_count", 0))
+        terms = ",".join(row.get("matched_terms") or [])
+        lines.append(f"[{i}] score={score:.4f} overlap={overlap} terms={terms}")
+
+        date = str(row.get("summary_date", ""))
+        lines.append(f"Date: {date}" if date else "Date: unknown")
+
+        group_id = str(row.get("group_id", ""))
+        if group_id:
+            lines.append(f"Group: {group_id}")
+
+        user_id = str(row.get("user_id", ""))
+        if user_id:
+            lines.append(f"User: {user_id}")
+
+        nickname = str(row.get("nickname", ""))
+        if nickname:
+            lines.append(f"Nickname: {nickname}")
+
+        group_card = str(row.get("group_card", ""))
+        if group_card:
+            lines.append(f"Group card: {group_card}")
+
+        lines.append("Summary:")
+        head = str(row.get("summary_text_head", ""))
+        if len(head) > 600:
+            head = head[:600] + "..."
+        lines.append(head)
+        lines.append("")
+
+    out = "\n".join(lines).strip()
+    if len(out) > 2500:
+        return out[:2500] + "\n...(truncated)"
+    return out
+
+
 async def build_context_pack(config, session_info: dict, prompt: str, bot=None, event=None) -> dict:
     intent = classify_tool_intent(prompt)
     if intent.needs_time:
@@ -494,9 +545,41 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     needs_reliable_context = _needs_reliable_context(prompt)
 
     web_context = ""
+    summary_retrieval_context = ""
     tool_notes = []
     tool_notes.extend(tool_notes_embed)
     tool_notes.append(f"intent={intent.kind}")
+
+    if retrieve_daily_summaries and getattr(config, "chat_agent_embedding_base_url", "") and getattr(config, "chat_agent_embedding_model", "") and prompt:
+        if intent.kind not in ("creative", "time", "current_fact"):
+            try:
+                sr_result = await retrieve_daily_summaries(
+                    config,
+                    prompt,
+                    top_k=3,
+                    candidate_limit=None,
+                    min_score=0.60,
+                    min_margin=0.04,
+                    overlap_min_score=0.50,
+                    min_overlap=2,
+                    strong_score=0.68,
+                    weak_margin_floor=0.02,
+                )
+                if sr_result.get("reliable"):
+                    summary_retrieval_context = _render_summary_retrieval_context(sr_result)
+
+                tool_notes.append(f"summary_retrieval_candidate_count={sr_result.get('candidate_count', 0)}")
+                tool_notes.append(f"summary_retrieval_reliable={str(sr_result.get('reliable', False)).lower()}")
+                tool_notes.append(f"summary_retrieval_by={sr_result.get('reliable_by', '')}")
+                tool_notes.append(f"summary_retrieval_reason={sr_result.get('gate_reason', '')}")
+                tool_notes.append(f"summary_retrieval_top1_score={float(sr_result.get('top1_score', 0.0)):.4f}")
+                tool_notes.append(f"summary_retrieval_margin={float(sr_result.get('margin', 0.0)):.4f}")
+                tool_notes.append(f"summary_retrieval_overlap={int(sr_result.get('top1_overlap_count', 0))}")
+                terms = (sr_result.get("top1_matched_terms") or [])[:6]
+                tool_notes.append(f"summary_retrieval_terms={','.join(terms)}")
+            except Exception as e:
+                tool_notes.append(f"summary_retrieval_error={str(e)[:120]}")
+
     tool_notes.append(f"subject={intent.subject}")
     tool_notes.append(f"time_hint={intent.time_hint}")
     tool_notes.append(f"intent_reason={intent.reason}")
@@ -608,6 +691,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         and retrieval_score < retrieval_threshold
         and not web_context
         and not retrieval_context
+        and not summary_retrieval_context
     ):
         tool_notes.append("reliable_context_not_found")
         tool_notes.append("没有找到足够可靠的资料，请直接说明资料不足，不要编造。")
@@ -623,6 +707,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         "profile_context": profile_context,
         "group_context": group_context,
         "retrieval_context": retrieval_context,
+        "summary_retrieval_context": summary_retrieval_context,
         "history_context": history_context,
         "memory_context": memory_context,
         "web_context": web_context,
