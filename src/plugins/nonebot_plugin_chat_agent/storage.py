@@ -133,6 +133,56 @@ def _init_storage_sync(db_path: Path) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_agent_user_daily_summaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                summary_key TEXT NOT NULL UNIQUE,
+                summary_date TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                group_id TEXT,
+                group_name TEXT,
+                nickname TEXT,
+                group_card TEXT,
+                message_count INTEGER NOT NULL DEFAULT 0,
+                first_event_time INTEGER,
+                last_event_time INTEGER,
+                first_log_time_text TEXT,
+                last_log_time_text TEXT,
+                sample_messages_json TEXT,
+                keywords_json TEXT,
+                summary_text TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                source_message_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_chat_agent_user_daily_summaries_user_id
+            ON chat_agent_user_daily_summaries(user_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_chat_agent_user_daily_summaries_group_id
+            ON chat_agent_user_daily_summaries(group_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_chat_agent_user_daily_summaries_date
+            ON chat_agent_user_daily_summaries(summary_date)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_chat_agent_user_daily_summaries_content_hash
+            ON chat_agent_user_daily_summaries(content_hash)
+            """
+        )
         conn.commit()
     finally:
         conn.close()
@@ -533,3 +583,196 @@ async def upsert_log_import_file(config, row: dict) -> None:
 
 async def get_log_import_file(config, file_path: str) -> dict | None:
     return await asyncio.to_thread(_get_log_import_file_sync, config.chat_agent_db_path, str(file_path))
+
+
+def _upsert_user_daily_summary_sync(db_path: Path, row: dict) -> None:
+    _ensure_parent(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """
+            INSERT INTO chat_agent_user_daily_summaries (
+                summary_key, summary_date, user_id, group_id, group_name, nickname, group_card,
+                message_count, first_event_time, last_event_time, first_log_time_text, last_log_time_text,
+                sample_messages_json, keywords_json, summary_text, content_hash, source_message_count,
+                created_at, updated_at
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?
+            )
+            ON CONFLICT(summary_key) DO UPDATE SET
+                summary_date=excluded.summary_date,
+                user_id=excluded.user_id,
+                group_id=excluded.group_id,
+                group_name=excluded.group_name,
+                nickname=excluded.nickname,
+                group_card=excluded.group_card,
+                message_count=excluded.message_count,
+                first_event_time=excluded.first_event_time,
+                last_event_time=excluded.last_event_time,
+                first_log_time_text=excluded.first_log_time_text,
+                last_log_time_text=excluded.last_log_time_text,
+                sample_messages_json=excluded.sample_messages_json,
+                keywords_json=excluded.keywords_json,
+                summary_text=excluded.summary_text,
+                content_hash=excluded.content_hash,
+                source_message_count=excluded.source_message_count,
+                updated_at=excluded.updated_at
+            """,
+            (
+                row.get("summary_key", ""),
+                row.get("summary_date", ""),
+                row.get("user_id", ""),
+                row.get("group_id"),
+                row.get("group_name"),
+                row.get("nickname"),
+                row.get("group_card"),
+                int(row.get("message_count", 0) or 0),
+                row.get("first_event_time"),
+                row.get("last_event_time"),
+                row.get("first_log_time_text"),
+                row.get("last_log_time_text"),
+                row.get("sample_messages_json"),
+                row.get("keywords_json"),
+                row.get("summary_text", ""),
+                row.get("content_hash", ""),
+                int(row.get("source_message_count", 0) or 0),
+                row.get("created_at", now),
+                row.get("updated_at", now),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _get_user_daily_summary_sync(db_path: Path, summary_key: str) -> dict | None:
+    if not db_path.exists():
+        return None
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.execute(
+            """
+            SELECT
+                id, summary_key, summary_date, user_id, group_id, group_name, nickname, group_card,
+                message_count, first_event_time, last_event_time, first_log_time_text, last_log_time_text,
+                sample_messages_json, keywords_json, summary_text, content_hash, source_message_count,
+                created_at, updated_at
+            FROM chat_agent_user_daily_summaries
+            WHERE summary_key = ?
+            LIMIT 1
+            """,
+            (str(summary_key),),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "summary_key": row[1],
+            "summary_date": row[2],
+            "user_id": row[3],
+            "group_id": row[4],
+            "group_name": row[5],
+            "nickname": row[6],
+            "group_card": row[7],
+            "message_count": row[8],
+            "first_event_time": row[9],
+            "last_event_time": row[10],
+            "first_log_time_text": row[11],
+            "last_log_time_text": row[12],
+            "sample_messages_json": row[13],
+            "keywords_json": row[14],
+            "summary_text": row[15],
+            "content_hash": row[16],
+            "source_message_count": row[17],
+            "created_at": row[18],
+            "updated_at": row[19],
+        }
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        conn.close()
+
+
+def _list_user_daily_summaries_sync(db_path: Path, user_id: str | None, limit: int) -> list[dict]:
+    if limit <= 0:
+        return []
+    if not db_path.exists():
+        return []
+    conn = sqlite3.connect(db_path)
+    try:
+        if user_id is None:
+            cur = conn.execute(
+                """
+                SELECT
+                    id, summary_key, summary_date, user_id, group_id, group_name, nickname, group_card,
+                    message_count, first_event_time, last_event_time, first_log_time_text, last_log_time_text,
+                    sample_messages_json, keywords_json, summary_text, content_hash, source_message_count,
+                    created_at, updated_at
+                FROM chat_agent_user_daily_summaries
+                ORDER BY summary_date DESC, id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            )
+        else:
+            cur = conn.execute(
+                """
+                SELECT
+                    id, summary_key, summary_date, user_id, group_id, group_name, nickname, group_card,
+                    message_count, first_event_time, last_event_time, first_log_time_text, last_log_time_text,
+                    sample_messages_json, keywords_json, summary_text, content_hash, source_message_count,
+                    created_at, updated_at
+                FROM chat_agent_user_daily_summaries
+                WHERE user_id = ?
+                ORDER BY summary_date DESC, id DESC
+                LIMIT ?
+                """,
+                (str(user_id), int(limit)),
+            )
+        rows = cur.fetchall()
+        return [
+            {
+                "id": row[0],
+                "summary_key": row[1],
+                "summary_date": row[2],
+                "user_id": row[3],
+                "group_id": row[4],
+                "group_name": row[5],
+                "nickname": row[6],
+                "group_card": row[7],
+                "message_count": row[8],
+                "first_event_time": row[9],
+                "last_event_time": row[10],
+                "first_log_time_text": row[11],
+                "last_log_time_text": row[12],
+                "sample_messages_json": row[13],
+                "keywords_json": row[14],
+                "summary_text": row[15],
+                "content_hash": row[16],
+                "source_message_count": row[17],
+                "created_at": row[18],
+                "updated_at": row[19],
+            }
+            for row in rows
+        ]
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        conn.close()
+
+
+async def upsert_user_daily_summary(config, row: dict) -> None:
+    await asyncio.to_thread(_upsert_user_daily_summary_sync, config.chat_agent_db_path, row)
+
+
+async def get_user_daily_summary(config, summary_key: str) -> dict | None:
+    return await asyncio.to_thread(_get_user_daily_summary_sync, config.chat_agent_db_path, str(summary_key))
+
+
+async def list_user_daily_summaries(config, user_id: str | None = None, limit: int = 20) -> list[dict]:
+    return await asyncio.to_thread(_list_user_daily_summaries_sync, config.chat_agent_db_path, user_id, limit)
