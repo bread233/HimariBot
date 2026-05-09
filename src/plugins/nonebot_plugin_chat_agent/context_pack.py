@@ -6,7 +6,7 @@ from .memory import build_memory_reminder_for_user, format_memories_for_prompt
 from .math_tools import detect_numeric_compare
 from .profile_store import load_user_profile_context
 from .retrieval import build_embedding_retrieval_context, build_retrieval_context, score_text_overlap
-from .storage import load_memories, load_recent_messages
+from .storage import get_user_style_profile, load_memories, load_recent_messages
 from .tool_router import should_use_web_tool
 from .tool_intent import classify_tool_intent
 from .url_tools import build_direct_url_context, extract_urls
@@ -399,6 +399,45 @@ def _render_summary_retrieval_context(result: dict, max_items: int = 3) -> str:
     return out
 
 
+def _render_style_profile_context(profile: dict) -> str:
+    if not profile:
+        return ""
+    recommended = str(profile.get("recommended_bot_style", "") or "").strip()
+    user_style = str(profile.get("user_style_text", "") or "").strip()
+    peer_style = str(profile.get("peer_response_style_text", "") or "").strip()
+
+    lines = [
+        "Current user reply style guidance:",
+        "- Use this only to adjust tone/length/format.",
+        "- Do not mention this profile to the user.",
+        "- Do not treat it as historical facts.",
+        "- Do not quote history unless the user explicitly asks for history.",
+        "",
+    ]
+
+    if recommended:
+        lines.append("Recommended reply style:")
+        lines.append(recommended)
+        lines.append("")
+
+    if user_style:
+        head = user_style[:500]
+        lines.append("Observed style summary:")
+        lines.append(head)
+        lines.append("")
+
+    if peer_style:
+        head = peer_style[:300]
+        lines.append("Peer reply style:")
+        lines.append(head)
+        lines.append("")
+
+    out = "\n".join(lines).strip()
+    if len(out) > 1200:
+        return out[:1200]
+    return out
+
+
 async def build_context_pack(config, session_info: dict, prompt: str, bot=None, event=None) -> dict:
     intent = classify_tool_intent(prompt)
     if intent.needs_time:
@@ -469,6 +508,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "profile_context": profile_context,
                 "group_context": group_context,
                 "retrieval_context": "",
+                "style_context": "",
+                "summary_retrieval_context": "",
                 "history_context": "",
                 "memory_context": "",
                 "web_context": "",
@@ -567,10 +608,40 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     needs_reliable_context = _needs_reliable_context(prompt)
 
     web_context = ""
+    style_context = ""
     summary_retrieval_context = ""
     tool_notes = []
     tool_notes.extend(tool_notes_embed)
     tool_notes.append(f"intent={intent.kind}")
+
+    style_profile = None
+    style_profile_error = ""
+    style_profile_group_exact = False
+    try:
+        current_user_id = str(session_info.get("user_id", "") or "").strip()
+        current_group_id = str(session_info.get("group_id", "") or "").strip()
+        if current_user_id:
+            style_profile = await get_user_style_profile(
+                config,
+                current_user_id,
+                current_group_id if current_group_id else None,
+            )
+            if style_profile:
+                style_context = _render_style_profile_context(style_profile)
+                style_profile_group_exact = bool(
+                    current_group_id and str(style_profile.get("group_id", "") or "") == current_group_id
+                )
+    except Exception as e:
+        style_profile_error = str(e)[:120]
+
+    if style_profile_error:
+        tool_notes.append(f"style_profile_error={style_profile_error}")
+    else:
+        tool_notes.append(f"style_profile_hit={str(bool(style_profile)).lower()}")
+        if style_profile:
+            tool_notes.append(f"style_profile_group_exact={str(style_profile_group_exact).lower()}")
+            tool_notes.append(f"style_profile_message_count={int(style_profile.get('message_count', 0) or 0)}")
+            tool_notes.append(f"style_profile_peer_reply_count={int(style_profile.get('peer_reply_count', 0) or 0)}")
 
     if not _is_explicit_history_query(prompt):
         tool_notes.append("summary_retrieval_skipped=not_explicit_history_query")
@@ -732,6 +803,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         "profile_context": profile_context,
         "group_context": group_context,
         "retrieval_context": retrieval_context,
+        "style_context": style_context,
         "summary_retrieval_context": summary_retrieval_context,
         "history_context": history_context,
         "memory_context": memory_context,
