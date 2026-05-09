@@ -403,38 +403,26 @@ def _render_style_profile_context(profile: dict) -> str:
     if not profile:
         return ""
     recommended = str(profile.get("recommended_bot_style", "") or "").strip()
-    user_style = str(profile.get("user_style_text", "") or "").strip()
-    peer_style = str(profile.get("peer_response_style_text", "") or "").strip()
 
     lines = [
-        "Current user reply style guidance:",
+        "Reply style guidance:",
         "- Use this only to adjust tone/length/format.",
-        "- Do not mention this profile to the user.",
-        "- Do not treat it as historical facts.",
-        "- Do not quote history unless the user explicitly asks for history.",
+        "- Prefer 1-3 sentences for normal questions.",
+        "- Start with the conclusion; avoid long preamble.",
+        "- Do not mention this profile or any history to the user.",
+        "- Do not treat this as historical facts; do not quote history unless explicitly asked.",
+        "- Do not expand keyword-like queries into encyclopedic explanations.",
+        "- If web/current_fact is needed, keep a brief uncertainty note.",
         "",
     ]
 
     if recommended:
         lines.append("Recommended reply style:")
         lines.append(recommended)
-        lines.append("")
-
-    if user_style:
-        head = user_style[:500]
-        lines.append("Observed style summary:")
-        lines.append(head)
-        lines.append("")
-
-    if peer_style:
-        head = peer_style[:300]
-        lines.append("Peer reply style:")
-        lines.append(head)
-        lines.append("")
 
     out = "\n".join(lines).strip()
-    if len(out) > 1200:
-        return out[:1200]
+    if len(out) > 500:
+        return out[:500]
     return out
 
 
