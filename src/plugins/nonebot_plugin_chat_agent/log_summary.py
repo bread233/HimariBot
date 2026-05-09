@@ -45,7 +45,9 @@ def infer_message_date(row: dict) -> str:
 
 
 def normalize_message_text(text: str) -> str:
-    s = _WS_RE.sub(" ", str(text or "").strip())
+    raw = str(text or "")
+    raw = raw.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
+    s = _WS_RE.sub(" ", raw.strip())
     if not s:
         return ""
     if s.startswith("@") and " " not in s and len(s) <= 24:
@@ -57,7 +59,27 @@ def is_low_value_text(text: str) -> bool:
     s = normalize_message_text(text)
     if not s:
         return True
+    if len(s) > 300:
+        return True
     if len(s) < 2:
+        return True
+    if s.startswith("/"):
+        return True
+    low_fragments = (
+        "[json:",
+        "[CQ:json",
+        "[forward:",
+        "[CQ:forward",
+        "[image:",
+        "[CQ:image",
+        "[record:",
+        "[CQ:record",
+        "[video:",
+        "[CQ:video",
+        "[file:",
+        "[CQ:file",
+    )
+    if any(f in s for f in low_fragments):
         return True
     if s in {"嗯", "啊", "哦", "草", "艹", "？", "?", "。"}:
         return True
