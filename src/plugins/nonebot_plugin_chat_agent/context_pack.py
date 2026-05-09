@@ -117,6 +117,28 @@ def _needs_reliable_context(prompt: str) -> bool:
     )
 
 
+def _is_explicit_history_query(prompt: str) -> bool:
+    text = (prompt or "").strip()
+    return any(
+        token in text
+        for token in [
+            "之前",
+            "以前",
+            "历史",
+            "说过",
+            "聊过",
+            "提过",
+            "记得",
+            "谁说",
+            "谁提",
+            "有没有人说",
+            "上次",
+            "前面",
+            "过去",
+        ]
+    )
+
+
 def _extract_last_user_message(history: list[dict], current_prompt: str) -> str | None:
     current = (current_prompt or "").strip()
     for item in reversed(history):
@@ -550,8 +572,11 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     tool_notes.extend(tool_notes_embed)
     tool_notes.append(f"intent={intent.kind}")
 
-    if retrieve_daily_summaries and getattr(config, "chat_agent_embedding_base_url", "") and getattr(config, "chat_agent_embedding_model", "") and prompt:
+    if not _is_explicit_history_query(prompt):
+        tool_notes.append("summary_retrieval_skipped=not_explicit_history_query")
+    elif retrieve_daily_summaries and getattr(config, "chat_agent_embedding_base_url", "") and getattr(config, "chat_agent_embedding_model", "") and prompt:
         if intent.kind not in ("creative", "time", "current_fact"):
+            tool_notes.append("summary_retrieval_triggered=true")
             try:
                 sr_result = await retrieve_daily_summaries(
                     config,
