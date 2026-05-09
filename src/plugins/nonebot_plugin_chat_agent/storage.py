@@ -851,5 +851,92 @@ def _upsert_user_style_profile_sync(db_path: Path, profile: dict) -> None:
         conn.close()
 
 
+def _get_user_style_profile_sync(db_path: Path, user_id: str, group_id: str | None = None) -> dict | None:
+    if not db_path.exists():
+        return None
+    uid = str(user_id or "").strip()
+    if not uid:
+        return None
+    gid = str(group_id or "").strip()
+
+    conn = sqlite3.connect(db_path)
+    try:
+        if gid:
+            cur = conn.execute(
+                """
+                SELECT
+                    profile_key,
+                    user_id,
+                    group_id,
+                    message_count,
+                    peer_reply_count,
+                    user_style_text,
+                    peer_response_style_text,
+                    recommended_bot_style,
+                    updated_at
+                FROM chat_agent_user_style_profiles
+                WHERE user_id = ? AND group_id = ?
+                ORDER BY message_count DESC
+                LIMIT 1
+                """,
+                (uid, gid),
+            )
+            row = cur.fetchone()
+            if row:
+                return {
+                    "profile_key": row[0],
+                    "user_id": row[1],
+                    "group_id": row[2],
+                    "message_count": row[3],
+                    "peer_reply_count": row[4],
+                    "user_style_text": row[5],
+                    "peer_response_style_text": row[6],
+                    "recommended_bot_style": row[7],
+                    "updated_at": row[8],
+                }
+
+        cur = conn.execute(
+            """
+            SELECT
+                profile_key,
+                user_id,
+                group_id,
+                message_count,
+                peer_reply_count,
+                user_style_text,
+                peer_response_style_text,
+                recommended_bot_style,
+                updated_at
+            FROM chat_agent_user_style_profiles
+            WHERE user_id = ?
+            ORDER BY message_count DESC
+            LIMIT 1
+            """,
+            (uid,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "profile_key": row[0],
+            "user_id": row[1],
+            "group_id": row[2],
+            "message_count": row[3],
+            "peer_reply_count": row[4],
+            "user_style_text": row[5],
+            "peer_response_style_text": row[6],
+            "recommended_bot_style": row[7],
+            "updated_at": row[8],
+        }
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        conn.close()
+
+
 async def upsert_user_style_profile(config, profile: dict) -> None:
     await asyncio.to_thread(_upsert_user_style_profile_sync, config.chat_agent_db_path, profile)
+
+
+async def get_user_style_profile(config, user_id: str, group_id: str | None = None) -> dict | None:
+    return await asyncio.to_thread(_get_user_style_profile_sync, config.chat_agent_db_path, str(user_id), group_id)
