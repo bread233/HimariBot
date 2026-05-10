@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from nonebot import get_driver, on_message
+from nonebot import get_driver, logger, on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, MessageSegment, PrivateMessageEvent
 from nonebot.rule import Rule
 from nonebot.typing import T_State
@@ -138,16 +138,31 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 {"role": "system", "content": "你负责用中文简洁解释一个概念。请用1-3句回答。不要编造版本号、价格、新闻或历史记录。不了解时直接说不确定。"},
                 {"role": "user", "content": lightweight_prompt or prompt},
             ]
-            lightweight_timeout = 12
+            lightweight_timeout = 20
             tool_notes = str(context_pack.get("tool_notes", "") or "")
             reply = ""
             should_save_assistant = False
             try:
                 reply = await chat_completions(lightweight_messages, config, timeout=lightweight_timeout)
                 reply = truncate_reply(strip_thinking(reply), config.chat_agent_max_reply_length)
+                reply = str(reply or "").strip()
+                if not reply:
+                    logger.warning(
+                        "lightweight definition empty reply timeout=%s prompt=%s",
+                        lightweight_timeout,
+                        (lightweight_prompt or prompt)[:80],
+                    )
+                    reply = "\u8fd9\u4e2a\u6982\u5ff5\u6211\u6682\u65f6\u6ca1\u6cd5\u7a33\u5b9a\u751f\u6210\u89e3\u91ca\uff0c\u53ef\u4ee5\u7a0d\u540e\u518d\u8bd5\u3002"
                 should_save_assistant = bool(reply)
             except Exception as e:
-                reply = "这个概念我暂时没法稳定生成解释，可以稍后再试。"
+                logger.warning(
+                    "lightweight definition failed type=%s timeout=%s prompt=%s message=%s",
+                    type(e).__name__,
+                    lightweight_timeout,
+                    (lightweight_prompt or prompt)[:80],
+                    str(e)[:200],
+                )
+                reply = "\u8fd9\u4e2a\u6982\u5ff5\u6211\u6682\u65f6\u6ca1\u6cd5\u7a33\u5b9a\u751f\u6210\u89e3\u91ca\uff0c\u53ef\u4ee5\u7a0d\u540e\u518d\u8bd5\u3002"
                 if tool_notes:
                     tool_notes += "\n"
                 tool_notes += f"simple_definition_lightweight_error={str(e)[:120]}"
