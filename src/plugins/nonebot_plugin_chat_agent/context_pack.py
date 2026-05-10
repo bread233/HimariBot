@@ -848,10 +848,11 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "tool_notes": "\n".join(tool_notes).strip(),
             }
     if _is_simple_definition_question(prompt, intent.kind):
-        tool_notes.append("simple_definition_direct_reply=1")
+        tool_notes.append("simple_definition_lightweight_llm=1")
+        tool_notes.append("simple_definition_lightweight_timeout=12")
         return {
-            "direct_reply": _build_simple_definition_reply(prompt),
-            "should_call_llm": False,
+            "direct_reply": None,
+            "should_call_llm": True,
             "web_used": False,
             "time_context": time_context,
             "profile_context": profile_context,
@@ -862,6 +863,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             "history_context": "",
             "memory_context": "",
             "web_context": "",
+            "lightweight_mode": "definition",
+            "lightweight_prompt": prompt,
             "tool_notes": "\n".join(tool_notes).strip(),
         }
     if is_identity_question:
