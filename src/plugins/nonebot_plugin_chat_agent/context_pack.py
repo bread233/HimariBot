@@ -481,6 +481,37 @@ def _build_simple_definition_reply(prompt: str) -> str:
     return "这是一个概念解释类问题，我暂时没法稳定生成回答，可以稍后再试。"
 
 
+def _build_explicit_history_direct_reply(prompt: str, summary_context: str, history_context: str) -> str:
+    summary_text = str(summary_context or "").strip()
+    if summary_text:
+        lines = [line.strip() for line in summary_text.splitlines() if line.strip()]
+        picked = []
+        for line in lines:
+            if line.startswith("[") and "]" in line:
+                picked.append(line)
+            elif line.startswith("Summary:"):
+                continue
+            elif line.startswith("Date:") or line.startswith("Group:") or line.startswith("User:"):
+                continue
+            elif len(line) > 5:
+                picked.append(line)
+            if len(picked) >= 3:
+                break
+        if picked:
+            return "\u6211\u627e\u5230\u4e00\u4e9b\u76f8\u5173\u7684\u5386\u53f2\u8bb0\u5f55\uff1a\n- " + "\n- ".join(picked[:3])
+
+    history_text = str(history_context or "").strip()
+    if history_text:
+        rows = [line.strip() for line in history_text.splitlines() if line.strip()]
+        if rows:
+            return "\u6211\u627e\u5230\u4e86\u76f8\u5173\u7684\u6700\u8fd1\u5bf9\u8bdd\uff1a\n- " + "\n- ".join(rows[-3:])
+
+    trimmed = str(prompt or "").strip()
+    if len(trimmed) > 20:
+        trimmed = trimmed[:20] + "..."
+    return f"\u6682\u65f6\u6ca1\u67e5\u5230\u4e0e\u201c{trimmed}\u201d\u76f8\u5173\u7684\u5386\u53f2\u8bb0\u5f55\u3002"
+
+
 async def build_context_pack(config, session_info: dict, prompt: str, bot=None, event=None) -> dict:
     intent = classify_tool_intent(prompt)
     if intent.needs_time:
@@ -689,7 +720,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     if not _is_explicit_history_query(prompt):
         tool_notes.append("summary_retrieval_skipped=not_explicit_history_query")
     elif retrieve_daily_summaries and getattr(config, "chat_agent_embedding_base_url", "") and getattr(config, "chat_agent_embedding_model", "") and prompt:
-        if intent.kind not in ("creative", "time", "current_fact"):
+        if intent.kind not in ("creative", "time"):
             tool_notes.append("summary_retrieval_triggered=true")
             try:
                 sr_result = await retrieve_daily_summaries(
@@ -750,7 +781,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         tool_notes.append("direct_url_mode=1")
     elif math_result is not None:
         tool_notes.append("math_tool=numeric_compare")
-    elif intent.kind == "current_fact":
+    elif intent.kind == "current_fact" and not _is_explicit_history_query(prompt):
         official_answer = await resolve_official_web_answer(
             web_query or prompt,
             intent_kind=intent.kind,
@@ -775,6 +806,44 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "summary_retrieval_context": summary_retrieval_context,
                 "history_context": history_context,
                 "memory_context": memory_context,
+                "web_context": "",
+                "tool_notes": "\n".join(tool_notes).strip(),
+            }
+    if _is_explicit_history_query(prompt):
+        try:
+            direct_history_reply = _build_explicit_history_direct_reply(
+                prompt, summary_retrieval_context, history_context
+            )
+            tool_notes.append("explicit_history_direct_reply=1")
+            return {
+                "direct_reply": direct_history_reply,
+                "should_call_llm": False,
+                "web_used": False,
+                "time_context": time_context,
+                "profile_context": profile_context,
+                "group_context": group_context,
+                "retrieval_context": retrieval_context,
+                "style_context": style_context,
+                "summary_retrieval_context": summary_retrieval_context,
+                "history_context": history_context,
+                "memory_context": memory_context,
+                "web_context": "",
+                "tool_notes": "\n".join(tool_notes).strip(),
+            }
+        except Exception:
+            tool_notes.append("explicit_history_direct_reply_error=1")
+            return {
+                "direct_reply": "\u5386\u53f2\u67e5\u8be2\u6682\u65f6\u4e0d\u53ef\u7528\uff0c\u53ef\u4ee5\u7a0d\u540e\u518d\u8bd5\u3002",
+                "should_call_llm": False,
+                "web_used": False,
+                "time_context": time_context,
+                "profile_context": profile_context,
+                "group_context": group_context,
+                "retrieval_context": "",
+                "style_context": "",
+                "summary_retrieval_context": "",
+                "history_context": "",
+                "memory_context": "",
                 "web_context": "",
                 "tool_notes": "\n".join(tool_notes).strip(),
             }
