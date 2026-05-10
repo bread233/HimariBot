@@ -147,6 +147,23 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             messages.append({"role": "system", "content": "联网查询结果：\n" + context_pack["web_context"]})
         if context_pack.get("tool_notes"):
             messages.append({"role": "system", "content": "工具状态：\n" + context_pack["tool_notes"]})
+        messages.append(
+            {
+                "role": "system",
+                "content": "\n".join(
+                    [
+                        "最终回复风格要求：",
+                        "- 普通问题默认 1~3 句。",
+                        "- 先给结论，不要铺垫。",
+                        "- 不要复述用户问题。",
+                        "- 不要主动说“根据历史/画像/上下文”。",
+                        "- 关键词式问题按“询问该主题的结论或状态”直接回答。",
+                        "- 只有必要时才补一句不确定性来源。",
+                        "- 如果是明确历史查询，可以说明“历史摘要里看到/没找到”。",
+                    ]
+                ),
+            }
+        )
         messages.append({"role": "user", "content": prompt})
 
         if config.chat_agent_enable_history:
