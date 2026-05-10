@@ -148,19 +148,17 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 reply = str(reply or "").strip()
                 if not reply:
                     logger.warning(
-                        "lightweight definition empty reply timeout=%s prompt=%s",
-                        lightweight_timeout,
-                        (lightweight_prompt or prompt)[:80],
+                        f"lightweight definition empty reply timeout={lightweight_timeout} "
+                        f"prompt={(lightweight_prompt or prompt)[:80]!r}"
                     )
                     reply = "\u8fd9\u4e2a\u6982\u5ff5\u6211\u6682\u65f6\u6ca1\u6cd5\u7a33\u5b9a\u751f\u6210\u89e3\u91ca\uff0c\u53ef\u4ee5\u7a0d\u540e\u518d\u8bd5\u3002"
                 should_save_assistant = bool(reply)
             except Exception as e:
                 logger.warning(
-                    "lightweight definition failed type=%s timeout=%s prompt=%s message=%s",
-                    type(e).__name__,
-                    lightweight_timeout,
-                    (lightweight_prompt or prompt)[:80],
-                    str(e)[:200],
+                    f"lightweight definition failed type={type(e).__name__} "
+                    f"timeout={lightweight_timeout} "
+                    f"prompt={(lightweight_prompt or prompt)[:80]!r} "
+                    f"message={str(e)[:200]!r}"
                 )
                 reply = "\u8fd9\u4e2a\u6982\u5ff5\u6211\u6682\u65f6\u6ca1\u6cd5\u7a33\u5b9a\u751f\u6210\u89e3\u91ca\uff0c\u53ef\u4ee5\u7a0d\u540e\u518d\u8bd5\u3002"
                 if tool_notes:
