@@ -22,6 +22,8 @@ class ChatAgentConfig(BaseModel):
     chat_agent_model: str = Field(default="qwen3:1.7b")
     chat_agent_think: bool = Field(default=False)
     chat_agent_timeout: int = Field(default=120)
+    chat_agent_lightweight_definition_model: str = Field(default="llama32-finalizer-fast")
+    chat_agent_lightweight_definition_timeout: float = Field(default=20.0)
     chat_agent_max_tokens: int = Field(default=512)
     chat_agent_max_reply_length: int = Field(default=500)
     chat_agent_history_max_messages: int = Field(default=10)
@@ -94,6 +96,12 @@ def get_chat_agent_config() -> ChatAgentConfig:
         chat_agent_model=str(getattr(config, "chat_agent_model", "qwen3:1.7b")),
         chat_agent_think=_as_bool(getattr(config, "chat_agent_think", False), False),
         chat_agent_timeout=int(getattr(config, "chat_agent_timeout", 120)),
+        chat_agent_lightweight_definition_model=str(
+            getattr(config, "chat_agent_lightweight_definition_model", "llama32-finalizer-fast")
+        ),
+        chat_agent_lightweight_definition_timeout=float(
+            getattr(config, "chat_agent_lightweight_definition_timeout", 20.0)
+        ),
         chat_agent_max_tokens=int(getattr(config, "chat_agent_max_tokens", 512)),
         chat_agent_max_reply_length=int(getattr(config, "chat_agent_max_reply_length", 500)),
         chat_agent_history_max_messages=int(getattr(config, "chat_agent_history_max_messages", 10)),

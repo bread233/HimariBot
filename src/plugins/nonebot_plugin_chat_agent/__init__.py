@@ -135,27 +135,37 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         if str(context_pack.get("lightweight_mode", "")).strip() == "definition":
             lightweight_prompt = str(context_pack.get("lightweight_prompt", prompt) or prompt).strip()
             lightweight_messages = [
-                {"role": "system", "content": "你负责用中文简洁解释一个概念。请用1-3句回答。不要编造版本号、价格、新闻或历史记录。不了解时直接说不确定。"},
+                {"role": "system", "content": "\u4f60\u8d1f\u8d23\u7528\u4e2d\u6587\u7b80\u6d01\u89e3\u91ca\u4e00\u4e2a\u6982\u5ff5\u3002\u8bf7\u75281-3\u53e5\u56de\u7b54\u3002\u4e0d\u8981\u7f16\u9020\u7248\u672c\u53f7\u3001\u4ef7\u683c\u3001\u65b0\u95fb\u6216\u5386\u53f2\u8bb0\u5f55\u3002\u4e0d\u4e86\u89e3\u65f6\u76f4\u63a5\u8bf4\u4e0d\u786e\u5b9a\u3002"},
                 {"role": "user", "content": lightweight_prompt or prompt},
             ]
-            lightweight_timeout = 20
+            lightweight_model = str(
+                getattr(config, "chat_agent_lightweight_definition_model", "") or "llama32-finalizer-fast"
+            ).strip()
+            lightweight_timeout = float(
+                getattr(config, "chat_agent_lightweight_definition_timeout", 20.0) or 20.0
+            )
             tool_notes = str(context_pack.get("tool_notes", "") or "")
             reply = ""
             should_save_assistant = False
             try:
-                reply = await chat_completions(lightweight_messages, config, timeout=lightweight_timeout)
+                reply = await chat_completions(
+                    lightweight_messages,
+                    config,
+                    timeout=lightweight_timeout,
+                    model=lightweight_model,
+                )
                 reply = truncate_reply(strip_thinking(reply), config.chat_agent_max_reply_length)
                 reply = str(reply or "").strip()
                 if not reply:
                     logger.warning(
-                        f"lightweight definition empty reply timeout={lightweight_timeout} "
+                        f"lightweight definition empty reply model={lightweight_model} timeout={lightweight_timeout} "
                         f"prompt={(lightweight_prompt or prompt)[:80]!r}"
                     )
                     reply = "\u8fd9\u4e2a\u6982\u5ff5\u6211\u6682\u65f6\u6ca1\u6cd5\u7a33\u5b9a\u751f\u6210\u89e3\u91ca\uff0c\u53ef\u4ee5\u7a0d\u540e\u518d\u8bd5\u3002"
                 should_save_assistant = bool(reply)
             except Exception as e:
                 logger.warning(
-                    f"lightweight definition failed type={type(e).__name__} "
+                    f"lightweight definition failed type={type(e).__name__} model={lightweight_model} "
                     f"timeout={lightweight_timeout} "
                     f"prompt={(lightweight_prompt or prompt)[:80]!r} "
                     f"message={str(e)[:200]!r}"
