@@ -550,6 +550,110 @@ async def _build_web_strategy_distilled_context(config, query: str) -> tuple[str
     return out, len(top)
 
 
+def _build_web_strategy_queries(prompt: str) -> list[str]:
+    raw = str(prompt or "").strip()
+    text = raw.lower()
+    queries: list[str] = []
+
+    def _push(q: str) -> None:
+        q = str(q or "").strip()
+        if q and q not in queries:
+            queries.append(q)
+
+    if any(k in text for k in ["\u94a2\u94c1\u96c4\u5fc3", "hoi4"]):
+        _push("\u94a2\u94c1\u96c4\u5fc34 \u65b0\u624b \u56fd\u5bb6 \u63a8\u8350 \u73a9\u6cd5 \u653b\u7565")
+        _push("HOI4 beginner country guide recommended countries")
+    if any(k in text for k in ["\u6587\u660e6", "civ6", "civilization 6"]):
+        _push("\u6587\u660e6 \u65b0\u624b \u56fd\u5bb6 \u63a8\u8350 \u653b\u7565")
+        _push("Civilization 6 beginner civilization guide recommended civ")
+    if any(k in text for k in ["\u7fa4\u661f", "stellaris"]):
+        _push("\u7fa4\u661f \u65b0\u624b \u653b\u7565 \u5f00\u5c40 \u73a9\u6cd5")
+        _push("Stellaris beginner guide opening tips")
+    if any(k in text for k in ["wot", "\u5766\u514b\u4e16\u754c", "world of tanks"]):
+        _push("\u5766\u514b\u4e16\u754c \u65b0\u624b \u63a8\u8350 \u79d1\u6280\u7ebf")
+        _push("World of Tanks beginner tech tree line recommendation")
+
+    _push(raw)
+    return queries
+
+
+async def _build_web_strategy_distilled_context_multi(config, queries: list[str]) -> tuple[str, int, list[str], list[str], str]:
+    merged: list[dict] = []
+    errors: list[str] = []
+    used_queries: list[str] = []
+    seen = set()
+
+    for q in queries:
+        qs = str(q or "").strip()
+        if not qs:
+            continue
+        used_queries.append(qs)
+        try:
+            results = await build_web_results(config, qs, intent_kind="community_strategy")
+        except Exception as e:
+            errors.append(str(e)[:120])
+            continue
+        for row in results or []:
+            title = str(row.get("title", "") or "").strip()
+            url = str(row.get("url", "") or "").strip()
+            key = (title.lower(), url.lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(row)
+        if len(merged) >= 5:
+            break
+
+    if not merged:
+        return "", 0, used_queries, [], (errors[0] if errors else "")
+
+    top = merged[:5]
+    notes = ["Web distilled notes:", f"- Query: {' || '.join(used_queries[:3])}", "- Top sources:"]
+    snippets: list[str] = []
+    top_titles: list[str] = []
+    for i, row in enumerate(top, 1):
+        title = str(row.get("title", "") or "").strip()
+        domain = str(row.get("domain", "") or "").strip() or "unknown"
+        snippet = str(row.get("snippet", "") or "").strip()
+        if len(snippet) > 220:
+            snippet = snippet[:220] + "..."
+        if title:
+            top_titles.append(title[:60])
+        if snippet:
+            snippets.append(snippet.lower())
+        notes.append(f"  {i}. {title} / {domain} / {snippet}")
+
+    token_map = {
+        "beginner": "\u65b0\u624b",
+        "opening": "\u5f00\u5c40",
+        "build": "\u6784\u5efa",
+        "focus": "\u91cd\u70b9",
+        "economy": "\u7ecf\u6d4e",
+        "industry": "\u5de5\u4e1a",
+        "guide": "\u6307\u5357",
+        "tips": "\u6280\u5de7",
+        "meta": "meta",
+    }
+    hint_hits: list[str] = []
+    blob = " ".join(snippets)
+    for k, v in token_map.items():
+        if k in blob:
+            hint_hits.append(v)
+    hint_hits = hint_hits[:5]
+    notes.append("- Consensus hints:")
+    if hint_hits:
+        for h in hint_hits:
+            notes.append(f"  - {h}")
+    else:
+        notes.append("  - \u4f18\u5148\u53c2\u8003\u591a\u6765\u6e90\u91cd\u590d\u63d0\u5230\u7684\u5efa\u8bae")
+    notes.append("- Caveats:")
+    notes.append("  - Community guides can be version or DLC dependent.")
+    out = "\n".join(notes).strip()
+    if len(out) > 1500:
+        out = out[:1500]
+    return out, len(top), used_queries, top_titles[:3], (errors[0] if errors else "")
+
+
 def _build_simple_definition_reply(prompt: str) -> str:
     text = str(prompt or "").strip().lower()
     if "nodejs" in text or "node.js" in text or re.search(r"\bnode\b", text):
@@ -931,11 +1035,18 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             }
     if _is_community_strategy_question(prompt, intent.kind):
         strategy_query = str(prompt or "").strip()
-        distilled_context, strategy_count = await _build_web_strategy_distilled_context(config, strategy_query)
+        strategy_queries = _build_web_strategy_queries(strategy_query)
+        distilled_context, strategy_count, used_queries, top_titles, strategy_error = await _build_web_strategy_distilled_context_multi(
+            config, strategy_queries
+        )
         tool_notes.append("web_strategy=1")
         tool_notes.append(f"web_strategy_query={strategy_query}")
+        tool_notes.append(f"web_strategy_queries={' || '.join(used_queries[:5])}")
         tool_notes.append(f"web_strategy_result_count={strategy_count}")
+        tool_notes.append(f"web_strategy_top_titles={' || '.join(top_titles)}")
         tool_notes.append(f"web_strategy_distilled_chars={len(distilled_context)}")
+        if strategy_error:
+            tool_notes.append(f"web_strategy_error={strategy_error}")
         if not distilled_context:
             return {
                 "direct_reply": "\u6682\u65f6\u6ca1\u67e5\u5230\u7a33\u5b9a\u7684\u653b\u7565\u8d44\u6599\uff0c\u53ef\u4ee5\u6362\u4e2a\u66f4\u5177\u4f53\u7684\u95ee\u9898\u3002",
