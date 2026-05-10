@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from html import unescape
 from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
-
-from .embedding_client import cosine_similarity, embed_texts
-
 
 def _clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "")).strip()
@@ -184,6 +182,8 @@ async def _rank_web_chunks(config, query: str, chunks: list[dict]) -> list[dict]
     query_text = f"为这个问题检索最相关的网页资料：{query}"
     docs = [f"网页资料：标题：{c.get('title','')}\nURL：{c.get('url','')}\n内容：{c.get('content','')}" for c in chunks]
     try:
+        from .embedding_client import cosine_similarity, embed_texts
+
         vectors = await embed_texts(config, [query_text] + docs)
         query_vector = vectors[0]
         ranked = []
@@ -320,7 +320,273 @@ def _extract_domain(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
-async def build_web_results(config, query: str) -> list[dict]:
+def _extract_years(text: str) -> list[int]:
+    s = str(text or "")
+    if not s:
+        return []
+    current_year = datetime.now().year
+    years: set[int] = set()
+    for raw in re.findall(r"\b(20\d{2})\b", s):
+        try:
+            y = int(raw)
+        except Exception:
+            continue
+        if 2018 <= y <= current_year + 1:
+            years.add(y)
+    return sorted(years, reverse=True)
+
+
+def _is_current_sensitive_query(query: str, intent_kind: str | None = None) -> bool:
+    if str(intent_kind or "").strip() == "current_fact":
+        return True
+
+    q = _clean_text(query)
+    if not q:
+        return False
+
+    low = q.lower()
+
+    time_terms = [
+        "最新",
+        "现在",
+        "目前",
+        "今年",
+        "发布",
+        "上市",
+        "价格",
+        "显存",
+        "规格",
+        "参数",
+        "版本",
+        "型号",
+        "支持吗",
+        "有没有",
+        "多少",
+        "变了吗",
+        "还能用吗",
+        "能用了吗",
+        "latest",
+        "current",
+        "now",
+        "release",
+        "price",
+        "spec",
+        "specs",
+        "version",
+        "model",
+        "support",
+        "available",
+    ]
+    if any(t in q or t in low for t in time_terms):
+        return True
+
+    model_patterns = [
+        r"[A-Za-z]{2,}[ -]?\d{2,}",
+        r"[A-Z]{2,}\d{3,}",
+        r"\d+\.\d+(?:\.\d+)?",
+    ]
+    if any(re.search(p, q) for p in model_patterns):
+        return True
+
+    status_terms = [
+        "支持吗",
+        "支持不",
+        "发布了吗",
+        "上市了吗",
+        "有了吗",
+        "怎么样",
+        "现在是啥",
+        "is available",
+        "supported",
+        "support",
+        "released",
+        "available",
+    ]
+    if any(t in q or t in low for t in status_terms):
+        return True
+
+    return False
+
+
+def _freshness_score(item: dict, query: str, current_sensitive: bool = False) -> float:
+    current_year = datetime.now().year
+    merged = " ".join(
+        [
+            str(item.get("title", "") or ""),
+            str(item.get("snippet", "") or ""),
+            str(item.get("excerpt", "") or ""),
+            str(item.get("url", "") or ""),
+        ]
+    )
+    years = _extract_years(merged)
+    newest_year = years[0] if years else None
+
+    score = 0.0
+    if newest_year is not None:
+        if newest_year >= current_year:
+            score += 0.30
+        elif newest_year == current_year - 1:
+            score += 0.18
+        elif newest_year == current_year - 2:
+            score += 0.05
+        else:
+            score -= 0.20 if current_sensitive else 0.05
+
+    low = (str(item.get("title", "")) + " " + str(item.get("snippet", "")) + " " + str(item.get("excerpt", ""))).lower()
+    hint_terms = [
+        "latest",
+        "new",
+        "current",
+        "release",
+        "spec",
+        "specs",
+        "version",
+        "发布",
+        "最新",
+        "规格",
+        "显存",
+        "参数",
+        "版本",
+    ]
+    if any(t in low for t in hint_terms):
+        score += 0.05
+
+    rumor_terms = [
+        "rumor",
+        "leak",
+        "unconfirmed",
+        "预测",
+        "爆料",
+        "传闻",
+        "预计",
+        "可能",
+        "未经证实",
+    ]
+    if any(t in low for t in rumor_terms):
+        score -= 0.15 if current_sensitive else 0.05
+
+    return max(-0.40, min(0.50, score))
+
+
+def _authority_score(item: dict, query: str, current_sensitive: bool = False) -> float:
+    domain = str(item.get("domain", "") or _extract_domain(str(item.get("url", "") or ""))).lower()
+    q = str(query or "").lower()
+
+    official_domains = {
+        "nvidia.com",
+        "nvidia.cn",
+        "amd.com",
+        "intel.com",
+        "microsoft.com",
+        "apple.com",
+        "python.org",
+        "docs.python.org",
+        "nodejs.org",
+        "cloudflare.com",
+        "developers.cloudflare.com",
+    }
+    doc_domains = {
+        "docs.python.org",
+        "developers.cloudflare.com",
+        "learn.microsoft.com",
+        "developer.apple.com",
+        "developer.nvidia.com",
+    }
+
+    if any(domain == d or domain.endswith("." + d) for d in official_domains):
+        return 0.35
+    if any(domain == d or domain.endswith("." + d) for d in doc_domains):
+        return 0.30
+    if domain.endswith("wikipedia.org"):
+        return 0.12
+
+    forum_domains = {
+        "reddit.com",
+        "zhihu.com",
+        "tieba.baidu.com",
+        "baidu.com",
+        "csdn.net",
+        "cnblogs.com",
+        "qastack.cn",
+    }
+    if any(domain == d or domain.endswith("." + d) for d in forum_domains):
+        return -0.12 if current_sensitive else -0.05
+
+    is_rtx_query = any(k in q for k in ["rtx", "nvidia", "geforce", "英伟达", "显卡", "显存"])
+    if is_rtx_query:
+        reputable = {
+            "techpowerup.com",
+            "videocardz.com",
+            "tomshardware.com",
+            "pcgamer.com",
+        }
+        if any(domain == d or domain.endswith("." + d) for d in reputable):
+            return 0.10
+        rumor_sites = {
+            "wccftech.com",
+        }
+        if any(domain == d or domain.endswith("." + d) for d in rumor_sites):
+            return -0.10 if current_sensitive else -0.05
+
+    if current_sensitive and domain.endswith("stackoverflow.com"):
+        return -0.06
+
+    return 0.0
+
+
+def _source_flags(item: dict, query: str, current_sensitive: bool = False) -> list[str]:
+    flags: list[str] = []
+    if current_sensitive:
+        flags.append("current-sensitive")
+
+    domain = str(item.get("domain", "") or _extract_domain(str(item.get("url", "") or ""))).lower()
+    if any(domain == d or domain.endswith("." + d) for d in ["nvidia.com", "nvidia.cn"]):
+        flags.extend(["official", "nvidia-official"])
+    elif any(domain == d or domain.endswith("." + d) for d in ["python.org", "nodejs.org", "cloudflare.com"]):
+        flags.append("official")
+    elif any(domain == d or domain.endswith("." + d) for d in ["docs.python.org", "developers.cloudflare.com", "learn.microsoft.com"]):
+        flags.extend(["docs", "official"])
+
+    merged = " ".join(
+        [
+            str(item.get("title", "") or ""),
+            str(item.get("snippet", "") or ""),
+            str(item.get("excerpt", "") or ""),
+            str(item.get("url", "") or ""),
+        ]
+    )
+    years = _extract_years(merged)
+    current_year = datetime.now().year
+    if not years:
+        flags.append("no-year")
+    else:
+        newest_year = years[0]
+        if newest_year >= current_year:
+            flags.append("current-year")
+        elif newest_year == current_year - 1:
+            flags.append("recent-year")
+        elif newest_year <= current_year - 2:
+            flags.append("stale-year")
+
+    low = merged.lower()
+    if any(t in low for t in ["rumor", "leak", "unconfirmed", "预测", "爆料", "传闻", "预计", "未经证实"]):
+        flags.append("rumor")
+    if any(domain == d or domain.endswith("." + d) for d in ["reddit.com", "zhihu.com", "tieba.baidu.com", "csdn.net", "cnblogs.com", "qastack.cn"]):
+        flags.append("forum")
+    if any(domain == d or domain.endswith("." + d) for d in ["baidu.com"]):
+        flags.append("seo")
+
+    seen: set[str] = set()
+    out: list[str] = []
+    for f in flags:
+        if f in seen:
+            continue
+        seen.add(f)
+        out.append(f)
+    return out
+
+
+async def build_web_results(config, query: str, intent_kind: str | None = None) -> list[dict]:
     try:
         results = await search_web(config, query)
     except Exception:
@@ -330,8 +596,9 @@ async def build_web_results(config, query: str) -> list[dict]:
     max_results = max(1, int(getattr(config, "chat_agent_web_max_results", 3)))
     snippet_max = int(getattr(config, "chat_agent_web_snippet_max_chars", 260))
     excerpt_max = int(getattr(config, "chat_agent_web_excerpt_max_chars", 400))
+    current_sensitive = _is_current_sensitive_query(query, intent_kind=intent_kind)
     rows: list[dict] = []
-    for item in results[:max_results]:
+    for idx, item in enumerate(results[:max_results]):
         title = _clean_text(item.get("title", ""))
         url = _clean_text(item.get("url", ""))
         snippet = _clean_text(item.get("snippet", ""))
@@ -350,47 +617,92 @@ async def build_web_results(config, query: str) -> list[dict]:
                 excerpt = excerpt[:excerpt_max].rstrip()
         score = float(item.get("score", 0.0) or 0.0)
         weighted_score = float(item.get("weighted_score", 0.0) or 0.0)
+        if weighted_score == 0.0 and url:
+            weighted_score = float(_source_preference_score(url, query))
+        domain = _extract_domain(url)
+        temp_item = {
+            "title": title,
+            "url": url,
+            "domain": domain,
+            "snippet": snippet,
+            "excerpt": excerpt,
+        }
+        merged = " ".join([title, snippet, excerpt, url])
+        extracted_years = _extract_years(merged)
+        freshness = _freshness_score(temp_item, query, current_sensitive=current_sensitive)
+        authority = _authority_score(temp_item, query, current_sensitive=current_sensitive)
+        flags = _source_flags(temp_item, query, current_sensitive=current_sensitive)
+        web_rank_score = float(weighted_score) + float(freshness) + float(authority)
+        if current_sensitive and ("official" in flags or "docs" in flags):
+            web_rank_score += 0.05
         rows.append(
             {
                 "title": title,
                 "url": url,
-                "domain": _extract_domain(url),
+                "domain": domain,
                 "snippet": snippet,
                 "excerpt": excerpt,
                 "score": score,
                 "weighted_score": weighted_score,
+                "freshness_score": float(freshness),
+                "authority_score": float(authority),
+                "web_rank_score": float(web_rank_score),
+                "source_flags": flags,
+                "extracted_years": extracted_years,
+                "_idx": idx,
             }
         )
+    rows.sort(key=lambda r: (-float(r.get("web_rank_score", 0.0)), int(r.get("_idx", 0))))
+    for r in rows:
+        r.pop("_idx", None)
     return rows
 
 
 def render_web_results_context(results: list[dict], *, max_items: int = 3) -> str:
     if not results:
         return ""
-    lines = ["Web results:"]
+    total_limit = 2500
+    lines = ["Web result candidates:"]
     for i, row in enumerate(results[:max_items], 1):
         title = _clean_text(row.get("title", ""))
         url = _clean_text(row.get("url", ""))
         domain = _clean_text(row.get("domain", ""))
         snippet = _clean_text(row.get("snippet", ""))
         excerpt = _clean_text(row.get("excerpt", ""))
-        score = float(row.get("weighted_score", 0.0) or row.get("score", 0.0) or 0.0)
+        if len(snippet) > 220:
+            snippet = snippet[:220].rstrip()
+        if len(excerpt) > 450:
+            excerpt = excerpt[:450].rstrip()
+        web_rank_score = float(row.get("web_rank_score", 0.0) or row.get("weighted_score", 0.0) or row.get("score", 0.0) or 0.0)
+        freshness = float(row.get("freshness_score", 0.0) or 0.0)
+        authority = float(row.get("authority_score", 0.0) or 0.0)
+        years = row.get("extracted_years") or []
+        flags = row.get("source_flags") or []
         lines.extend(
             [
                 f"[{i}] {title or url}",
                 f"Domain: {domain or 'unknown'}",
                 f"URL: {url}",
+                f"Rank: {web_rank_score:.3f}",
+                f"Freshness: {freshness:.3f}",
+                f"Authority: {authority:.3f}",
+                f"Years: {','.join(str(y) for y in years) if years else ''}",
+                f"Flags: {','.join(str(f) for f in flags) if flags else ''}",
                 f"Snippet: {snippet}",
                 f"Excerpt: {excerpt}",
-                f"Source-Score: {score:.2f}",
                 "",
             ]
         )
-    return "\n".join(lines).strip()
+        if sum(len(x) + 1 for x in lines) > total_limit:
+            break
+    out = "\n".join(lines).strip()
+    if len(out) > total_limit:
+        return out[:total_limit].rstrip()
+    return out
 
 
 async def build_web_context(config, query: str) -> str:
-    structured = await build_web_results(config, query)
+    structured = await build_web_results(config, query, intent_kind=None)
     if structured:
         return render_web_results_context(structured, max_items=max(1, int(getattr(config, "chat_agent_web_max_results", 3))))
     try:

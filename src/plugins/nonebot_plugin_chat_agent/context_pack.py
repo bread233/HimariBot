@@ -307,35 +307,53 @@ def _apply_web_source_ranking(raw_context: str, intent, prompt: str, web_query: 
     return ranked_context, top_source_score
 
 
-async def _build_ranked_web_context(config, query: str, intent, prompt: str, tool_notes: list[str]) -> tuple[str, float]:
+async def _build_ranked_web_context(config, query: str, intent, prompt: str, tool_notes: list[str]) -> tuple[str, dict]:
     try:
-        results = await build_web_results(config, query)
+        results = await build_web_results(config, query, intent_kind=str(getattr(intent, "kind", "") or ""))
     except Exception:
         results = []
     if results:
-        keywords = _build_source_keywords(intent, prompt, query)
         current_year = datetime.now().year
-        scored = []
-        for idx, row in enumerate(results):
-            block = {
-                "idx": idx,
-                "domain": str(row.get("domain", "") or ""),
-                "url": str(row.get("url", "") or ""),
-                "title_line": str(row.get("title", "") or ""),
-                "snippet": f"{row.get('snippet', '')}\n{row.get('excerpt', '')}",
-            }
-            source_score = _score_web_source(block, keywords, current_year)
-            item = dict(row)
-            item["weighted_score"] = source_score
-            item["_idx"] = idx
-            scored.append(item)
-        scored.sort(key=lambda x: (-float(x.get("weighted_score", 0.0)), int(x.get("_idx", 0))))
+        scored = sorted(results, key=lambda x: -float(x.get("web_rank_score", x.get("weighted_score", 0.0)) or 0.0))
+        top = scored[0] if scored else {}
+        top_domain = str(top.get("domain", "") or "")
+        top_years = top.get("extracted_years") or []
+        top_freshness = float(top.get("freshness_score", 0.0) or 0.0)
+        top_authority = float(top.get("authority_score", 0.0) or 0.0)
+        top_flags = top.get("source_flags") or []
+        current_sensitive = bool("current-sensitive" in top_flags or getattr(intent, "kind", "") == "current_fact")
+
+        top3 = scored[:3]
+        official = any(float(x.get("authority_score", 0.0) or 0.0) >= 0.30 or any(f in (x.get("source_flags") or []) for f in ["official", "docs", "nvidia-official"]) for x in top3)
+        current = any(float(x.get("freshness_score", 0.0) or 0.0) >= 0.18 or any(y in (x.get("extracted_years") or []) for y in [current_year, current_year - 1]) for x in top3)
+        newest_year = max([y for x in top3 for y in (x.get("extracted_years") or [])], default=None)
+        if official:
+            gate = "official"
+            gate_adjust = 0.08
+        elif current:
+            gate = "current"
+            gate_adjust = 0.04
+        elif current_sensitive and newest_year is not None and newest_year <= current_year - 2:
+            gate = "stale"
+            gate_adjust = -0.15
+        else:
+            gate = "unknown"
+            gate_adjust = -0.03 if current_sensitive else 0.0
+
+        tool_notes.append(f"web_current_sensitive={str(bool(current_sensitive)).lower()}")
+        tool_notes.append(f"web_top_domain={top_domain}")
+        tool_notes.append(f"web_top_years={','.join(str(y) for y in top_years[:3])}")
+        tool_notes.append(f"web_top_freshness={top_freshness:.3f}")
+        tool_notes.append(f"web_top_authority={top_authority:.3f}")
+        tool_notes.append(f"web_freshness_gate={gate}")
+        tool_notes.append(f"web_source_flags={','.join(str(f) for f in top_flags[:6])}")
+
         top_domains = [str(x.get("domain", "")) for x in scored if x.get("domain")][:5]
-        top_score = float(scored[0].get("weighted_score", 0.0)) if scored else 0.0
-        tool_notes.append("web_source_rank=structured_generic_ranked")
+        top_score = float(scored[0].get("web_rank_score", 0.0) or 0.0) if scored else 0.0
+        tool_notes.append("web_source_rank=structured_ranked_v2")
         tool_notes.append(f"web_source_domains={','.join(top_domains)}")
         tool_notes.append(f"web_top_source_score={top_score:.2f}")
-        return render_web_results_context(scored, max_items=3), top_score
+        return render_web_results_context(scored, max_items=3), {"gate": gate, "gate_adjust": gate_adjust}
 
     try:
         raw_context = await build_web_context(config, query)
@@ -346,11 +364,13 @@ async def _build_ranked_web_context(config, query: str, intent, prompt: str, too
         tool_notes.append("web_source_rank=fallback_text_ranked")
         tool_notes.append(f"web_source_domains={','.join(top_domains)}")
         tool_notes.append(f"web_top_source_score={top_score:.2f}")
-        return ranked, top_score
+        tool_notes.append("web_freshness_gate=unknown")
+        return ranked, {"gate": "unknown", "gate_adjust": 0.0}
     tool_notes.append("web_source_rank=neutral")
     tool_notes.append("web_source_domains=")
     tool_notes.append("web_top_source_score=0.00")
-    return "", 0.0
+    tool_notes.append("web_freshness_gate=unknown")
+    return "", {"gate": "unknown", "gate_adjust": 0.0}
 
 
 def _render_summary_retrieval_context(result: dict, max_items: int = 3) -> str:
@@ -699,32 +719,17 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         tool_notes.append("identity_question_no_web")
     elif intent.kind == "current_fact":
         if web_enabled:
-            web_context, top_source_score = await _build_ranked_web_context(config, web_query, intent, prompt, tool_notes)
+            web_context, web_meta = await _build_ranked_web_context(config, web_query, intent, prompt, tool_notes)
             if web_context:
                 web_relevance_score = score_text_overlap(prompt, web_context)
-                years = [int(y) for y in re.findall(r"20\d{2}", web_context)]
-                current_year = datetime.now().year
-                if not intent.freshness_days:
-                    freshness_score = 1.0
-                elif current_year in years:
-                    freshness_score = 1.0
-                elif (current_year - 1) in years:
-                    freshness_score = 0.7
-                elif years and min(years) <= current_year - 2:
-                    freshness_score = 0.3
-                else:
-                    freshness_score = 0.6
-                web_final_score = web_relevance_score * freshness_score
-                web_final_score = min(1.0, web_final_score + min(0.10, top_source_score * 0.10))
+                gate_adjust = float((web_meta or {}).get("gate_adjust", 0.0) or 0.0)
+                web_final_score = max(0.0, min(1.0, web_relevance_score + gate_adjust))
                 tool_notes.append(f"web_relevance_score={web_relevance_score:.2f}")
-                tool_notes.append(f"web_freshness_score={freshness_score:.2f}")
                 tool_notes.append(f"web_final_score={web_final_score:.2f}")
-                if freshness_score < 0.7:
-                    tool_notes.append("web_may_be_stale")
                 if web_final_score >= web_final_threshold:
                     web_used = True
                     tool_notes.append(f"web_score={web_relevance_score:.2f}")
-                else:
+                elif web_relevance_score < 0.15:
                     web_context = ""
                     tool_notes.append("web_low_relevance_or_stale")
             if not web_context:
