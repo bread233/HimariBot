@@ -446,6 +446,41 @@ def _render_style_profile_context(profile: dict) -> str:
     return out
 
 
+def _is_simple_definition_question(prompt: str, intent_kind: str | None) -> bool:
+    text = str(prompt or "").strip().lower()
+    if not text:
+        return False
+    if len(text) < 2 or len(text) > 40:
+        return False
+    if str(intent_kind or "").strip() in {"local_context", "time"}:
+        return False
+
+    block_terms = [
+        "最新", "版本", "latest", "version", "现在", "今天", "价格", "新闻", "谁说过", "之前", "历史", "聊过",
+        "发布", "发售", "更新", "多少钱", "参数", "规格", "显存",
+    ]
+    if any(t in text for t in block_terms):
+        return False
+
+    def_markers = ["是什么", "是啥", "什么是", "什么意思", "是什么东西", "是做什么的"]
+    if not any(t in text for t in def_markers):
+        return False
+    return True
+
+
+def _build_simple_definition_reply(prompt: str) -> str:
+    text = str(prompt or "").strip().lower()
+    if "nodejs" in text or "node.js" in text or re.search(r"\bnode\b", text):
+        return "Node.js 是一个基于 Chrome V8 引擎的 JavaScript 运行时，常用于服务端开发。"
+    if "python" in text:
+        return "Python 是一门通用编程语言，以语法简洁、生态丰富著称。"
+    if "docker" in text:
+        return "Docker 是一个容器化平台，用来打包、分发和运行应用及其依赖。"
+    if re.search(r"\bnpm\b", text):
+        return "npm 是 Node.js 的包管理工具，用于安装和管理 JavaScript 依赖。"
+    return "这是一个概念解释类问题，我暂时没法稳定生成回答，可以稍后再试。"
+
+
 async def build_context_pack(config, session_info: dict, prompt: str, bot=None, event=None) -> dict:
     intent = classify_tool_intent(prompt)
     if intent.needs_time:
@@ -743,7 +778,24 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "web_context": "",
                 "tool_notes": "\n".join(tool_notes).strip(),
             }
-    elif is_identity_question:
+    if _is_simple_definition_question(prompt, intent.kind):
+        tool_notes.append("simple_definition_direct_reply=1")
+        return {
+            "direct_reply": _build_simple_definition_reply(prompt),
+            "should_call_llm": False,
+            "web_used": False,
+            "time_context": time_context,
+            "profile_context": profile_context,
+            "group_context": group_context,
+            "retrieval_context": "",
+            "style_context": "",
+            "summary_retrieval_context": "",
+            "history_context": "",
+            "memory_context": "",
+            "web_context": "",
+            "tool_notes": "\n".join(tool_notes).strip(),
+        }
+    if is_identity_question:
         tool_notes.append("identity_question_no_web")
     elif intent.kind == "current_fact":
         if web_enabled:
