@@ -312,6 +312,103 @@ async def read_url(config, url: str) -> dict | None:
     return {"url": url, "title": title, "text": text, "meta_description": meta_description}
 
 
+async def get_nodejs_latest_version(timeout: float = 8.0) -> dict | None:
+    endpoint = "https://nodejs.org/dist/index.json"
+    try:
+        async with httpx.AsyncClient(timeout=float(timeout), trust_env=False, follow_redirects=True) as client:
+            resp = await client.get(endpoint)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception:
+        return None
+
+    if not isinstance(data, list):
+        return None
+
+    pattern = re.compile(r"^v\d+\.\d+\.\d+$")
+    version = ""
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        raw = str(item.get("version", "")).strip()
+        if pattern.match(raw):
+            version = raw
+            break
+    if not version:
+        return None
+
+    return {
+        "kind": "nodejs_latest",
+        "answer": f"Node.js 最新版是 {version}。",
+        "version": version,
+        "source": endpoint,
+        "confidence": "high",
+    }
+
+
+OFFICIAL_WEB_RESOLVERS = [
+    {
+        "key": "nodejs_latest",
+        "intent_kind": "current_fact",
+        "entity_patterns": ["nodejs", "node.js", r"\bnode\b"],
+        "query_patterns": ["latest", "version", "\u6700\u65b0\u7248", "\u6700\u65b0", "\u7248\u672c"],
+        "handler": get_nodejs_latest_version,
+    },
+]
+
+
+def _resolver_pattern_hit(text: str, patterns: list[str]) -> bool:
+    body = str(text or "").lower()
+    if not body:
+        return False
+    for pattern in patterns or []:
+        token = str(pattern or "").strip()
+        if not token:
+            continue
+        try:
+            if re.search(token, body):
+                return True
+        except re.error:
+            if token.lower() in body:
+                return True
+    return False
+
+
+async def resolve_official_web_answer(
+    query: str,
+    *,
+    intent_kind: str | None = None,
+    timeout: float = 8.0,
+) -> dict | None:
+    q = str(query or "").strip()
+    if not q:
+        return None
+    for resolver in OFFICIAL_WEB_RESOLVERS:
+        if str(resolver.get("intent_kind", "")).strip() != str(intent_kind or "").strip():
+            continue
+        if not _resolver_pattern_hit(q, resolver.get("entity_patterns") or []):
+            continue
+        query_hit = _resolver_pattern_hit(q, resolver.get("query_patterns") or [])
+        if not query_hit:
+            continue
+        handler = resolver.get("handler")
+        if not callable(handler):
+            continue
+        try:
+            result = await handler(timeout=timeout)
+        except Exception:
+            continue
+        if not isinstance(result, dict):
+            continue
+        if str(result.get("confidence", "")).lower() != "high":
+            continue
+        out = dict(result)
+        out["resolver_key"] = str(resolver.get("key", "")).strip()
+        out["matched"] = True
+        return out
+    return None
+
+
 def _extract_domain(url: str) -> str:
     try:
         host = (urlparse(str(url or "").strip()).netloc or "").lower()
