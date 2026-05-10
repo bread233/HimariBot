@@ -132,6 +132,71 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             await chat_agent.finish(_with_group_at(event, is_group, reply))
             return
 
+        if str(context_pack.get("lightweight_mode", "")).strip() == "web_strategy":
+            strategy_prompt = str(context_pack.get("lightweight_prompt", prompt) or prompt).strip()
+            strategy_query = str(context_pack.get("web_strategy_query", strategy_prompt) or strategy_prompt).strip()
+            strategy_context = str(context_pack.get("web_strategy_context", "") or "").strip()
+            strategy_model = str(
+                getattr(config, "chat_agent_lightweight_definition_model", "") or "llama32-finalizer-fast"
+            ).strip()
+            strategy_timeout = min(
+                25.0,
+                max(20.0, float(getattr(config, "chat_agent_lightweight_definition_timeout", 20.0) or 20.0)),
+            )
+            strategy_messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You answer in Chinese using the distilled web notes.\n"
+                        "Give a practical answer in 2-5 short sentences.\n"
+                        "Prefer consensus from the notes.\n"
+                        "Mention uncertainty if sources are weak or version-dependent.\n"
+                        "Do not invent details not present in the notes."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Question: {strategy_prompt}\nQuery: {strategy_query}\n\n{strategy_context}",
+                },
+            ]
+            reply = ""
+            should_save_assistant = False
+            try:
+                reply = await chat_completions(
+                    strategy_messages,
+                    config,
+                    timeout=strategy_timeout,
+                    model=strategy_model,
+                    temperature=0.35,
+                    top_p=0.7,
+                    max_tokens=300,
+                )
+                reply = truncate_reply(strip_thinking(reply), config.chat_agent_max_reply_length)
+                reply = str(reply or "").strip()
+                if not reply:
+                    logger.warning(
+                        f"web_strategy empty reply model={strategy_model} timeout={strategy_timeout} "
+                        f"prompt={strategy_prompt[:80]!r}"
+                    )
+                    reply = "\u6682\u65f6\u6ca1\u67e5\u5230\u7a33\u5b9a\u7684\u653b\u7565\u8d44\u6599\uff0c\u53ef\u4ee5\u6362\u4e2a\u66f4\u5177\u4f53\u7684\u95ee\u9898\u3002"
+                should_save_assistant = bool(reply)
+            except Exception as e:
+                logger.warning(
+                    f"web_strategy failed type={type(e).__name__} model={strategy_model} "
+                    f"timeout={strategy_timeout} prompt={strategy_prompt[:80]!r} message={str(e)[:200]!r}"
+                )
+                reply = "\u6682\u65f6\u6ca1\u67e5\u5230\u7a33\u5b9a\u7684\u653b\u7565\u8d44\u6599\uff0c\u53ef\u4ee5\u6362\u4e2a\u66f4\u5177\u4f53\u7684\u95ee\u9898\u3002"
+            if _should_sanitize_task_reply(prompt, context_pack):
+                reply = sanitize_task_reply(reply) or reply
+            if config.chat_agent_enable_history and reply and should_save_assistant:
+                try:
+                    await save_message(config, session_info, "user", prompt)
+                    await save_message(config, session_info, "assistant", reply)
+                except Exception:
+                    pass
+            await chat_agent.finish(_with_group_at(event, is_group, reply))
+            return
+
         if str(context_pack.get("lightweight_mode", "")).strip() == "definition":
             lightweight_prompt = str(context_pack.get("lightweight_prompt", prompt) or prompt).strip()
             lightweight_messages = [

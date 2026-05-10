@@ -468,6 +468,88 @@ def _is_simple_definition_question(prompt: str, intent_kind: str | None) -> bool
     return True
 
 
+def _is_community_strategy_question(prompt: str, intent_kind: str | None) -> bool:
+    text = str(prompt or "").strip().lower()
+    if not text:
+        return False
+    if len(text) < 4 or len(text) > 80:
+        return False
+    if str(intent_kind or "").strip() in {"local_context", "time"}:
+        return False
+    if _is_explicit_history_query(prompt) or _is_simple_definition_question(prompt, intent_kind):
+        return False
+    if extract_urls(prompt):
+        return False
+    if detect_numeric_compare(prompt) is not None:
+        return False
+
+    exclude_markers = [
+        "\u6700\u65b0", "\u7248\u672c", "latest", "version", "\u4ef7\u683c", "\u65b0\u95fb",
+        "\u4eca\u5929", "\u73b0\u5728", "\u5f53\u524d", "\u591a\u5c11", "\u53c2\u6570", "\u89c4\u683c",
+    ]
+    if any(t in text for t in exclude_markers):
+        return False
+
+    strategy_markers = [
+        "\u4ecb\u7ecd", "\u63a8\u8350", "\u73a9\u6cd5", "\u600e\u4e48\u73a9", "\u653b\u7565",
+        "\u65b0\u624b", "\u5f00\u5c40", "\u65b9\u6848", "\u8def\u7ebf", "\u5e2e\u6211\u9009",
+        "\u9009\u54ea\u4e2a", "\u914d\u7f6e", "\u600e\u4e48\u914d", "\u804c\u4e1a", "\u56fd\u5bb6",
+        "\u89d2\u8272",
+    ]
+    return any(t in text for t in strategy_markers)
+
+
+async def _build_web_strategy_distilled_context(config, query: str) -> tuple[str, int]:
+    try:
+        results = await build_web_results(config, query, intent_kind="community_strategy")
+    except Exception:
+        return "", 0
+    if not results:
+        return "", 0
+    top = results[:5]
+    notes = ["Web distilled notes:", f"- Query: {query}", "- Top sources:"]
+    snippets: list[str] = []
+    for i, row in enumerate(top, 1):
+        title = str(row.get("title", "") or "").strip()
+        domain = str(row.get("domain", "") or "").strip() or "unknown"
+        snippet = str(row.get("snippet", "") or "").strip()
+        if len(snippet) > 220:
+            snippet = snippet[:220] + "..."
+        if snippet:
+            snippets.append(snippet.lower())
+        notes.append(f"  {i}. {title} / {domain} / {snippet}")
+
+    token_map = {
+        "beginner": "\u65b0\u624b",
+        "opening": "\u5f00\u5c40",
+        "build": "\u6784\u5efa",
+        "focus": "\u91cd\u70b9",
+        "economy": "\u7ecf\u6d4e",
+        "industry": "\u5de5\u4e1a",
+        "guide": "\u6307\u5357",
+        "tips": "\u6280\u5de7",
+        "meta": "meta",
+    }
+    hint_hits: list[str] = []
+    blob = " ".join(snippets)
+    for k, v in token_map.items():
+        if k in blob:
+            hint_hits.append(v)
+    hint_hits = hint_hits[:5]
+    notes.append("- Consensus hints:")
+    if hint_hits:
+        for h in hint_hits:
+            notes.append(f"  - {h}")
+    else:
+        notes.append("  - \u4f18\u5148\u53c2\u8003\u591a\u6765\u6e90\u91cd\u590d\u63d0\u5230\u7684\u5efa\u8bae")
+    notes.append("- Caveats:")
+    notes.append("  - Community guides can be version or DLC dependent.")
+    out = "\n".join(notes).strip()
+    if len(out) > 1500:
+        out = out[:1500]
+    return out, len(top)
+
+
 def _build_simple_definition_reply(prompt: str) -> str:
     text = str(prompt or "").strip().lower()
     if "nodejs" in text or "node.js" in text or re.search(r"\bnode\b", text):
@@ -847,6 +929,48 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "web_context": "",
                 "tool_notes": "\n".join(tool_notes).strip(),
             }
+    if _is_community_strategy_question(prompt, intent.kind):
+        strategy_query = str(prompt or "").strip()
+        distilled_context, strategy_count = await _build_web_strategy_distilled_context(config, strategy_query)
+        tool_notes.append("web_strategy=1")
+        tool_notes.append(f"web_strategy_query={strategy_query}")
+        tool_notes.append(f"web_strategy_result_count={strategy_count}")
+        tool_notes.append(f"web_strategy_distilled_chars={len(distilled_context)}")
+        if not distilled_context:
+            return {
+                "direct_reply": "\u6682\u65f6\u6ca1\u67e5\u5230\u7a33\u5b9a\u7684\u653b\u7565\u8d44\u6599\uff0c\u53ef\u4ee5\u6362\u4e2a\u66f4\u5177\u4f53\u7684\u95ee\u9898\u3002",
+                "should_call_llm": False,
+                "web_used": True,
+                "time_context": time_context,
+                "profile_context": profile_context,
+                "group_context": group_context,
+                "retrieval_context": "",
+                "style_context": "",
+                "summary_retrieval_context": "",
+                "history_context": "",
+                "memory_context": "",
+                "web_context": "",
+                "tool_notes": "\n".join(tool_notes).strip(),
+            }
+        return {
+            "direct_reply": None,
+            "should_call_llm": True,
+            "web_used": True,
+            "time_context": time_context,
+            "profile_context": profile_context,
+            "group_context": group_context,
+            "retrieval_context": "",
+            "style_context": "",
+            "summary_retrieval_context": "",
+            "history_context": "",
+            "memory_context": "",
+            "web_context": "",
+            "lightweight_mode": "web_strategy",
+            "lightweight_prompt": prompt,
+            "web_strategy_query": strategy_query,
+            "web_strategy_context": distilled_context,
+            "tool_notes": "\n".join(tool_notes).strip(),
+        }
     if _is_simple_definition_question(prompt, intent.kind):
         tool_notes.append("simple_definition_lightweight_llm=1")
         tool_notes.append("simple_definition_lightweight_timeout=12")
