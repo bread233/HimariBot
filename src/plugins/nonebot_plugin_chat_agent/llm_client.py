@@ -3,7 +3,15 @@ from __future__ import annotations
 import httpx
 
 
-async def chat_completions(messages, config, timeout=None, model=None):
+async def chat_completions(
+    messages,
+    config,
+    timeout=None,
+    model=None,
+    temperature=None,
+    top_p=None,
+    max_tokens=None,
+):
     url = f"{config.chat_agent_base_url.rstrip('/')}/chat/completions"
     headers = {
         "Authorization": f"Bearer {config.chat_agent_api_key}",
@@ -13,9 +21,9 @@ async def chat_completions(messages, config, timeout=None, model=None):
     payload = {
         "model": model_name,
         "messages": messages,
-        "temperature": 0.8,
-        "top_p": 0.9,
-        "max_tokens": config.chat_agent_max_tokens,
+        "temperature": 0.8 if temperature is None else temperature,
+        "top_p": 0.9 if top_p is None else top_p,
+        "max_tokens": config.chat_agent_max_tokens if max_tokens is None else max_tokens,
         "think": config.chat_agent_think,
     }
     try:
