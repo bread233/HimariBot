@@ -312,6 +312,40 @@ async def read_url(config, url: str) -> dict | None:
     return {"url": url, "title": title, "text": text, "meta_description": meta_description}
 
 
+async def get_nodejs_latest_version(timeout: float = 8.0) -> dict | None:
+    endpoint = "https://nodejs.org/dist/index.json"
+    try:
+        async with httpx.AsyncClient(timeout=float(timeout), trust_env=False, follow_redirects=True) as client:
+            resp = await client.get(endpoint)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception:
+        return None
+
+    if not isinstance(data, list):
+        return None
+
+    pattern = re.compile(r"^v\d+\.\d+\.\d+$")
+    version = ""
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        raw = str(item.get("version", "")).strip()
+        if pattern.match(raw):
+            version = raw
+            break
+    if not version:
+        return None
+
+    return {
+        "kind": "nodejs_latest",
+        "answer": f"Node.js 最新版是 {version}。",
+        "version": version,
+        "source": endpoint,
+        "confidence": "high",
+    }
+
+
 def _extract_domain(url: str) -> str:
     try:
         host = (urlparse(str(url or "").strip()).netloc or "").lower()
