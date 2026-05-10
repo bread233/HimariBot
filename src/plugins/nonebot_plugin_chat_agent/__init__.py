@@ -135,7 +135,18 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         if str(context_pack.get("lightweight_mode", "")).strip() == "definition":
             lightweight_prompt = str(context_pack.get("lightweight_prompt", prompt) or prompt).strip()
             lightweight_messages = [
-                {"role": "system", "content": "\u4f60\u8d1f\u8d23\u7528\u4e2d\u6587\u7b80\u6d01\u89e3\u91ca\u4e00\u4e2a\u6982\u5ff5\u3002\u8bf7\u75281-3\u53e5\u56de\u7b54\u3002\u4e0d\u8981\u7f16\u9020\u7248\u672c\u53f7\u3001\u4ef7\u683c\u3001\u65b0\u95fb\u6216\u5386\u53f2\u8bb0\u5f55\u3002\u4e0d\u4e86\u89e3\u65f6\u76f4\u63a5\u8bf4\u4e0d\u786e\u5b9a\u3002"},
+                {
+                    "role": "system",
+                    "content": (
+                        "You explain technical concepts in Chinese.\n"
+                        "Answer in 1-3 short sentences.\n"
+                        "Only explain what the term is and its common use.\n"
+                        "Do not mention author, company, year, license, latest version, price, news, "
+                        "or history unless the user explicitly asks.\n"
+                        "If you are not sure, say you are not sure.\n"
+                        "Do not guess."
+                    ),
+                },
                 {"role": "user", "content": lightweight_prompt or prompt},
             ]
             lightweight_model = str(
@@ -153,6 +164,9 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     config,
                     timeout=lightweight_timeout,
                     model=lightweight_model,
+                    temperature=0.2,
+                    top_p=0.6,
+                    max_tokens=180,
                 )
                 reply = truncate_reply(strip_thinking(reply), config.chat_agent_max_reply_length)
                 reply = str(reply or "").strip()
@@ -167,6 +181,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 logger.warning(
                     f"lightweight definition failed type={type(e).__name__} model={lightweight_model} "
                     f"timeout={lightweight_timeout} "
+                    "temperature=0.2 top_p=0.6 max_tokens=180 "
                     f"prompt={(lightweight_prompt or prompt)[:80]!r} "
                     f"message={str(e)[:200]!r}"
                 )
