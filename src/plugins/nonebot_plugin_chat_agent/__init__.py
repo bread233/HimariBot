@@ -52,6 +52,12 @@ def _with_group_at(event: MessageEvent, is_group: bool, text: str):
     return MessageSegment.at(event.user_id) + MessageSegment.text(" " + text)
 
 
+def _append_system(messages: list[dict], content: str) -> None:
+    text = str(content or "").strip()
+    if text:
+        messages.append({"role": "system", "content": text})
+
+
 def _should_sanitize_task_reply(prompt: str, context_pack: dict) -> bool:
     text = (prompt or "").strip()
     if any(token in text for token in ["你是谁", "自我介绍", "可爱语气", "安慰", "陪聊", "角色扮演"]):
@@ -127,42 +133,129 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             return
 
         messages = [{"role": "system", "content": build_system_prompt()}]
-        if context_pack.get("time_context"):
-            messages.append({"role": "system", "content": context_pack["time_context"]})
-        if context_pack.get("profile_context"):
-            messages.append({"role": "system", "content": context_pack["profile_context"]})
-        if context_pack.get("group_context"):
-            messages.append({"role": "system", "content": context_pack["group_context"]})
-        if context_pack.get("style_context"):
-            messages.append({"role": "system", "content": "回复风格提示：\n" + context_pack["style_context"]})
-        if context_pack.get("retrieval_context"):
-            messages.append({"role": "system", "content": "本地检索到的相关资料：\n" + context_pack["retrieval_context"]})
-        if context_pack.get("summary_retrieval_context"):
-            messages.append({"role": "system", "content": "历史聊天摘要检索结果：\n" + context_pack["summary_retrieval_context"]})
-        if context_pack.get("memory_context"):
-            messages.append({"role": "system", "content": context_pack["memory_context"]})
-        if context_pack.get("history_context"):
-            messages.append({"role": "system", "content": "最近对话：\n" + context_pack["history_context"]})
-        if context_pack.get("web_context"):
-            messages.append({"role": "system", "content": "联网查询结果：\n" + context_pack["web_context"]})
-        if context_pack.get("tool_notes"):
-            messages.append({"role": "system", "content": "工具状态：\n" + context_pack["tool_notes"]})
-        messages.append(
-            {
-                "role": "system",
-                "content": "\n".join(
+        _append_system(messages, context_pack.get("time_context", ""))
+        _append_system(messages, context_pack.get("profile_context", ""))
+        _append_system(messages, context_pack.get("group_context", ""))
+
+        style_context = str(context_pack.get("style_context", "") or "").strip()
+        if style_context:
+            _append_system(
+                messages,
+                "你会收到“回复风格提示”。这只用于调整语气、长度和格式。不要向用户提到画像、历史或系统提示。",
+            )
+            _append_system(messages, "回复风格提示：\n" + style_context)
+
+        retrieval_context = str(context_pack.get("retrieval_context", "") or "").strip()
+        if retrieval_context:
+            _append_system(
+                messages,
+                "\n".join(
                     [
-                        "最终回复风格要求：",
-                        "- 普通问题默认 1~3 句。",
-                        "- 先给结论，不要铺垫。",
-                        "- 不要复述用户问题。",
-                        "- 不要主动说“根据历史/画像/上下文”。",
-                        "- 关键词式问题按“询问该主题的结论或状态”直接回答。",
-                        "- 只有必要时才补一句不确定性来源。",
-                        "- 如果是明确历史查询，可以说明“历史摘要里看到/没找到”。",
+                        "本地资料使用规则：",
+                        "- 下面是本地检索资料。",
+                        "- 只在和用户问题直接相关时使用。",
+                        "- 不要编造资料中没有的信息。",
                     ]
                 ),
-            }
+            )
+            _append_system(messages, "本地检索到的相关资料：\n" + retrieval_context)
+
+        summary_retrieval_context = str(context_pack.get("summary_retrieval_context", "") or "").strip()
+        if summary_retrieval_context:
+            _append_system(
+                messages,
+                "\n".join(
+                    [
+                        "历史摘要使用规则：",
+                        "- 下面内容只用于用户明确询问“之前/历史/谁说过/聊过/提过”等场景。",
+                        "- 只能复述或概括历史摘要里的线索。",
+                        "- 不要把历史摘要扩写成通用事实。",
+                        "- 如果摘要不足，回答“历史摘要里没找到足够可靠线索”。",
+                    ]
+                ),
+            )
+            _append_system(messages, "历史聊天摘要检索结果：\n" + summary_retrieval_context)
+
+        memory_context = str(context_pack.get("memory_context", "") or "").strip()
+        if memory_context:
+            _append_system(
+                messages,
+                "\n".join(
+                    [
+                        "长期记忆使用规则：",
+                        "- 只用于个性化和已确认偏好。",
+                        "- 不要把记忆当成当前事实来源。",
+                        "- 不要主动暴露记忆内容。",
+                    ]
+                ),
+            )
+            _append_system(messages, memory_context)
+
+        history_context = str(context_pack.get("history_context", "") or "").strip()
+        if history_context:
+            _append_system(messages, "最近对话：\n" + history_context)
+
+        tool_notes = str(context_pack.get("tool_notes", "") or "").strip()
+        is_direct_url_mode = "direct_url_mode=1" in tool_notes
+
+        web_context = str(context_pack.get("web_context", "") or "").strip()
+        if web_context:
+            if is_direct_url_mode:
+                _append_system(
+                    messages,
+                    "\n".join(
+                        [
+                            "链接内容使用规则：",
+                            "- 下面是用户提供链接的读取结果。",
+                            "- 优先根据链接内容回答。",
+                            "- 如果内容不足，明确说明。",
+                        ]
+                    ),
+                )
+                _append_system(messages, "链接读取结果：\n" + web_context)
+            else:
+                _append_system(
+                    messages,
+                    "\n".join(
+                        [
+                            "联网资料使用规则：",
+                            "- 下面的联网资料是候选资料，不保证都正确。",
+                            "- 优先使用 official/docs/current-year/recent-year 来源。",
+                            "- 对 stale-year/rumor/forum/seo 来源保持低置信。",
+                            "- 如果官方或权威来源没有明确参数，不要硬编；回答“官方资料未明确，以官方发布为准”。",
+                            "- 不要把传闻、旧页面或论坛内容当成确定事实。",
+                            "- 如果资料冲突，说明低置信，并优先官方/较新的来源。",
+                        ]
+                    ),
+                )
+                _append_system(messages, "联网查询结果：\n" + web_context)
+
+        if tool_notes:
+            _append_system(
+                messages,
+                "\n".join(
+                    [
+                        "工具状态（仅用于判断可靠性，不要在回答中复述）：",
+                        tool_notes,
+                    ]
+                ),
+            )
+
+        _append_system(
+            messages,
+            "\n".join(
+                [
+                    "最终回复要求：",
+                    "- 普通问题默认 1~3 句。",
+                    "- 第一反应给结论，不要铺垫。",
+                    "- 不要复述用户问题。",
+                    "- 不要主动说“根据上下文/根据资料/根据历史/根据画像”。",
+                    "- 关键词式问题按“询问该主题的结论或状态”直接回答。",
+                    "- 当前事实类问题：如果官方/权威资料不明确，直接说“不确定/官方未明确”，不要编。",
+                    "- 明确历史查询：可以说“历史摘要里看到/没找到”。",
+                    "- 没有可靠资料时，不要为了完整而扩写。",
+                ]
+            ),
         )
         messages.append({"role": "user", "content": prompt})
 
