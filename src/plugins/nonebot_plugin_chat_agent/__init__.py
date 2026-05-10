@@ -132,6 +132,36 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             await chat_agent.finish(_with_group_at(event, is_group, reply))
             return
 
+        if str(context_pack.get("lightweight_mode", "")).strip() == "definition":
+            lightweight_prompt = str(context_pack.get("lightweight_prompt", prompt) or prompt).strip()
+            lightweight_messages = [
+                {"role": "system", "content": "你负责用中文简洁解释一个概念。请用1-3句回答。不要编造版本号、价格、新闻或历史记录。不了解时直接说不确定。"},
+                {"role": "user", "content": lightweight_prompt or prompt},
+            ]
+            lightweight_timeout = 12
+            tool_notes = str(context_pack.get("tool_notes", "") or "")
+            reply = ""
+            should_save_assistant = False
+            try:
+                reply = await chat_completions(lightweight_messages, config, timeout=lightweight_timeout)
+                reply = truncate_reply(strip_thinking(reply), config.chat_agent_max_reply_length)
+                should_save_assistant = bool(reply)
+            except Exception as e:
+                reply = "这个概念我暂时没法稳定生成解释，可以稍后再试。"
+                if tool_notes:
+                    tool_notes += "\n"
+                tool_notes += f"simple_definition_lightweight_error={str(e)[:120]}"
+            if _should_sanitize_task_reply(prompt, context_pack):
+                reply = sanitize_task_reply(reply) or reply
+            if config.chat_agent_enable_history and reply and should_save_assistant:
+                try:
+                    await save_message(config, session_info, "user", prompt)
+                    await save_message(config, session_info, "assistant", reply)
+                except Exception:
+                    pass
+            await chat_agent.finish(_with_group_at(event, is_group, reply))
+            return
+
         messages = [{"role": "system", "content": build_system_prompt()}]
         _append_system(messages, context_pack.get("time_context", ""))
         _append_system(messages, context_pack.get("profile_context", ""))

@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 
 
-async def chat_completions(messages, config):
+async def chat_completions(messages, config, timeout=None):
     url = f"{config.chat_agent_base_url.rstrip('/')}/chat/completions"
     headers = {
         "Authorization": f"Bearer {config.chat_agent_api_key}",
@@ -18,7 +18,8 @@ async def chat_completions(messages, config):
         "think": config.chat_agent_think,
     }
     try:
-        async with httpx.AsyncClient(timeout=config.chat_agent_timeout) as client:
+        client_timeout = config.chat_agent_timeout if timeout is None else timeout
+        async with httpx.AsyncClient(timeout=client_timeout) as client:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
