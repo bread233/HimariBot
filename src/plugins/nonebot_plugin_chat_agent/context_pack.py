@@ -10,7 +10,7 @@ from .storage import get_user_style_profile, load_memories, load_recent_messages
 from .tool_router import should_use_web_tool
 from .tool_intent import classify_tool_intent
 from .url_tools import build_direct_url_context, extract_urls
-from .web_tools import build_web_context, build_web_results, get_nodejs_latest_version, render_web_results_context
+from .web_tools import build_web_context, build_web_results, render_web_results_context, resolve_official_web_answer
 from datetime import datetime
 import re
 from urllib.parse import urlparse
@@ -446,17 +446,6 @@ def _render_style_profile_context(profile: dict) -> str:
     return out
 
 
-def _is_nodejs_latest_query(prompt: str, web_query: str) -> bool:
-    text = f"{prompt or ''} {web_query or ''}".lower()
-    if not text.strip():
-        return False
-    has_node = ("nodejs" in text) or ("node.js" in text) or re.search(r"\bnode\b", text) is not None
-    if not has_node:
-        return False
-    latest_tokens = ["latest", "version", "最新版", "最新", "版本"]
-    return any(token in text for token in latest_tokens)
-
-
 async def build_context_pack(config, session_info: dict, prompt: str, bot=None, event=None) -> dict:
     intent = classify_tool_intent(prompt)
     if intent.needs_time:
@@ -727,30 +716,33 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     elif math_result is not None:
         tool_notes.append("math_tool=numeric_compare")
     elif intent.kind == "current_fact":
-        nodejs_query = _is_nodejs_latest_query(prompt, web_query)
-        if nodejs_query:
-            nodejs_answer = await get_nodejs_latest_version(timeout=8.0)
-            if nodejs_answer and str(nodejs_answer.get("confidence", "")).lower() == "high":
-                tool_notes.append("current_fact_direct_answer=nodejs_latest")
-                tool_notes.append("current_fact_direct_confidence=high")
-                tool_notes.append(
-                    f"current_fact_direct_source={nodejs_answer.get('source', 'https://nodejs.org/dist/index.json')}"
-                )
-                return {
-                    "direct_reply": str(nodejs_answer.get("answer", "")).strip(),
-                    "should_call_llm": False,
-                    "web_used": False,
-                    "time_context": time_context,
-                    "profile_context": profile_context,
-                    "group_context": group_context,
-                    "retrieval_context": retrieval_context,
-                    "style_context": style_context,
-                    "summary_retrieval_context": summary_retrieval_context,
-                    "history_context": history_context,
-                    "memory_context": memory_context,
-                    "web_context": "",
-                    "tool_notes": "\n".join(tool_notes).strip(),
-                }
+        official_answer = await resolve_official_web_answer(
+            web_query or prompt,
+            intent_kind=intent.kind,
+            timeout=8.0,
+        )
+        if official_answer and str(official_answer.get("confidence", "")).lower() == "high":
+            resolver_key = str(official_answer.get("resolver_key", official_answer.get("kind", "official_answer")))
+            tool_notes.append(f"current_fact_direct_answer={resolver_key}")
+            tool_notes.append("current_fact_direct_confidence=high")
+            tool_notes.append(
+                f"current_fact_direct_source={official_answer.get('source', '')}"
+            )
+            return {
+                "direct_reply": str(official_answer.get("answer", "")).strip(),
+                "should_call_llm": False,
+                "web_used": False,
+                "time_context": time_context,
+                "profile_context": profile_context,
+                "group_context": group_context,
+                "retrieval_context": retrieval_context,
+                "style_context": style_context,
+                "summary_retrieval_context": summary_retrieval_context,
+                "history_context": history_context,
+                "memory_context": memory_context,
+                "web_context": "",
+                "tool_notes": "\n".join(tool_notes).strip(),
+            }
     elif is_identity_question:
         tool_notes.append("identity_question_no_web")
     elif intent.kind == "current_fact":
