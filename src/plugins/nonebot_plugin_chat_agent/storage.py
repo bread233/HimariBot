@@ -677,6 +677,202 @@ async def list_enabled_chat_agent_skills(config, group_id: str | None = None) ->
     return await asyncio.to_thread(_list_enabled_chat_agent_skills_sync, config.chat_agent_db_path, group_id)
 
 
+def _validate_skill_key(key: str) -> bool:
+    if not key:
+        return False
+    for ch in key:
+        if not (ch.isalnum() or ch in {"_", "-", "."}):
+            return False
+    return True
+
+
+def _upsert_chat_agent_skill_sync(db_path: Path, row: dict) -> None:
+    _init_storage_sync(db_path)
+    key = str(row.get("key", "") or "").strip()
+    if not _validate_skill_key(key):
+        raise ValueError("invalid skill key")
+    title = str(row.get("title", "") or "").strip()
+    description = str(row.get("description", "") or "").strip()
+    intent_kinds = str(row.get("intent_kinds", "") or "").strip()
+    trigger_terms = str(row.get("trigger_terms", "") or "").strip()
+    negative_terms = str(row.get("negative_terms", "") or "").strip()
+    group_ids = str(row.get("group_ids", "") or "").strip()
+    content = str(row.get("content", "") or "").strip()
+    if not content and not description:
+        raise ValueError("content or description is required")
+    if not intent_kinds and not trigger_terms:
+        raise ValueError("intent_kinds or trigger_terms is required")
+    if len(title) > 120:
+        raise ValueError("title too long")
+    if len(description) > 300:
+        raise ValueError("description too long")
+    if len(content) > 600:
+        raise ValueError("content too long")
+    try:
+        priority = float(row.get("priority", 1.0) or 1.0)
+    except Exception as e:
+        raise ValueError("invalid priority") from e
+    enabled = 0 if not bool(int(row.get("enabled", 1) or 0)) else 1
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO chat_agent_skills
+            (key, title, description, intent_kinds, trigger_terms, negative_terms, group_ids, priority, content, enabled, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET
+                title=excluded.title,
+                description=excluded.description,
+                intent_kinds=excluded.intent_kinds,
+                trigger_terms=excluded.trigger_terms,
+                negative_terms=excluded.negative_terms,
+                group_ids=excluded.group_ids,
+                priority=excluded.priority,
+                content=excluded.content,
+                enabled=excluded.enabled,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (
+                key,
+                title,
+                description,
+                intent_kinds,
+                trigger_terms,
+                negative_terms,
+                group_ids,
+                priority,
+                content,
+                enabled,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _set_chat_agent_skill_enabled_sync(db_path: Path, key: str, enabled: bool) -> bool:
+    _init_storage_sync(db_path)
+    skey = str(key or "").strip()
+    if not _validate_skill_key(skey):
+        return False
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.execute(
+            """
+            UPDATE chat_agent_skills
+            SET enabled=?, updated_at=CURRENT_TIMESTAMP
+            WHERE key=?
+            """,
+            (1 if enabled else 0, skey),
+        )
+        conn.commit()
+        return bool(cur.rowcount)
+    finally:
+        conn.close()
+
+
+def _get_chat_agent_skill_sync(db_path: Path, key: str) -> dict | None:
+    if not db_path.exists():
+        return None
+    skey = str(key or "").strip()
+    if not _validate_skill_key(skey):
+        return None
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.execute(
+            """
+            SELECT id, key, title, description, intent_kinds, trigger_terms, negative_terms,
+                   group_ids, priority, content, enabled, created_at, updated_at
+            FROM chat_agent_skills
+            WHERE key = ?
+            LIMIT 1
+            """,
+            (skey,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "key": row[1],
+            "title": row[2],
+            "description": row[3],
+            "intent_kinds": row[4],
+            "trigger_terms": row[5],
+            "negative_terms": row[6],
+            "group_ids": row[7],
+            "priority": row[8],
+            "content": row[9],
+            "enabled": row[10],
+            "created_at": row[11],
+            "updated_at": row[12],
+        }
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        conn.close()
+
+
+def _list_chat_agent_skills_sync(db_path: Path, include_disabled: bool = False) -> list[dict]:
+    if not db_path.exists():
+        return []
+    conn = sqlite3.connect(db_path)
+    try:
+        where_sql = "" if include_disabled else "WHERE enabled = 1"
+        cur = conn.execute(
+            f"""
+            SELECT id, key, title, description, intent_kinds, trigger_terms, negative_terms,
+                   group_ids, priority, content, enabled, created_at, updated_at
+            FROM chat_agent_skills
+            {where_sql}
+            ORDER BY id ASC
+            LIMIT 200
+            """
+        )
+        rows = cur.fetchall()
+        out = []
+        for row in rows:
+            out.append(
+                {
+                    "id": row[0],
+                    "key": row[1],
+                    "title": row[2],
+                    "description": row[3],
+                    "intent_kinds": row[4],
+                    "trigger_terms": row[5],
+                    "negative_terms": row[6],
+                    "group_ids": row[7],
+                    "priority": row[8],
+                    "content": row[9],
+                    "enabled": row[10],
+                    "created_at": row[11],
+                    "updated_at": row[12],
+                }
+            )
+        return out
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        conn.close()
+
+
+async def upsert_chat_agent_skill(config, row: dict) -> None:
+    await asyncio.to_thread(_upsert_chat_agent_skill_sync, config.chat_agent_db_path, row)
+
+
+async def set_chat_agent_skill_enabled(config, key: str, enabled: bool) -> bool:
+    return await asyncio.to_thread(_set_chat_agent_skill_enabled_sync, config.chat_agent_db_path, key, enabled)
+
+
+async def get_chat_agent_skill(config, key: str) -> dict | None:
+    return await asyncio.to_thread(_get_chat_agent_skill_sync, config.chat_agent_db_path, key)
+
+
+async def list_chat_agent_skills(config, include_disabled: bool = False) -> list[dict]:
+    return await asyncio.to_thread(_list_chat_agent_skills_sync, config.chat_agent_db_path, include_disabled)
+
+
 def _upsert_user_daily_summary_sync(db_path: Path, row: dict) -> None:
     _ensure_parent(db_path)
     conn = sqlite3.connect(db_path)
