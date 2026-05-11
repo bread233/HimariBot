@@ -140,8 +140,8 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 getattr(config, "chat_agent_lightweight_definition_model", "") or "llama32-finalizer-fast"
             ).strip()
             strategy_timeout = min(
-                25.0,
-                max(20.0, float(getattr(config, "chat_agent_lightweight_definition_timeout", 20.0) or 20.0)),
+                180.0,
+                max(10.0, float(getattr(config, "chat_agent_web_strategy_timeout", 60.0) or 60.0)),
             )
             strategy_messages = [
                 {
