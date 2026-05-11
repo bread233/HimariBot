@@ -760,6 +760,30 @@ def _has_local_evidence_for_question(
     return False
 
 
+def _fallback_lexical_relevance(query: str, title: str, snippet: str, url: str) -> float:
+    q = str(query or "").lower()
+    blob = " ".join([str(title or ""), str(snippet or ""), str(url or "")]).lower()
+    title_url_blob = " ".join([str(title or ""), str(url or "")]).lower()
+    if not q or not blob:
+        return 0.0
+    score = 0.0
+    zh_tokens = [x for x in re.findall(r"[\u4e00-\u9fff]{2,}", q) if len(x) >= 2]
+    en_tokens = [x for x in re.findall(r"[a-z0-9]{2,}", q) if len(x) >= 2]
+    digits = re.findall(r"\d+", q)
+    for token in zh_tokens[:8]:
+        if token and token in blob:
+            score += 0.20
+    for token in en_tokens[:10]:
+        if token and token in blob:
+            score += 0.08
+    for token in digits[:6]:
+        if token and token in title_url_blob:
+            score += 0.15
+    if q and q in blob:
+        score += 0.10
+    return min(0.55, max(0.0, score))
+
+
 async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, int, list[str], float, str]:
     q = str(query or "").strip()
     if not q:
@@ -789,6 +813,8 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
             continue
         seen.add(key)
         score = float(row.get("weighted_score", row.get("score", 0.0)) or 0.0)
+        if score <= 0.0:
+            score = _fallback_lexical_relevance(q, title, snippet, url)
         authority = float(row.get("authority_score", 0.0) or 0.0)
         flags = [str(x).lower() for x in (row.get("source_flags") or [])]
         official = bool("official" in flags or "docs" in flags or authority >= 0.30)
