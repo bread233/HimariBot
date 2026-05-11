@@ -18,6 +18,7 @@ from nonebot import logger
 from datetime import datetime
 import re
 from urllib.parse import urlparse
+from datetime import date
 
 try:
     from .summary_retrieval import retrieve_daily_summaries
@@ -773,6 +774,8 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
         return "", 0, [], 0.0, msg
     merged: list[dict] = []
     top_score = 0.0
+    today = date.today()
+    freshness_sensitive = _is_freshness_sensitive_prompt(q)
     seen = set()
     for row in results or []:
         title = str((row or {}).get("title", "") or "").strip()
@@ -786,16 +789,53 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
             continue
         seen.add(key)
         score = float(row.get("weighted_score", row.get("score", 0.0)) or 0.0)
+        authority = float(row.get("authority_score", 0.0) or 0.0)
+        flags = [str(x).lower() for x in (row.get("source_flags") or [])]
+        official = bool("official" in flags or "docs" in flags or authority >= 0.30)
+        recency_days, recency_source = _extract_recency_days("\n".join([title, snippet, url]), today)
+        freshness_weight = 0.0
+        if recency_days is not None:
+            if recency_days <= 365:
+                freshness_weight = 0.20
+            elif recency_days <= 730:
+                freshness_weight = 0.05
+            else:
+                freshness_weight = -0.10
+        official_weight = 0.35 if (official and score >= 0.15) else 0.0
+        final_score = score + official_weight + freshness_weight
         if score > top_score:
             top_score = score
         if len(snippet) > 240:
             snippet = snippet[:240] + "..."
-        merged.append({"title": title, "url": url, "domain": domain, "snippet": snippet})
+        merged.append(
+            {
+                "title": title,
+                "url": url,
+                "domain": domain,
+                "snippet": snippet,
+                "score": score,
+                "official": official,
+                "recency_days": recency_days,
+                "recency_source": recency_source,
+                "final_score": final_score,
+            }
+        )
         if len(merged) >= 5:
             break
     if not merged:
         logger.info("web_evidence distilled result_count=0 top_titles=[] chars=0")
         return "", 0, [], top_score, ""
+    merged.sort(
+        key=lambda x: (
+            float(x.get("final_score", 0.0)),
+            float(x.get("score", 0.0)),
+            1 if x.get("official") else 0,
+        ),
+        reverse=True,
+    )
+    if freshness_sensitive and not any((x.get("recency_days") is not None and int(x.get("recency_days")) <= 365) for x in merged[:5]):
+        logger.info("web_evidence freshness_sensitive_no_recent=1")
+        return "", len(merged[:5]), [str(x.get("title", ""))[:60] for x in merged[:3]], top_score, "no_recent_within_1y"
     notes = [
         "\u5df2\u67e5\u5230\u7684\u7f51\u9875\u8d44\u6599\uff1a",
         "- \u8fd9\u662f\u4e00\u4e2a\u9700\u8981\u4f9d\u636e\u8d44\u6599\u7684\u95ee\u9898\u3002",
@@ -805,14 +845,24 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
         "- \u641c\u7d22\u7ed3\u679c\u6458\u8981\uff1a",
     ]
     top_titles: list[str] = []
-    for i, row in enumerate(merged, 1):
+    for i, row in enumerate(merged[:5], 1):
         title = str(row.get("title", "") or "")
         domain = str(row.get("domain", "") or "") or "unknown"
         snippet = str(row.get("snippet", "") or "")
+        recency_days = row.get("recency_days")
+        recency_source = str(row.get("recency_source", "") or "")
+        official = "\u662f" if row.get("official") else "\u5426"
+        recency_text = "\u672a\u8bc6\u522b"
+        recency_source_text = recency_source or "\u672a\u8bc6\u522b"
+        if recency_days is not None:
+            recency_text = f"{int(recency_days)}\u5929\u524d"
         top_titles.append(title[:60] if title else "")
         notes.append(f"  {i}. \u6807\u9898\uff1a{title}")
         notes.append(f"     \u6765\u6e90\u57df\u540d\uff1a{domain}")
         notes.append(f"     \u6458\u8981\uff1a{snippet}")
+        notes.append(f"     \u8d44\u6599\u65e5\u671f\uff1a{recency_text}")
+        notes.append(f"     \u65e5\u671f\u6765\u6e90\uff1a{recency_source_text}")
+        notes.append(f"     \u662f\u5426\u5b98\u65b9\uff1a{official}")
     notes.extend(
         [
             "- \u56de\u7b54\u8981\u6c42\uff1a",
@@ -825,9 +875,56 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
     if len(out) > 1800:
         out = out[:1800]
     logger.info(
-        f"web_evidence distilled result_count={len(merged)} top_titles={top_titles[:3]!r} chars={len(out)} top_score={top_score:.3f}"
+        f"web_evidence distilled result_count={len(merged[:5])} top_titles={top_titles[:3]!r} chars={len(out)} top_score={top_score:.3f}"
     )
-    return out, len(merged), [t for t in top_titles[:3] if t], top_score, ""
+    return out, len(merged[:5]), [t for t in top_titles[:3] if t], top_score, ""
+
+
+def _is_freshness_sensitive_prompt(prompt: str) -> bool:
+    text = str(prompt or "").lower()
+    markers = [
+        "\u6700\u65b0", "\u6700\u8fd1", "\u8fd1\u671f", "\u8fd1\u51b5", "\u8fd1\u6765", "\u5f53\u524d", "\u8fd9\u8d5b\u5b63", "\u672c\u8d5b\u5b63", "\u4eca\u5e74", "\u4eca\u5929", "\u73b0\u5728",
+        "\u7248\u672c", "\u4ef7\u683c", "\u591a\u5c11\u94b1", "\u8868\u73b0", "\u65b0\u95fb", "latest", "current", "this season",
+        "price", "news", "version", "recent",
+    ]
+    return any(m in text for m in markers)
+
+
+def _extract_recency_days(text: str, today: date) -> tuple[int | None, str]:
+    s = str(text or "")
+    if not s:
+        return None, ""
+    m = re.search(r"(20\d{2})[-/](\d{1,2})[-/](\d{1,2})", s)
+    if m:
+        try:
+            d = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            return max(0, (today - d).days), "yyyy-mm-dd"
+        except Exception:
+            pass
+    m = re.search(r"(20\d{2})\s*\u5e74\s*(\d{1,2})\s*\u6708\s*(\d{1,2})\s*\u65e5", s)
+    if m:
+        try:
+            d = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            return max(0, (today - d).days), "yyyy\u5e74m\u6708d\u65e5"
+        except Exception:
+            pass
+    m = re.search(r"(20\d{2})\s*\u5e74", s)
+    if m:
+        try:
+            d = date(int(m.group(1)), 7, 1)
+            return max(0, (today - d).days), "yyyy\u5e74"
+        except Exception:
+            pass
+    m = re.search(r"(\d+)\s*days?\s*ago", s, re.IGNORECASE)
+    if m:
+        return int(m.group(1)), "x_days_ago"
+    m = re.search(r"(\d+)\s*months?\s*ago", s, re.IGNORECASE)
+    if m:
+        return int(m.group(1)) * 30, "x_months_ago"
+    m = re.search(r"(\d+)\s*years?\s*ago", s, re.IGNORECASE)
+    if m:
+        return int(m.group(1)) * 365, "x_years_ago"
+    return None, ""
 
 
 def _build_simple_definition_reply(prompt: str) -> str:
@@ -1342,8 +1439,11 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 tool_notes.append("web_evidence_low_score=1")
             tool_notes.append("evidence_gate_source=none")
             tool_notes.append("evidence_gate_no_answer=1")
+            unknown_reply = "\u6682\u65f6\u6ca1\u67e5\u5230\u53ef\u9760\u8d44\u6599\uff0c\u6211\u4e0d\u77e5\u9053\u3002"
+            if evidence_error == "no_recent_within_1y":
+                unknown_reply = "\u6682\u65f6\u6ca1\u67e5\u5230\u4e00\u5e74\u5185\u7684\u53ef\u9760\u8d44\u6599\uff0c\u6211\u4e0d\u77e5\u9053\u3002"
             return {
-                "direct_reply": "\u6682\u65f6\u6ca1\u67e5\u5230\u53ef\u9760\u8d44\u6599\uff0c\u6211\u4e0d\u77e5\u9053\u3002",
+                "direct_reply": unknown_reply,
                 "should_call_llm": False,
                 "web_used": True,
                 "time_context": time_context,
