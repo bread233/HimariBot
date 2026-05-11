@@ -269,6 +269,9 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             return
 
         messages = [{"role": "system", "content": build_system_prompt()}]
+        skill_evidence_context = str(context_pack.get("skill_evidence_context", "") or "").strip()
+        if skill_evidence_context:
+            _append_system(messages, "Relevant evidence instructions:\n" + skill_evidence_context)
         skill_context = str(context_pack.get("skill_context", "") or "").strip()
         if skill_context:
             _append_system(messages, "Relevant skill instructions:\n" + skill_context)
