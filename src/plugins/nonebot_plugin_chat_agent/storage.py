@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -218,6 +219,35 @@ def _init_storage_sync(db_path: Path) -> None:
                 enabled INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_agent_skill_proposals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                proposal_key TEXT NOT NULL UNIQUE,
+                title TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                intent_kinds TEXT NOT NULL DEFAULT '',
+                trigger_terms TEXT NOT NULL DEFAULT '',
+                negative_terms TEXT NOT NULL DEFAULT '',
+                group_ids TEXT NOT NULL DEFAULT '',
+                priority REAL NOT NULL DEFAULT 1.0,
+                content TEXT NOT NULL DEFAULT '',
+                source_type TEXT NOT NULL DEFAULT '',
+                source_ref TEXT NOT NULL DEFAULT '',
+                evidence_samples_json TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL DEFAULT 'pending',
+                confidence REAL NOT NULL DEFAULT 0.0,
+                hit_count INTEGER NOT NULL DEFAULT 0,
+                success_count INTEGER NOT NULL DEFAULT 0,
+                failure_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                reviewed_at TEXT DEFAULT NULL,
+                reviewed_by TEXT NOT NULL DEFAULT '',
+                review_note TEXT NOT NULL DEFAULT ''
             )
             """
         )
@@ -686,6 +716,13 @@ def _validate_skill_key(key: str) -> bool:
     return True
 
 
+_RESERVED_BUILTIN_SKILL_KEYS = {
+    "official_current_fact_resolver",
+    "lightweight_definition_answer",
+    "evidence_route_question",
+}
+
+
 def _upsert_chat_agent_skill_sync(db_path: Path, row: dict) -> None:
     _init_storage_sync(db_path)
     key = str(row.get("key", "") or "").strip()
@@ -871,6 +908,422 @@ async def get_chat_agent_skill(config, key: str) -> dict | None:
 
 async def list_chat_agent_skills(config, include_disabled: bool = False) -> list[dict]:
     return await asyncio.to_thread(_list_chat_agent_skills_sync, config.chat_agent_db_path, include_disabled)
+
+
+def _normalize_evidence_samples(value: object) -> str:
+    samples: list[str] = []
+    if isinstance(value, list):
+        raw_list = value
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raw_list = []
+        else:
+            parsed = json.loads(text)
+            if not isinstance(parsed, list):
+                raise ValueError("evidence_samples_json must be a JSON list")
+            raw_list = parsed
+    elif value is None:
+        raw_list = []
+    else:
+        raise ValueError("invalid evidence_samples_json")
+    for item in raw_list[:5]:
+        s = str(item or "").strip()
+        if s:
+            samples.append(s[:300])
+    return json.dumps(samples, ensure_ascii=False)
+
+
+def _upsert_chat_agent_skill_proposal_sync(db_path: Path, row: dict) -> None:
+    _init_storage_sync(db_path)
+    proposal_key = str(row.get("proposal_key", "") or "").strip()
+    if not _validate_skill_key(proposal_key):
+        raise ValueError("invalid proposal key")
+    if proposal_key in _RESERVED_BUILTIN_SKILL_KEYS:
+        raise ValueError(f"Cannot use reserved builtin skill key: {proposal_key}")
+
+    title = str(row.get("title", "") or "").strip()
+    description = str(row.get("description", "") or "").strip()
+    intent_kinds = str(row.get("intent_kinds", "") or "").strip()
+    trigger_terms = str(row.get("trigger_terms", "") or "").strip()
+    negative_terms = str(row.get("negative_terms", "") or "").strip()
+    group_ids = str(row.get("group_ids", "") or "").strip()
+    content = str(row.get("content", "") or "").strip()
+    source_type = str(row.get("source_type", "") or "").strip()[:80]
+    source_ref = str(row.get("source_ref", "") or "").strip()[:200]
+    status = str(row.get("status", "pending") or "pending").strip().lower()
+    if status not in {"pending", "approved", "rejected", "archived"}:
+        raise ValueError("invalid proposal status")
+    reviewed_by = str(row.get("reviewed_by", "") or "").strip()[:80]
+    review_note = str(row.get("review_note", "") or "").strip()[:300]
+
+    if len(title) > 120:
+        raise ValueError("title too long")
+    if len(description) > 300:
+        raise ValueError("description too long")
+    if len(content) > 600:
+        raise ValueError("content too long")
+    if not content and not description:
+        raise ValueError("content or description is required")
+    if not intent_kinds and not trigger_terms:
+        raise ValueError("intent_kinds or trigger_terms is required")
+
+    try:
+        priority = float(row.get("priority", 1.0) or 1.0)
+    except Exception as e:
+        raise ValueError("invalid priority") from e
+    try:
+        confidence = float(row.get("confidence", 0.0) or 0.0)
+    except Exception as e:
+        raise ValueError("invalid confidence") from e
+    confidence = max(0.0, min(1.0, confidence))
+    hit_count = max(0, int(row.get("hit_count", 0) or 0))
+    success_count = max(0, int(row.get("success_count", 0) or 0))
+    failure_count = max(0, int(row.get("failure_count", 0) or 0))
+    evidence_samples_json = _normalize_evidence_samples(row.get("evidence_samples_json", []))
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO chat_agent_skill_proposals (
+                proposal_key, title, description, intent_kinds, trigger_terms, negative_terms, group_ids,
+                priority, content, source_type, source_ref, evidence_samples_json, status, confidence,
+                hit_count, success_count, failure_count, updated_at, reviewed_at, reviewed_by, review_note
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, CURRENT_TIMESTAMP, NULL, ?, ?
+            )
+            ON CONFLICT(proposal_key) DO UPDATE SET
+                title=excluded.title,
+                description=excluded.description,
+                intent_kinds=excluded.intent_kinds,
+                trigger_terms=excluded.trigger_terms,
+                negative_terms=excluded.negative_terms,
+                group_ids=excluded.group_ids,
+                priority=excluded.priority,
+                content=excluded.content,
+                source_type=excluded.source_type,
+                source_ref=excluded.source_ref,
+                evidence_samples_json=excluded.evidence_samples_json,
+                status=excluded.status,
+                confidence=excluded.confidence,
+                hit_count=excluded.hit_count,
+                success_count=excluded.success_count,
+                failure_count=excluded.failure_count,
+                updated_at=CURRENT_TIMESTAMP,
+                reviewed_by=excluded.reviewed_by,
+                review_note=excluded.review_note
+            """,
+            (
+                proposal_key,
+                title,
+                description,
+                intent_kinds,
+                trigger_terms,
+                negative_terms,
+                group_ids,
+                priority,
+                content,
+                source_type,
+                source_ref,
+                evidence_samples_json,
+                status,
+                confidence,
+                hit_count,
+                success_count,
+                failure_count,
+                reviewed_by,
+                review_note,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _get_chat_agent_skill_proposal_sync(db_path: Path, proposal_key: str) -> dict | None:
+    if not db_path.exists():
+        return None
+    pkey = str(proposal_key or "").strip()
+    if not _validate_skill_key(pkey):
+        return None
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.execute(
+            """
+            SELECT id, proposal_key, title, description, intent_kinds, trigger_terms, negative_terms, group_ids,
+                   priority, content, source_type, source_ref, evidence_samples_json, status, confidence,
+                   hit_count, success_count, failure_count, created_at, updated_at, reviewed_at, reviewed_by, review_note
+            FROM chat_agent_skill_proposals
+            WHERE proposal_key=?
+            LIMIT 1
+            """,
+            (pkey,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "proposal_key": row[1],
+            "title": row[2],
+            "description": row[3],
+            "intent_kinds": row[4],
+            "trigger_terms": row[5],
+            "negative_terms": row[6],
+            "group_ids": row[7],
+            "priority": row[8],
+            "content": row[9],
+            "source_type": row[10],
+            "source_ref": row[11],
+            "evidence_samples_json": row[12],
+            "status": row[13],
+            "confidence": row[14],
+            "hit_count": row[15],
+            "success_count": row[16],
+            "failure_count": row[17],
+            "created_at": row[18],
+            "updated_at": row[19],
+            "reviewed_at": row[20],
+            "reviewed_by": row[21],
+            "review_note": row[22],
+        }
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        conn.close()
+
+
+def _list_chat_agent_skill_proposals_sync(db_path: Path, status: str | None = "pending", limit: int = 100) -> list[dict]:
+    if not db_path.exists():
+        return []
+    lim = max(1, min(500, int(limit or 100)))
+    where_sql = ""
+    params: tuple = ()
+    if status is not None:
+        s = str(status or "").strip().lower()
+        if s not in {"pending", "approved", "rejected", "archived"}:
+            return []
+        where_sql = "WHERE status = ?"
+        params = (s,)
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.execute(
+            f"""
+            SELECT id, proposal_key, title, description, intent_kinds, trigger_terms, negative_terms, group_ids,
+                   priority, content, source_type, source_ref, evidence_samples_json, status, confidence,
+                   hit_count, success_count, failure_count, created_at, updated_at, reviewed_at, reviewed_by, review_note
+            FROM chat_agent_skill_proposals
+            {where_sql}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            params + (lim,),
+        )
+        rows = cur.fetchall()
+        out = []
+        for row in rows:
+            out.append(
+                {
+                    "id": row[0],
+                    "proposal_key": row[1],
+                    "title": row[2],
+                    "description": row[3],
+                    "intent_kinds": row[4],
+                    "trigger_terms": row[5],
+                    "negative_terms": row[6],
+                    "group_ids": row[7],
+                    "priority": row[8],
+                    "content": row[9],
+                    "source_type": row[10],
+                    "source_ref": row[11],
+                    "evidence_samples_json": row[12],
+                    "status": row[13],
+                    "confidence": row[14],
+                    "hit_count": row[15],
+                    "success_count": row[16],
+                    "failure_count": row[17],
+                    "created_at": row[18],
+                    "updated_at": row[19],
+                    "reviewed_at": row[20],
+                    "reviewed_by": row[21],
+                    "review_note": row[22],
+                }
+            )
+        return out
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        conn.close()
+
+
+def _set_chat_agent_skill_proposal_status_sync(
+    db_path: Path,
+    proposal_key: str,
+    status: str,
+    reviewed_by: str = "",
+    review_note: str = "",
+) -> bool:
+    _init_storage_sync(db_path)
+    pkey = str(proposal_key or "").strip()
+    if not _validate_skill_key(pkey):
+        return False
+    s = str(status or "").strip().lower()
+    if s not in {"pending", "approved", "rejected", "archived"}:
+        return False
+    rb = str(reviewed_by or "").strip()[:80]
+    rn = str(review_note or "").strip()[:300]
+    conn = sqlite3.connect(db_path)
+    try:
+        if s == "pending":
+            cur = conn.execute(
+                """
+                UPDATE chat_agent_skill_proposals
+                SET status=?, updated_at=CURRENT_TIMESTAMP, reviewed_at=NULL, reviewed_by=?, review_note=?
+                WHERE proposal_key=?
+                """,
+                (s, rb, rn, pkey),
+            )
+        else:
+            cur = conn.execute(
+                """
+                UPDATE chat_agent_skill_proposals
+                SET status=?, updated_at=CURRENT_TIMESTAMP, reviewed_at=CURRENT_TIMESTAMP, reviewed_by=?, review_note=?
+                WHERE proposal_key=?
+                """,
+                (s, rb, rn, pkey),
+            )
+        conn.commit()
+        return bool(cur.rowcount)
+    finally:
+        conn.close()
+
+
+async def upsert_chat_agent_skill_proposal(config, row: dict) -> None:
+    await asyncio.to_thread(_upsert_chat_agent_skill_proposal_sync, config.chat_agent_db_path, row)
+
+
+async def get_chat_agent_skill_proposal(config, proposal_key: str) -> dict | None:
+    return await asyncio.to_thread(_get_chat_agent_skill_proposal_sync, config.chat_agent_db_path, proposal_key)
+
+
+async def list_chat_agent_skill_proposals(config, status: str | None = "pending", limit: int = 100) -> list[dict]:
+    return await asyncio.to_thread(_list_chat_agent_skill_proposals_sync, config.chat_agent_db_path, status, limit)
+
+
+async def set_chat_agent_skill_proposal_status(
+    config,
+    proposal_key: str,
+    status: str,
+    reviewed_by: str = "",
+    review_note: str = "",
+) -> bool:
+    return await asyncio.to_thread(
+        _set_chat_agent_skill_proposal_status_sync,
+        config.chat_agent_db_path,
+        proposal_key,
+        status,
+        reviewed_by,
+        review_note,
+    )
+
+
+def _materialize_chat_agent_skill_proposal_sync(
+    db_path: Path,
+    proposal_key: str,
+    enabled: bool = False,
+    reviewed_by: str = "",
+    review_note: str = "",
+) -> bool:
+    _init_storage_sync(db_path)
+    pkey = str(proposal_key or "").strip()
+    if not _validate_skill_key(pkey):
+        return False
+    if pkey in _RESERVED_BUILTIN_SKILL_KEYS:
+        return False
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.execute(
+            """
+            SELECT
+                proposal_key, title, description, intent_kinds, trigger_terms, negative_terms,
+                group_ids, priority, content, status
+            FROM chat_agent_skill_proposals
+            WHERE proposal_key = ?
+            LIMIT 1
+            """,
+            (pkey,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return False
+        status = str(row[9] or "").strip().lower()
+        if status != "approved":
+            return False
+        conn.execute(
+            """
+            INSERT INTO chat_agent_skills
+            (key, title, description, intent_kinds, trigger_terms, negative_terms, group_ids, priority, content, enabled, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET
+                title=excluded.title,
+                description=excluded.description,
+                intent_kinds=excluded.intent_kinds,
+                trigger_terms=excluded.trigger_terms,
+                negative_terms=excluded.negative_terms,
+                group_ids=excluded.group_ids,
+                priority=excluded.priority,
+                content=excluded.content,
+                enabled=excluded.enabled,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (
+                row[0],
+                row[1],
+                row[2],
+                row[3],
+                row[4],
+                row[5],
+                row[6],
+                float(row[7] or 1.0),
+                row[8],
+                1 if enabled else 0,
+            ),
+        )
+        rb = str(reviewed_by or "").strip()[:80]
+        rn = str(review_note or "").strip()[:300]
+        if rb or rn:
+            conn.execute(
+                """
+                UPDATE chat_agent_skill_proposals
+                SET updated_at=CURRENT_TIMESTAMP, reviewed_by=?, review_note=?
+                WHERE proposal_key=?
+                """,
+                (rb, rn, pkey),
+            )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+async def materialize_chat_agent_skill_proposal(
+    config,
+    proposal_key: str,
+    enabled: bool = False,
+    reviewed_by: str = "",
+    review_note: str = "",
+) -> bool:
+    return await asyncio.to_thread(
+        _materialize_chat_agent_skill_proposal_sync,
+        config.chat_agent_db_path,
+        proposal_key,
+        enabled,
+        reviewed_by,
+        review_note,
+    )
 
 
 def _upsert_user_daily_summary_sync(db_path: Path, row: dict) -> None:

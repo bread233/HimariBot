@@ -123,6 +123,19 @@ def detect_question_like(prompt: str) -> QuestionIntent:
         "\u884c\u4e0d",
         "\u53ef\u4ee5\u4e0d",
     )
+    web_judgement_terms = (
+        "\u80fd",
+        "\u4f1a",
+        "\u53ef\u4ee5",
+        "\u6709\u6ca1\u6709\u673a\u4f1a",
+        "\u662f\u5426",
+        "\u662f\u4e0d\u662f",
+        "\u503c\u4e0d\u503c\u5f97",
+        "\u597d\u4e0d\u597d",
+        "\u5f3a\u4e0d\u5f3a",
+        "\u63a8\u8350\u5417",
+        "\u9002\u5408\u5417",
+    )
 
     def _hits(terms: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(t for t in terms if t and t in text)
@@ -143,6 +156,13 @@ def detect_question_like(prompt: str) -> QuestionIntent:
     matched_suffix = tuple(s for s in question_suffixes if text.endswith(s))
     if matched_general or matched_suffix:
         matched = matched_general or matched_suffix
-        return QuestionIntent(True, "general_question", True, False, matched)
+        matched_judgement = _hits(web_judgement_terms)
+        has_modal_pattern = (
+            text.endswith("\u5417")
+            and any(x in text for x in ("\u80fd", "\u4f1a", "\u53ef\u4ee5", "\u662f\u5426", "\u662f\u4e0d\u662f"))
+        )
+        web_eligible = bool(matched_judgement or has_modal_pattern)
+        merged = tuple(dict.fromkeys(matched + matched_judgement))
+        return QuestionIntent(True, "general_question", True, web_eligible, merged or matched)
 
     return QuestionIntent(False, "none", False, False, ())

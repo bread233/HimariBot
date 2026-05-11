@@ -742,6 +742,90 @@ async def _build_web_strategy_distilled_context_multi(config, queries: list[str]
     return out, len(top), used_queries, top_titles[:3], (errors[0] if errors else "")
 
 
+def _has_local_evidence_for_question(
+    *,
+    direct_reply: str | None,
+    retrieval_context: str,
+    summary_retrieval_context: str,
+    history_context: str,
+    memory_context: str,
+    simple_definition_hit: bool,
+    explicit_history_hit: bool,
+) -> bool:
+    if str(direct_reply or "").strip():
+        return True
+    if simple_definition_hit or explicit_history_hit:
+        return True
+    return False
+
+
+async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, int, list[str], str]:
+    q = str(query or "").strip()
+    if not q:
+        return "", 0, [], "empty_query"
+    logger.info(f"web_evidence search start query={q[:120]!r}")
+    try:
+        results = await build_web_results(config, q, intent_kind="evidence_route")
+        logger.info(f"web_evidence query result_count={len(results or [])} query={q[:120]!r}")
+    except Exception as e:
+        msg = str(e)[:200]
+        logger.warning(f"web_evidence query error query={q[:120]!r} message={msg!r}")
+        return "", 0, [], msg
+    merged: list[dict] = []
+    seen = set()
+    for row in results or []:
+        title = str((row or {}).get("title", "") or "").strip()
+        url = str((row or {}).get("url", "") or "").strip()
+        domain = str((row or {}).get("domain", "") or "").strip()
+        snippet = str((row or {}).get("snippet", "") or "").strip()
+        if not title and not snippet:
+            continue
+        key = ((title or "").lower(), (url or "").lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        if len(snippet) > 240:
+            snippet = snippet[:240] + "..."
+        merged.append({"title": title, "url": url, "domain": domain, "snippet": snippet})
+        if len(merged) >= 5:
+            break
+    if not merged:
+        logger.info("web_evidence distilled result_count=0 top_titles=[] chars=0")
+        return "", 0, [], ""
+    notes = [
+        "Web evidence notes:",
+        "- User asked a question that needs external evidence.",
+        "- Answer must be based on the snippets below.",
+        "- Do not answer from model memory if snippets are insufficient.",
+        f"- Query: {q}",
+        "- Top source snippets:",
+    ]
+    top_titles: list[str] = []
+    for i, row in enumerate(merged, 1):
+        title = str(row.get("title", "") or "")
+        domain = str(row.get("domain", "") or "") or "unknown"
+        snippet = str(row.get("snippet", "") or "")
+        top_titles.append(title[:60] if title else "")
+        notes.append(f"  {i}. title: {title}")
+        notes.append(f"     domain: {domain}")
+        notes.append(f"     snippet: {snippet}")
+    notes.extend(
+        [
+            "- Answer guidance:",
+            "  - Start with a cautious conclusion.",
+            "  - Mention uncertainty if evidence is weak.",
+            "  - Do not invent facts not present in snippets.",
+        ]
+    )
+    out = "\n".join(notes).strip()
+    if len(out) > 1800:
+        out = out[:1800]
+    logger.info(
+        f"web_evidence distilled result_count={len(merged)} top_titles={top_titles[:3]!r} chars={len(out)}"
+    )
+    return out, len(merged), [t for t in top_titles[:3] if t], ""
+
+
 def _build_simple_definition_reply(prompt: str) -> str:
     text = str(prompt or "").strip().lower()
     if "nodejs" in text or "node.js" in text or re.search(r"\bnode\b", text):
@@ -1197,6 +1281,72 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             "web_strategy_context": distilled_context,
             "tool_notes": "\n".join(tool_notes).strip(),
         }
+    if (
+        question_intent.is_question_like
+        and bool(question_intent.web_eligible)
+        and not _is_explicit_history_query(prompt)
+        and not _is_simple_definition_question(prompt, intent.kind)
+        and not _is_community_strategy_question(prompt, intent.kind)
+        and not urls
+        and math_result is None
+        and intent.kind != "local_context"
+    ):
+        local_ok = _has_local_evidence_for_question(
+            direct_reply=None,
+            retrieval_context=retrieval_context,
+            summary_retrieval_context=summary_retrieval_context,
+            history_context=history_context,
+            memory_context=memory_context,
+            simple_definition_hit=False,
+            explicit_history_hit=False,
+        )
+        if not local_ok:
+            evidence_query = str(web_query or prompt or "").strip()
+            evidence_context, evidence_count, evidence_titles, evidence_error = await _build_generic_web_evidence_context(
+                config, evidence_query
+            )
+            tool_notes.append("web_evidence=1")
+            tool_notes.append(f"web_evidence_query={evidence_query}")
+            tool_notes.append(f"web_evidence_result_count={evidence_count}")
+            tool_notes.append(f"web_evidence_top_titles={' || '.join(evidence_titles)}")
+            tool_notes.append(f"web_evidence_context_chars={len(evidence_context)}")
+            if evidence_error:
+                tool_notes.append(f"web_evidence_error={evidence_error[:120]}")
+            if evidence_context:
+                return {
+                    "direct_reply": None,
+                    "should_call_llm": True,
+                    "web_used": True,
+                    "time_context": time_context,
+                    "profile_context": profile_context,
+                    "group_context": group_context,
+                    "retrieval_context": "",
+                    "style_context": "",
+                    "summary_retrieval_context": "",
+                    "history_context": "",
+                    "memory_context": "",
+                    "web_context": "",
+                    "lightweight_mode": "web_evidence",
+                    "lightweight_prompt": prompt,
+                    "web_evidence_query": evidence_query,
+                    "web_evidence_context": evidence_context,
+                    "tool_notes": "\n".join(tool_notes).strip(),
+                }
+            return {
+                "direct_reply": "\u6682\u65f6\u6ca1\u67e5\u5230\u53ef\u9760\u8d44\u6599\uff0c\u53ef\u4ee5\u6362\u4e2a\u66f4\u5177\u4f53\u7684\u95ee\u9898\u3002",
+                "should_call_llm": False,
+                "web_used": True,
+                "time_context": time_context,
+                "profile_context": profile_context,
+                "group_context": group_context,
+                "retrieval_context": "",
+                "style_context": "",
+                "summary_retrieval_context": "",
+                "history_context": "",
+                "memory_context": "",
+                "web_context": "",
+                "tool_notes": "\n".join(tool_notes).strip(),
+            }
     if _is_simple_definition_question(prompt, intent.kind):
         tool_notes.append("simple_definition_lightweight_llm=1")
         tool_notes.append("simple_definition_lightweight_timeout=12")
