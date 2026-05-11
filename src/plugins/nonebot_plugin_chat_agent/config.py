@@ -25,6 +25,7 @@ class ChatAgentConfig(BaseModel):
     chat_agent_lightweight_definition_model: str = Field(default="llama32-finalizer-fast")
     chat_agent_lightweight_definition_timeout: float = Field(default=20.0)
     chat_agent_web_strategy_timeout: float = Field(default=60.0)
+    chat_agent_web_strategy_max_tokens: int = Field(default=700)
     chat_agent_max_tokens: int = Field(default=512)
     chat_agent_max_reply_length: int = Field(default=500)
     chat_agent_history_max_messages: int = Field(default=10)
@@ -105,6 +106,9 @@ def get_chat_agent_config() -> ChatAgentConfig:
         ),
         chat_agent_web_strategy_timeout=float(
             getattr(config, "chat_agent_web_strategy_timeout", 60.0)
+        ),
+        chat_agent_web_strategy_max_tokens=int(
+            getattr(config, "chat_agent_web_strategy_max_tokens", 700)
         ),
         chat_agent_max_tokens=int(getattr(config, "chat_agent_max_tokens", 512)),
         chat_agent_max_reply_length=int(getattr(config, "chat_agent_max_reply_length", 500)),
