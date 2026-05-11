@@ -245,12 +245,15 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     "role": "system",
                     "content": (
                         "You are answering a user question using compact web evidence.\n"
-                        "Answer in Chinese.\n"
+                        "Answer in Chinese only.\n"
+                        "Use Chinese labels: \u7ed3\u8bba\uff1a and \u7406\u7531\uff1a.\n"
                         "Use only the provided evidence.\n"
                         "If evidence is weak or insufficient, say it is uncertain.\n"
                         "Do not invent facts.\n"
                         "Start with the conclusion.\n"
                         "Then give 2-4 short reasons.\n"
+                        "Do not output English section titles such as conclusion, reasons, evidence, or source.\n"
+                        "Do not invent probability, score, ranking, date, version, or any number unless it appears in evidence.\n"
                         "Avoid saying \"the article says\" unless the user asked for article summary."
                     ),
                 },

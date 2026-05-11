@@ -16,6 +16,20 @@ def detect_question_like(prompt: str) -> QuestionIntent:
     text = str(prompt or "").strip().lower()
     if not text:
         return QuestionIntent(False, "none", False, False, ())
+    chatter_terms = (
+        "\u54c8\u54c8",
+        "\u8349",
+        "\u4e50",
+        "\u7b11\u6b7b",
+        "ok",
+        "\u6536\u5230",
+        "\u597d\u7684",
+        "\u665a\u5b89",
+        "\u65e9",
+        "\u786e\u5b9e",
+    )
+    if any(t in text for t in chatter_terms):
+        return QuestionIntent(False, "none", False, False, ())
 
     history_terms = (
         "\u4e4b\u524d",
@@ -107,6 +121,12 @@ def detect_question_like(prompt: str) -> QuestionIntent:
         "\u662f\u4e0d\u662f",
         "\u8981\u4e0d\u8981",
         "\u8be5\u4e0d\u8be5",
+        "\uff1f",
+        "?",
+        "\u662f\u5417",
+        "\u5bf9\u5417",
+        "\u4e48",
+        "\u5462",
     )
     question_suffixes = (
         "\u5417",
@@ -134,7 +154,21 @@ def detect_question_like(prompt: str) -> QuestionIntent:
         "\u597d\u4e0d\u597d",
         "\u5f3a\u4e0d\u5f3a",
         "\u63a8\u8350\u5417",
+        "\u63a8\u8350\u73a9\u5417",
         "\u9002\u5408\u5417",
+        "\u597d\u4e0d\u597d",
+        "\u597d\u73a9\u5417",
+        "\u503c\u5f97\u73a9\u5417",
+        "\u80fd\u73a9\u5417",
+        "\u53ef\u4ee5\u73a9\u5417",
+    )
+    how_to_terms = (
+        "\u600e\u4e48",
+        "\u5982\u4f55",
+        "\u548b",
+        "\u600e\u4e48\u529e",
+        "\u600e\u4e48\u5f04",
+        "\u600e\u4e48\u505a",
     )
 
     def _hits(terms: tuple[str, ...]) -> tuple[str, ...]:
@@ -146,7 +180,7 @@ def detect_question_like(prompt: str) -> QuestionIntent:
         ("recommendation", True, _hits(recommendation_terms)),
         ("comparison", True, _hits(comparison_terms)),
         ("troubleshooting", True, _hits(troubleshooting_terms)),
-        ("definition", False, _hits(definition_terms)),
+        ("definition", True, _hits(definition_terms)),
     )
     for category, web_eligible, matched in checks:
         if matched:
@@ -157,12 +191,13 @@ def detect_question_like(prompt: str) -> QuestionIntent:
     if matched_general or matched_suffix:
         matched = matched_general or matched_suffix
         matched_judgement = _hits(web_judgement_terms)
+        matched_how_to = _hits(how_to_terms)
         has_modal_pattern = (
             text.endswith("\u5417")
             and any(x in text for x in ("\u80fd", "\u4f1a", "\u53ef\u4ee5", "\u662f\u5426", "\u662f\u4e0d\u662f"))
         )
-        web_eligible = bool(matched_judgement or has_modal_pattern)
-        merged = tuple(dict.fromkeys(matched + matched_judgement))
+        web_eligible = bool(matched_judgement or matched_how_to or has_modal_pattern or matched_general or matched_suffix)
+        merged = tuple(dict.fromkeys(matched + matched_judgement + matched_how_to))
         return QuestionIntent(True, "general_question", True, web_eligible, merged or matched)
 
     return QuestionIntent(False, "none", False, False, ())
