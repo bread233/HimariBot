@@ -1230,6 +1230,102 @@ async def set_chat_agent_skill_proposal_status(
     )
 
 
+def _materialize_chat_agent_skill_proposal_sync(
+    db_path: Path,
+    proposal_key: str,
+    enabled: bool = False,
+    reviewed_by: str = "",
+    review_note: str = "",
+) -> bool:
+    _init_storage_sync(db_path)
+    pkey = str(proposal_key or "").strip()
+    if not _validate_skill_key(pkey):
+        return False
+    if pkey in _RESERVED_BUILTIN_SKILL_KEYS:
+        return False
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.execute(
+            """
+            SELECT
+                proposal_key, title, description, intent_kinds, trigger_terms, negative_terms,
+                group_ids, priority, content, status
+            FROM chat_agent_skill_proposals
+            WHERE proposal_key = ?
+            LIMIT 1
+            """,
+            (pkey,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return False
+        status = str(row[9] or "").strip().lower()
+        if status != "approved":
+            return False
+        conn.execute(
+            """
+            INSERT INTO chat_agent_skills
+            (key, title, description, intent_kinds, trigger_terms, negative_terms, group_ids, priority, content, enabled, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET
+                title=excluded.title,
+                description=excluded.description,
+                intent_kinds=excluded.intent_kinds,
+                trigger_terms=excluded.trigger_terms,
+                negative_terms=excluded.negative_terms,
+                group_ids=excluded.group_ids,
+                priority=excluded.priority,
+                content=excluded.content,
+                enabled=excluded.enabled,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (
+                row[0],
+                row[1],
+                row[2],
+                row[3],
+                row[4],
+                row[5],
+                row[6],
+                float(row[7] or 1.0),
+                row[8],
+                1 if enabled else 0,
+            ),
+        )
+        rb = str(reviewed_by or "").strip()[:80]
+        rn = str(review_note or "").strip()[:300]
+        if rb or rn:
+            conn.execute(
+                """
+                UPDATE chat_agent_skill_proposals
+                SET updated_at=CURRENT_TIMESTAMP, reviewed_by=?, review_note=?
+                WHERE proposal_key=?
+                """,
+                (rb, rn, pkey),
+            )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+async def materialize_chat_agent_skill_proposal(
+    config,
+    proposal_key: str,
+    enabled: bool = False,
+    reviewed_by: str = "",
+    review_note: str = "",
+) -> bool:
+    return await asyncio.to_thread(
+        _materialize_chat_agent_skill_proposal_sync,
+        config.chat_agent_db_path,
+        proposal_key,
+        enabled,
+        reviewed_by,
+        review_note,
+    )
+
+
 def _upsert_user_daily_summary_sync(db_path: Path, row: dict) -> None:
     _ensure_parent(db_path)
     conn = sqlite3.connect(db_path)

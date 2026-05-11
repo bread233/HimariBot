@@ -24,14 +24,18 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from storage import (  # type: ignore
         get_chat_agent_skill_proposal,
+        get_chat_agent_skill,
         list_chat_agent_skill_proposals,
+        materialize_chat_agent_skill_proposal,
         set_chat_agent_skill_proposal_status,
         upsert_chat_agent_skill_proposal,
     )
 else:
     from .storage import (
         get_chat_agent_skill_proposal,
+        get_chat_agent_skill,
         list_chat_agent_skill_proposals,
+        materialize_chat_agent_skill_proposal,
         set_chat_agent_skill_proposal_status,
         upsert_chat_agent_skill_proposal,
     )
@@ -79,6 +83,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_archive.add_argument("proposal_key")
     p_archive.add_argument("--reviewed-by", default="")
     p_archive.add_argument("--note", default="")
+
+    p_materialize = sub.add_parser("materialize", help="Materialize approved proposal into manual skill")
+    p_materialize.add_argument("proposal_key")
+    p_materialize.add_argument("--enable", action="store_true")
+    p_materialize.add_argument("--reviewed-by", default="")
+    p_materialize.add_argument("--note", default="")
 
     return parser
 
@@ -167,6 +177,21 @@ async def _run(args) -> dict:
         item = await get_chat_agent_skill_proposal(cfg, str(args.proposal_key))
         return {"ok": changed, "item": item}
 
+    if args.cmd == "materialize":
+        key = str(args.proposal_key or "").strip()
+        changed = await materialize_chat_agent_skill_proposal(
+            cfg,
+            key,
+            enabled=bool(args.enable),
+            reviewed_by=str(args.reviewed_by or ""),
+            review_note=str(args.note or ""),
+        )
+        proposal = await get_chat_agent_skill_proposal(cfg, key)
+        skill = await get_chat_agent_skill(cfg, key)
+        if changed:
+            return {"ok": True, "proposal": proposal, "skill": skill}
+        return {"ok": False, "error": "materialize failed", "proposal": proposal, "skill": skill}
+
     return {"ok": False, "error": "unknown command"}
 
 
@@ -176,7 +201,7 @@ def main() -> int:
     try:
         result = asyncio.run(_run(args))
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0
+        return 0 if bool(result.get("ok")) else 1
     except Exception as e:
         print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False, indent=2))
         return 1
