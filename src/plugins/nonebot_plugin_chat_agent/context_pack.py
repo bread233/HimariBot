@@ -1469,8 +1469,28 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             tool_notes.append(f"web_evidence_top_score={top_score:.3f}")
             if evidence_error:
                 tool_notes.append(f"web_evidence_error={evidence_error[:120]}")
+            snippet_lens = [len(x.strip()) for x in re.findall(r"\u6458\u8981\uff1a(.*)", evidence_context)]
+            max_snippet_len = max(snippet_lens) if snippet_lens else 0
+            has_official = "\u662f\u5426\u5b98\u65b9\uff1a\u662f" in evidence_context
+            weak_hits = sum(1 for w in ["\u8bc4\u4ef7", "\u4e24\u6781\u5206\u5316", "\u503c\u5f97\u5165\u624b"] if w in evidence_context)
+            weak_single = evidence_count == 1 and max_snippet_len < 80 and weak_hits > 0
+            evidence_sufficient = (
+                evidence_count >= 2
+                or (evidence_count == 1 and max_snippet_len >= 80)
+                or (evidence_count == 1 and has_official and top_score >= 0.35)
+            ) and not weak_single
+            tool_notes.append(f"web_evidence_filtered_count={evidence_count}")
+            tool_notes.append(f"web_evidence_sufficient={1 if evidence_sufficient else 0}")
+            if weak_single:
+                tool_notes.append("web_evidence_reason=weak_single_snippet")
+            elif evidence_count == 0:
+                tool_notes.append("web_evidence_reason=no_filtered_results")
+            elif evidence_count == 1 and max_snippet_len < 80 and not (has_official and top_score >= 0.35):
+                tool_notes.append("web_evidence_reason=single_short_snippet")
+            else:
+                tool_notes.append("web_evidence_reason=sufficient")
             min_score = 0.35
-            if evidence_context and top_score >= min_score:
+            if evidence_context and top_score >= min_score and evidence_sufficient:
                 tool_notes.append("evidence_gate_source=web")
                 return {
                     "direct_reply": None,
