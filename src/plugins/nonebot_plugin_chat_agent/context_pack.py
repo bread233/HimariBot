@@ -759,10 +759,10 @@ def _has_local_evidence_for_question(
     return False
 
 
-async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, int, list[str], str]:
+async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, int, list[str], float, str]:
     q = str(query or "").strip()
     if not q:
-        return "", 0, [], "empty_query"
+        return "", 0, [], 0.0, "empty_query"
     logger.info(f"web_evidence search start query={q[:120]!r}")
     try:
         results = await build_web_results(config, q, intent_kind="evidence_route")
@@ -770,8 +770,9 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
     except Exception as e:
         msg = str(e)[:200]
         logger.warning(f"web_evidence query error query={q[:120]!r} message={msg!r}")
-        return "", 0, [], msg
+        return "", 0, [], 0.0, msg
     merged: list[dict] = []
+    top_score = 0.0
     seen = set()
     for row in results or []:
         title = str((row or {}).get("title", "") or "").strip()
@@ -784,6 +785,9 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
         if key in seen:
             continue
         seen.add(key)
+        score = float(row.get("weighted_score", row.get("score", 0.0)) or 0.0)
+        if score > top_score:
+            top_score = score
         if len(snippet) > 240:
             snippet = snippet[:240] + "..."
         merged.append({"title": title, "url": url, "domain": domain, "snippet": snippet})
@@ -791,7 +795,7 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
             break
     if not merged:
         logger.info("web_evidence distilled result_count=0 top_titles=[] chars=0")
-        return "", 0, [], ""
+        return "", 0, [], top_score, ""
     notes = [
         "\u5df2\u67e5\u5230\u7684\u7f51\u9875\u8d44\u6599\uff1a",
         "- \u8fd9\u662f\u4e00\u4e2a\u9700\u8981\u4f9d\u636e\u8d44\u6599\u7684\u95ee\u9898\u3002",
@@ -821,9 +825,9 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
     if len(out) > 1800:
         out = out[:1800]
     logger.info(
-        f"web_evidence distilled result_count={len(merged)} top_titles={top_titles[:3]!r} chars={len(out)}"
+        f"web_evidence distilled result_count={len(merged)} top_titles={top_titles[:3]!r} chars={len(out)} top_score={top_score:.3f}"
     )
-    return out, len(merged), [t for t in top_titles[:3] if t], ""
+    return out, len(merged), [t for t in top_titles[:3] if t], top_score, ""
 
 
 def _build_simple_definition_reply(prompt: str) -> str:
@@ -1282,14 +1286,14 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             "tool_notes": "\n".join(tool_notes).strip(),
         }
     if (
-        question_intent.is_question_like
-        and bool(question_intent.web_eligible)
+        str(prompt or "").strip()
         and not _is_explicit_history_query(prompt)
         and not _is_community_strategy_question(prompt, intent.kind)
         and not urls
         and math_result is None
         and intent.kind != "local_context"
     ):
+        tool_notes.append("evidence_gate=1")
         local_ok = _has_local_evidence_for_question(
             direct_reply=None,
             retrieval_context=retrieval_context,
@@ -1301,7 +1305,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         )
         if not local_ok:
             evidence_query = str(web_query or prompt or "").strip()
-            evidence_context, evidence_count, evidence_titles, evidence_error = await _build_generic_web_evidence_context(
+            evidence_context, evidence_count, evidence_titles, top_score, evidence_error = await _build_generic_web_evidence_context(
                 config, evidence_query
             )
             tool_notes.append("web_evidence=1")
@@ -1309,9 +1313,12 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             tool_notes.append(f"web_evidence_result_count={evidence_count}")
             tool_notes.append(f"web_evidence_top_titles={' || '.join(evidence_titles)}")
             tool_notes.append(f"web_evidence_context_chars={len(evidence_context)}")
+            tool_notes.append(f"web_evidence_top_score={top_score:.3f}")
             if evidence_error:
                 tool_notes.append(f"web_evidence_error={evidence_error[:120]}")
-            if evidence_context:
+            min_score = 0.35
+            if evidence_context and top_score >= min_score:
+                tool_notes.append("evidence_gate_source=web")
                 return {
                     "direct_reply": None,
                     "should_call_llm": True,
@@ -1331,8 +1338,12 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     "web_evidence_context": evidence_context,
                     "tool_notes": "\n".join(tool_notes).strip(),
                 }
+            if evidence_context and top_score < min_score:
+                tool_notes.append("web_evidence_low_score=1")
+            tool_notes.append("evidence_gate_source=none")
+            tool_notes.append("evidence_gate_no_answer=1")
             return {
-                "direct_reply": "\u6682\u65f6\u6ca1\u67e5\u5230\u53ef\u9760\u8d44\u6599\uff0c\u53ef\u4ee5\u6362\u4e2a\u66f4\u5177\u4f53\u7684\u95ee\u9898\u3002",
+                "direct_reply": "\u6682\u65f6\u6ca1\u67e5\u5230\u53ef\u9760\u8d44\u6599\uff0c\u6211\u4e0d\u77e5\u9053\u3002",
                 "should_call_llm": False,
                 "web_used": True,
                 "time_context": time_context,
@@ -1346,12 +1357,14 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "web_context": "",
                 "tool_notes": "\n".join(tool_notes).strip(),
             }
-    if _is_simple_definition_question(prompt, intent.kind):
-        tool_notes.append("simple_definition_lightweight_llm=1")
-        tool_notes.append("simple_definition_lightweight_timeout=12")
+        tool_notes.append("evidence_gate_source=local")
+    if intent.kind == "local_context":
+        tool_notes.append("evidence_gate=1")
+        tool_notes.append("evidence_gate_source=local")
+        tool_notes.append("evidence_gate_no_answer=1")
         return {
-            "direct_reply": None,
-            "should_call_llm": True,
+            "direct_reply": "\u672c\u5730\u8bb0\u5f55\u91cc\u6682\u65f6\u6ca1\u67e5\u5230\u53ef\u9760\u4fe1\u606f\uff0c\u6211\u4e0d\u77e5\u9053\u3002",
+            "should_call_llm": False,
             "web_used": False,
             "time_context": time_context,
             "profile_context": profile_context,
@@ -1362,10 +1375,10 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             "history_context": "",
             "memory_context": "",
             "web_context": "",
-            "lightweight_mode": "definition",
-            "lightweight_prompt": prompt,
             "tool_notes": "\n".join(tool_notes).strip(),
         }
+    if _is_simple_definition_question(prompt, intent.kind):
+        tool_notes.append("simple_definition_routed_to_evidence=1")
     if is_identity_question:
         tool_notes.append("identity_question_no_web")
     elif intent.kind == "current_fact":
