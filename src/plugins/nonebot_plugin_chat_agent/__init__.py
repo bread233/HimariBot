@@ -149,8 +149,8 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     "content": (
                         "You answer in Chinese using the distilled web notes.\n"
                         "Give a practical answer in 2-5 short sentences.\n"
-                        "This may include game strategy, tech-tree lines, country/civilization choices, or build recommendations.\n"
-                        "For game questions, it is safe to recommend in-game countries, factions, tech-tree lines, builds, or openings.\n"
+                        "This may include game strategy, tech-tree lines, country/civilization choices, weapon choices, or build recommendations.\n"
+                        "For game questions, it is safe to recommend in-game countries, factions, tech-tree lines, weapons, builds, or openings.\n"
                         "Do not refuse unless the request is about real-world harm.\n"
                         "Prefer consensus from the notes.\n"
                         "Mention uncertainty if sources are weak or version-dependent.\n"
