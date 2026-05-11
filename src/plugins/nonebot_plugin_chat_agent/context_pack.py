@@ -1285,7 +1285,6 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         question_intent.is_question_like
         and bool(question_intent.web_eligible)
         and not _is_explicit_history_query(prompt)
-        and not _is_simple_definition_question(prompt, intent.kind)
         and not _is_community_strategy_question(prompt, intent.kind)
         and not urls
         and math_result is None
