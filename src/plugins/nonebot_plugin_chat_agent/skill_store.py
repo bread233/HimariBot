@@ -39,6 +39,44 @@ def load_builtin_skills() -> list[Skill]:
             content="Prefer official resolver/direct answer for current/latest/version facts. Avoid stale web pages.",
         ),
         Skill(
+            key="evidence_route_question",
+            title="Evidence route for question-like prompts",
+            description="Prefer evidence routes before free generation for question-like or help-seeking prompts.",
+            intent_kinds=("general", "current_fact"),
+            trigger_terms=(
+                "question",
+                "what",
+                "how",
+                "recommend",
+                "compare",
+                "troubleshoot",
+                "\u63a8\u8350",
+                "\u5efa\u8bae",
+                "\u600e\u4e48",
+                "\u54ea\u4e2a",
+                "\u5bf9\u6bd4",
+                "\u533a\u522b",
+                "\u62a5\u9519",
+                "\u5931\u8d25",
+            ),
+            negative_terms=(
+                "\u54c8\u54c8",
+                "\u8349",
+                "\u4e50",
+                "\u65e9",
+                "\u665a\u5b89",
+                "\u597d\u7684",
+                "ok",
+                "\u6536\u5230",
+            ),
+            priority=0.25,
+            content=(
+                "For question-like, help-seeking, recommendation, comparison, troubleshooting, or current-fact prompts, "
+                "prefer evidence routes before free generation. Use local/cache/skills/memory/history/knowledge first. "
+                "Use web only when web-eligible and local evidence is insufficient."
+            ),
+        ),
+        Skill(
             key="lightweight_definition_answer",
             title="Lightweight definition answer",
             description="Use lightweight concise concept explanation path for definition questions.",

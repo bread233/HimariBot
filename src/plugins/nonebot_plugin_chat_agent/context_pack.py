@@ -9,6 +9,7 @@ from .retrieval import build_embedding_retrieval_context, build_retrieval_contex
 from .storage import get_user_style_profile, load_memories, load_recent_messages
 from .tool_router import should_use_web_tool
 from .tool_intent import classify_tool_intent
+from .question_intent import detect_question_like
 from .url_tools import build_direct_url_context, extract_urls
 from .web_tools import build_web_context, build_web_results, render_web_results_context, resolve_official_web_answer
 from .skill_store import render_skill_context, select_relevant_skills, skills_to_evidence_items
@@ -787,11 +788,18 @@ def _build_explicit_history_direct_reply(prompt: str, summary_context: str, hist
 
 async def build_context_pack(config, session_info: dict, prompt: str, bot=None, event=None) -> dict:
     intent = classify_tool_intent(prompt)
+    question_intent = detect_question_like(prompt)
+    skill_prompt = prompt
+    if question_intent.is_question_like:
+        skill_prompt = (
+            f"{prompt} question {question_intent.category} "
+            f"{'web_eligible' if question_intent.web_eligible else 'local_only'}"
+        )
     group_id_raw = session_info.get("group_id")
     group_id = str(group_id_raw).strip() if group_id_raw is not None else ""
     selected_skills = await select_relevant_skills(
         config,
-        prompt,
+        skill_prompt,
         intent.kind,
         group_id=group_id or None,
         limit=3,
@@ -976,6 +984,10 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     tool_notes.append(f"skill_evidence_items={len(skill_evidence_items)}")
     tool_notes.append(f"skill_evidence_chars={len(skill_evidence_context)}")
     tool_notes.append(f"intent={intent.kind}")
+    tool_notes.append(f"question_like={1 if question_intent.is_question_like else 0}")
+    tool_notes.append(f"question_category={question_intent.category}")
+    tool_notes.append(f"question_web_eligible={1 if question_intent.web_eligible else 0}")
+    tool_notes.append(f"question_matched_terms={','.join(question_intent.matched_terms[:8])}")
 
     style_profile = None
     style_profile_error = ""
@@ -1293,5 +1305,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         "history_context": history_context,
         "memory_context": memory_context,
         "web_context": web_context,
+        "question_like": question_intent.is_question_like,
+        "question_category": question_intent.category,
+        "question_web_eligible": question_intent.web_eligible,
         "tool_notes": "\n".join(tool_notes).strip(),
     }
