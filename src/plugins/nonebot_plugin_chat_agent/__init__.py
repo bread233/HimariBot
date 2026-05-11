@@ -227,6 +227,83 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             await chat_agent.finish(_with_group_at(event, is_group, reply))
             return
 
+        if str(context_pack.get("lightweight_mode", "")).strip() == "web_evidence":
+            evidence_prompt = str(context_pack.get("lightweight_prompt", prompt) or prompt).strip()
+            evidence_query = str(context_pack.get("web_evidence_query", evidence_prompt) or evidence_prompt).strip()
+            evidence_context = str(context_pack.get("web_evidence_context", "") or "").strip()
+            evidence_model = str(
+                getattr(config, "chat_agent_lightweight_definition_model", "") or "llama32-finalizer-fast"
+            ).strip()
+            evidence_timeout = min(
+                180.0,
+                max(10.0, float(getattr(config, "chat_agent_web_strategy_timeout", 60.0) or 60.0)),
+            )
+            evidence_max_tokens = int(getattr(config, "chat_agent_web_strategy_max_tokens", 700) or 700)
+            evidence_max_tokens = min(2048, max(128, evidence_max_tokens))
+            evidence_messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are answering a user question using compact web evidence.\n"
+                        "Answer in Chinese.\n"
+                        "Use only the provided evidence.\n"
+                        "If evidence is weak or insufficient, say it is uncertain.\n"
+                        "Do not invent facts.\n"
+                        "Start with the conclusion.\n"
+                        "Then give 2-4 short reasons.\n"
+                        "Avoid saying \"the article says\" unless the user asked for article summary."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Question: {evidence_prompt}\nQuery: {evidence_query}\n\nEvidence:\n{evidence_context}",
+                },
+            ]
+            reply = ""
+            should_save_assistant = False
+            try:
+                reply = await chat_completions(
+                    evidence_messages,
+                    config,
+                    timeout=evidence_timeout,
+                    model=evidence_model,
+                    temperature=0.35,
+                    top_p=0.7,
+                    max_tokens=evidence_max_tokens,
+                )
+                reply = truncate_reply(strip_thinking(reply), config.chat_agent_max_reply_length)
+                reply = str(reply or "").strip()
+                if not reply:
+                    logger.warning(
+                        f"web_evidence llm empty model={evidence_model} timeout={evidence_timeout} "
+                        f"max_tokens={evidence_max_tokens} context_chars={len(evidence_context)} "
+                        f"prompt={evidence_prompt[:80]!r}"
+                    )
+                    reply = "\u6682\u65f6\u6ca1\u67e5\u5230\u53ef\u9760\u8d44\u6599\uff0c\u53ef\u4ee5\u6362\u4e2a\u66f4\u5177\u4f53\u7684\u95ee\u9898\u3002"
+                else:
+                    logger.info(
+                        f"web_evidence llm success model={evidence_model} timeout={evidence_timeout} "
+                        f"max_tokens={evidence_max_tokens} reply_chars={len(reply)} prompt={evidence_prompt[:80]!r}"
+                    )
+                should_save_assistant = bool(reply)
+            except Exception as e:
+                logger.warning(
+                    f"web_evidence llm failed type={type(e).__name__} model={evidence_model} "
+                    f"timeout={evidence_timeout} max_tokens={evidence_max_tokens} "
+                    f"context_chars={len(evidence_context)} prompt={evidence_prompt[:80]!r} message={str(e)[:200]!r}"
+                )
+                reply = "\u6682\u65f6\u6ca1\u67e5\u5230\u53ef\u9760\u8d44\u6599\uff0c\u53ef\u4ee5\u6362\u4e2a\u66f4\u5177\u4f53\u7684\u95ee\u9898\u3002"
+            if _should_sanitize_task_reply(prompt, context_pack):
+                reply = sanitize_task_reply(reply) or reply
+            if config.chat_agent_enable_history and reply and should_save_assistant:
+                try:
+                    await save_message(config, session_info, "user", prompt)
+                    await save_message(config, session_info, "assistant", reply)
+                except Exception:
+                    pass
+            await chat_agent.finish(_with_group_at(event, is_group, reply))
+            return
+
         if str(context_pack.get("lightweight_mode", "")).strip() == "definition":
             lightweight_prompt = str(context_pack.get("lightweight_prompt", prompt) or prompt).strip()
             lightweight_messages = [
