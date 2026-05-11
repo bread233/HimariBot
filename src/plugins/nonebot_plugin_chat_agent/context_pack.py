@@ -766,6 +766,8 @@ def _fallback_lexical_relevance(query: str, title: str, snippet: str, url: str) 
     title_url_blob = " ".join([str(title or ""), str(url or "")]).lower()
     if not q or not blob:
         return 0.0
+    q_norm = re.sub(r"[\W_]+", "", q, flags=re.UNICODE)
+    blob_norm = re.sub(r"[\W_]+", "", blob, flags=re.UNICODE)
     score = 0.0
     zh_tokens = [x for x in re.findall(r"[\u4e00-\u9fff]{2,}", q) if len(x) >= 2]
     en_tokens = [x for x in re.findall(r"[a-z0-9]{2,}", q) if len(x) >= 2]
@@ -773,6 +775,16 @@ def _fallback_lexical_relevance(query: str, title: str, snippet: str, url: str) 
     for token in zh_tokens[:8]:
         if token and token in blob:
             score += 0.20
+    zh_norm_only = re.sub(r"[^\u4e00-\u9fff]", "", q)
+    if zh_norm_only:
+        seg_hits = 0
+        max_seg_len = min(4, len(zh_norm_only))
+        for seg_len in range(2, max_seg_len + 1):
+            for i in range(0, len(zh_norm_only) - seg_len + 1):
+                seg = zh_norm_only[i : i + seg_len]
+                if seg and seg in blob_norm:
+                    seg_hits += 1
+        score += min(0.20, seg_hits * 0.04)
     for token in en_tokens[:10]:
         if token and token in blob:
             score += 0.08
@@ -781,6 +793,12 @@ def _fallback_lexical_relevance(query: str, title: str, snippet: str, url: str) 
             score += 0.15
     if q and q in blob:
         score += 0.10
+    if q_norm and q_norm in blob_norm:
+        score += 0.15
+    if digits:
+        missing_digit = any(d not in title_url_blob for d in digits[:6] if d)
+        if missing_digit:
+            score = min(score, 0.25)
     return min(0.55, max(0.0, score))
 
 
@@ -812,9 +830,9 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
         if key in seen:
             continue
         seen.add(key)
-        score = float(row.get("weighted_score", row.get("score", 0.0)) or 0.0)
-        if score <= 0.0:
-            score = _fallback_lexical_relevance(q, title, snippet, url)
+        provider_score = float(row.get("weighted_score", row.get("score", 0.0)) or 0.0)
+        fallback_score = _fallback_lexical_relevance(q, title, snippet, url)
+        score = max(provider_score, fallback_score)
         authority = float(row.get("authority_score", 0.0) or 0.0)
         flags = [str(x).lower() for x in (row.get("source_flags") or [])]
         official = bool("official" in flags or "docs" in flags or authority >= 0.30)
@@ -840,6 +858,8 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
                 "domain": domain,
                 "snippet": snippet,
                 "score": score,
+                "provider_score": provider_score,
+                "fallback_score": fallback_score,
                 "official": official,
                 "recency_days": recency_days,
                 "recency_source": recency_source,
@@ -859,6 +879,16 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
         ),
         reverse=True,
     )
+    relevance_threshold = 0.35
+    filtered = [
+        x for x in merged
+        if float(x.get("score", 0.0)) >= relevance_threshold or float(x.get("final_score", 0.0)) >= relevance_threshold
+    ]
+    merged = filtered
+    top_score = max((float(x.get("score", 0.0)) for x in merged), default=0.0)
+    if not merged:
+        logger.info("web_evidence distilled all_results_filtered_out=1")
+        return "", 0, [], top_score, ""
     if freshness_sensitive and not any((x.get("recency_days") is not None and int(x.get("recency_days")) <= 365) for x in merged[:5]):
         logger.info("web_evidence freshness_sensitive_no_recent=1")
         return "", len(merged[:5]), [str(x.get("title", ""))[:60] for x in merged[:3]], top_score, "no_recent_within_1y"
