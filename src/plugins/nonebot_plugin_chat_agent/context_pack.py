@@ -586,6 +586,62 @@ def _build_web_strategy_queries(prompt: str) -> list[str]:
     return queries
 
 
+def _is_bad_web_strategy_result(row: dict, query_blob: str) -> bool:
+    title = str((row or {}).get("title", "") or "").strip()
+    url = str((row or {}).get("url", "") or "").strip()
+    snippet = str((row or {}).get("snippet", "") or "").strip()
+    text = f"{title} {url} {snippet}".lower()
+    q = str(query_blob or "").strip().lower()
+
+    keep_aliases = [
+        "hoi4",
+        "civilization 6",
+        "civ6",
+        "stellaris",
+        "world of tanks",
+        "wot",
+        "where winds meet",
+        "\u94a2\u94c1\u96c4\u5fc3",
+        "\u6587\u660e6",
+        "\u7fa4\u661f",
+        "\u5766\u514b\u4e16\u754c",
+        "\u71d5\u4e91\u5341\u516d\u58f0",
+    ]
+    if any(k in text and (k in q or any(x in q for x in keep_aliases)) for k in keep_aliases):
+        return False
+
+    bad_terms = [
+        "ticket",
+        "tickets",
+        "promo",
+        "promos",
+        "price",
+        "prices",
+        "hotel",
+        "travel",
+        "trip",
+        "tour",
+        "tourist",
+        "attraction",
+        "booking",
+        "\u95e8\u7968",
+        "\u7968\u4ef7",
+        "\u9152\u5e97",
+        "\u65c5\u6e38",
+        "\u666f\u70b9",
+        "\u9884\u8ba2",
+        "\u4f18\u60e0",
+        "\u4fc3\u9500",
+    ]
+    if any(t in text for t in bad_terms):
+        return True
+
+    if any(x in text for x in ["red giant", "altec"]) and any(x in q for x in ["weapon", "guide", "\u6b66\u5668", "\u653b\u7565"]):
+        return True
+
+    return False
+
+
 async def _build_web_strategy_distilled_context_multi(config, queries: list[str]) -> tuple[str, int, list[str], list[str], str]:
     logger.info(f"web_strategy search start queries={queries[:3]!r}")
     merged: list[dict] = []
@@ -608,6 +664,9 @@ async def _build_web_strategy_distilled_context_multi(config, queries: list[str]
         for row in results or []:
             title = str(row.get("title", "") or "").strip()
             url = str(row.get("url", "") or "").strip()
+            if _is_bad_web_strategy_result(row, " || ".join(queries)):
+                logger.info(f"web_strategy filtered title={title[:80]!r} reason='bad_source_signal'")
+                continue
             key = (title.lower(), url.lower())
             if key in seen:
                 continue
@@ -623,7 +682,14 @@ async def _build_web_strategy_distilled_context_multi(config, queries: list[str]
         return "", 0, used_queries, [], (errors[0] if errors else "")
 
     top = merged[:5]
-    notes = ["Web distilled notes:", f"- Query: {' || '.join(used_queries[:3])}", "- Top sources:"]
+    notes = [
+        "Web strategy evidence:",
+        "- User wants a practical recommendation, not an article summary.",
+        "- Answer should choose or recommend directly when evidence supports it.",
+        "- Do not say \"the article discusses\" unless the user asks for article summary.",
+        f"- Query: {' || '.join(used_queries[:3])}",
+        "- Top source snippets:",
+    ]
     snippets: list[str] = []
     top_titles: list[str] = []
     for i, row in enumerate(top, 1):
@@ -636,7 +702,9 @@ async def _build_web_strategy_distilled_context_multi(config, queries: list[str]
             top_titles.append(title[:60])
         if snippet:
             snippets.append(snippet.lower())
-        notes.append(f"  {i}. {title} / {domain} / {snippet}")
+        notes.append(f"  {i}. title: {title}")
+        notes.append(f"     domain: {domain}")
+        notes.append(f"     snippet: {snippet}")
 
     token_map = {
         "beginner": "\u65b0\u624b",
