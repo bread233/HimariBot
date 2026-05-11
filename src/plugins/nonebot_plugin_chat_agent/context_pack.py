@@ -793,12 +793,12 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
         logger.info("web_evidence distilled result_count=0 top_titles=[] chars=0")
         return "", 0, [], ""
     notes = [
-        "Web evidence notes:",
-        "- User asked a question that needs external evidence.",
-        "- Answer must be based on the snippets below.",
-        "- Do not answer from model memory if snippets are insufficient.",
-        f"- Query: {q}",
-        "- Top source snippets:",
+        "\u5df2\u67e5\u5230\u7684\u7f51\u9875\u8d44\u6599\uff1a",
+        "- \u8fd9\u662f\u4e00\u4e2a\u9700\u8981\u4f9d\u636e\u8d44\u6599\u7684\u95ee\u9898\u3002",
+        "- \u8bf7\u57fa\u4e8e\u4e0b\u9762\u7684\u641c\u7d22\u7ed3\u679c\u6458\u8981\u56de\u7b54\u3002",
+        "- \u82e5\u6458\u8981\u4e0d\u8db3\uff0c\u4e0d\u8981\u4ec5\u51ed\u6a21\u578b\u8bb0\u5fc6\u4e0b\u7ed3\u8bba\u3002",
+        f"- \u68c0\u7d22\u95ee\u9898\uff1a{q}",
+        "- \u641c\u7d22\u7ed3\u679c\u6458\u8981\uff1a",
     ]
     top_titles: list[str] = []
     for i, row in enumerate(merged, 1):
@@ -806,15 +806,15 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
         domain = str(row.get("domain", "") or "") or "unknown"
         snippet = str(row.get("snippet", "") or "")
         top_titles.append(title[:60] if title else "")
-        notes.append(f"  {i}. title: {title}")
-        notes.append(f"     domain: {domain}")
-        notes.append(f"     snippet: {snippet}")
+        notes.append(f"  {i}. \u6807\u9898\uff1a{title}")
+        notes.append(f"     \u6765\u6e90\u57df\u540d\uff1a{domain}")
+        notes.append(f"     \u6458\u8981\uff1a{snippet}")
     notes.extend(
         [
-            "- Answer guidance:",
-            "  - Start with a cautious conclusion.",
-            "  - Mention uncertainty if evidence is weak.",
-            "  - Do not invent facts not present in snippets.",
+            "- \u56de\u7b54\u8981\u6c42\uff1a",
+            "  - \u5148\u7ed9\u51fa\u8c28\u614e\u7ed3\u8bba\u3002",
+            "  - \u82e5\u8bc1\u636e\u8f83\u5f31\uff0c\u8981\u660e\u786e\u8bf4\u51fa\u4e0d\u786e\u5b9a\u6027\u3002",
+            "  - \u4e0d\u8981\u7f16\u9020\u6458\u8981\u91cc\u6ca1\u6709\u7684\u4e8b\u5b9e\u3002",
         ]
     )
     out = "\n".join(notes).strip()

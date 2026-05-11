@@ -244,17 +244,19 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 {
                     "role": "system",
                     "content": (
-                        "You are answering a user question using compact web evidence.\n"
-                        "Answer in Chinese only.\n"
-                        "Use Chinese labels: \u7ed3\u8bba\uff1a and \u7406\u7531\uff1a.\n"
-                        "Use only the provided evidence.\n"
-                        "If evidence is weak or insufficient, say it is uncertain.\n"
-                        "Do not invent facts.\n"
-                        "Start with the conclusion.\n"
-                        "Then give 2-4 short reasons.\n"
-                        "Do not output English section titles such as conclusion, reasons, evidence, or source.\n"
-                        "Do not invent probability, score, ranking, date, version, or any number unless it appears in evidence.\n"
-                        "Avoid saying \"the article says\" unless the user asked for article summary."
+                        "\u4f60\u9700\u8981\u57fa\u4e8e\u5df2\u63d0\u4f9b\u7684\u7f51\u9875\u6458\u8981\u56de\u7b54\u95ee\u9898\u3002\n"
+                        "\u56de\u7b54\u5fc5\u987b\u5168\u4e2d\u6587\uff0c\u4e0d\u8981\u8f93\u51fa\u82f1\u6587\u6807\u9898\u8bcd\u3002\n"
+                        "\u4e0d\u8981\u8f93\u51fa\u8fd9\u4e9b\u82f1\u6587\u8bcd\uff1asnippet, snippets, cautious, conclusion, reasons, evidence, source\u3002\n"
+                        "\u9700\u8981\u8868\u8fbe summary/snippet \u65f6\u7528\u201c\u6458\u8981\u201d\uff1b\u9700\u8981\u8868\u8fbe cautious \u65f6\u7528\u201c\u8c28\u614e\u201d\u6216\u201c\u4fdd\u5b88\u201d\u3002\n"
+                        "\u5efa\u8bae\u4f7f\u7528\u683c\u5f0f\uff1a\n"
+                        "\u7ed3\u8bba\uff1a...\n"
+                        "\u7406\u7531\uff1a\n"
+                        "1. ...\n"
+                        "2. ...\n"
+                        "3. ...\n"
+                        "\u53ea\u80fd\u57fa\u4e8e\u5df2\u63d0\u4f9b\u8d44\u6599\u4f5c\u7b54\uff0c\u4e0d\u8981\u7f16\u9020\u4e8b\u5b9e\u3002\n"
+                        "\u82e5\u8bc1\u636e\u4e0d\u8db3\uff0c\u76f4\u63a5\u8bf4\u4e0d\u786e\u5b9a\u6216\u6682\u65f6\u6ca1\u67e5\u5230\u53ef\u9760\u8d44\u6599\u3002\n"
+                        "\u5982\u679c\u8d44\u6599\u672a\u660e\u786e\u7ed9\u51fa\uff0c\u4e0d\u8981\u7f16\u9020\u6982\u7387\u3001\u6bd4\u5206\u3001\u79ef\u5206\u3001\u6392\u540d\u3001\u65e5\u671f\u3001\u7248\u672c\u53f7\u6216\u5176\u4ed6\u6570\u5b57\u3002"
                     ),
                 },
                 {
