@@ -9,6 +9,7 @@ from .retrieval import build_embedding_retrieval_context, build_retrieval_contex
 from .storage import get_user_style_profile, load_memories, load_recent_messages
 from .tool_router import should_use_web_tool
 from .tool_intent import classify_tool_intent
+from .question_intent import detect_question_like
 from .url_tools import build_direct_url_context, extract_urls
 from .web_tools import build_web_context, build_web_results, render_web_results_context, resolve_official_web_answer
 from .skill_store import render_skill_context, select_relevant_skills, skills_to_evidence_items
@@ -586,6 +587,62 @@ def _build_web_strategy_queries(prompt: str) -> list[str]:
     return queries
 
 
+def _is_bad_web_strategy_result(row: dict, query_blob: str) -> bool:
+    title = str((row or {}).get("title", "") or "").strip()
+    url = str((row or {}).get("url", "") or "").strip()
+    snippet = str((row or {}).get("snippet", "") or "").strip()
+    text = f"{title} {url} {snippet}".lower()
+    q = str(query_blob or "").strip().lower()
+
+    keep_aliases = [
+        "hoi4",
+        "civilization 6",
+        "civ6",
+        "stellaris",
+        "world of tanks",
+        "wot",
+        "where winds meet",
+        "\u94a2\u94c1\u96c4\u5fc3",
+        "\u6587\u660e6",
+        "\u7fa4\u661f",
+        "\u5766\u514b\u4e16\u754c",
+        "\u71d5\u4e91\u5341\u516d\u58f0",
+    ]
+    if any(k in text and (k in q or any(x in q for x in keep_aliases)) for k in keep_aliases):
+        return False
+
+    bad_terms = [
+        "ticket",
+        "tickets",
+        "promo",
+        "promos",
+        "price",
+        "prices",
+        "hotel",
+        "travel",
+        "trip",
+        "tour",
+        "tourist",
+        "attraction",
+        "booking",
+        "\u95e8\u7968",
+        "\u7968\u4ef7",
+        "\u9152\u5e97",
+        "\u65c5\u6e38",
+        "\u666f\u70b9",
+        "\u9884\u8ba2",
+        "\u4f18\u60e0",
+        "\u4fc3\u9500",
+    ]
+    if any(t in text for t in bad_terms):
+        return True
+
+    if any(x in text for x in ["red giant", "altec"]) and any(x in q for x in ["weapon", "guide", "\u6b66\u5668", "\u653b\u7565"]):
+        return True
+
+    return False
+
+
 async def _build_web_strategy_distilled_context_multi(config, queries: list[str]) -> tuple[str, int, list[str], list[str], str]:
     logger.info(f"web_strategy search start queries={queries[:3]!r}")
     merged: list[dict] = []
@@ -608,6 +665,9 @@ async def _build_web_strategy_distilled_context_multi(config, queries: list[str]
         for row in results or []:
             title = str(row.get("title", "") or "").strip()
             url = str(row.get("url", "") or "").strip()
+            if _is_bad_web_strategy_result(row, " || ".join(queries)):
+                logger.info(f"web_strategy filtered title={title[:80]!r} reason='bad_source_signal'")
+                continue
             key = (title.lower(), url.lower())
             if key in seen:
                 continue
@@ -623,7 +683,14 @@ async def _build_web_strategy_distilled_context_multi(config, queries: list[str]
         return "", 0, used_queries, [], (errors[0] if errors else "")
 
     top = merged[:5]
-    notes = ["Web distilled notes:", f"- Query: {' || '.join(used_queries[:3])}", "- Top sources:"]
+    notes = [
+        "Web strategy evidence:",
+        "- User wants a practical recommendation, not an article summary.",
+        "- Answer should choose or recommend directly when evidence supports it.",
+        "- Do not say \"the article discusses\" unless the user asks for article summary.",
+        f"- Query: {' || '.join(used_queries[:3])}",
+        "- Top source snippets:",
+    ]
     snippets: list[str] = []
     top_titles: list[str] = []
     for i, row in enumerate(top, 1):
@@ -636,7 +703,9 @@ async def _build_web_strategy_distilled_context_multi(config, queries: list[str]
             top_titles.append(title[:60])
         if snippet:
             snippets.append(snippet.lower())
-        notes.append(f"  {i}. {title} / {domain} / {snippet}")
+        notes.append(f"  {i}. title: {title}")
+        notes.append(f"     domain: {domain}")
+        notes.append(f"     snippet: {snippet}")
 
     token_map = {
         "beginner": "\u65b0\u624b",
@@ -719,11 +788,18 @@ def _build_explicit_history_direct_reply(prompt: str, summary_context: str, hist
 
 async def build_context_pack(config, session_info: dict, prompt: str, bot=None, event=None) -> dict:
     intent = classify_tool_intent(prompt)
+    question_intent = detect_question_like(prompt)
+    skill_prompt = prompt
+    if question_intent.is_question_like:
+        skill_prompt = (
+            f"{prompt} question {question_intent.category} "
+            f"{'web_eligible' if question_intent.web_eligible else 'local_only'}"
+        )
     group_id_raw = session_info.get("group_id")
     group_id = str(group_id_raw).strip() if group_id_raw is not None else ""
     selected_skills = await select_relevant_skills(
         config,
-        prompt,
+        skill_prompt,
         intent.kind,
         group_id=group_id or None,
         limit=3,
@@ -908,6 +984,10 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     tool_notes.append(f"skill_evidence_items={len(skill_evidence_items)}")
     tool_notes.append(f"skill_evidence_chars={len(skill_evidence_context)}")
     tool_notes.append(f"intent={intent.kind}")
+    tool_notes.append(f"question_like={1 if question_intent.is_question_like else 0}")
+    tool_notes.append(f"question_category={question_intent.category}")
+    tool_notes.append(f"question_web_eligible={1 if question_intent.web_eligible else 0}")
+    tool_notes.append(f"question_matched_terms={','.join(question_intent.matched_terms[:8])}")
 
     style_profile = None
     style_profile_error = ""
@@ -1225,5 +1305,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         "history_context": history_context,
         "memory_context": memory_context,
         "web_context": web_context,
+        "question_like": question_intent.is_question_like,
+        "question_category": question_intent.category,
+        "question_web_eligible": question_intent.web_eligible,
         "tool_notes": "\n".join(tool_notes).strip(),
     }

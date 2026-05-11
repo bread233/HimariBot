@@ -151,6 +151,12 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     "content": (
                         "You answer in Chinese using the distilled web notes.\n"
                         "Give a practical answer in 2-5 short sentences.\n"
+                        "Answer the user's actual question directly.\n"
+                        "Do not summarize the source article itself.\n"
+                        "Start with a concrete recommendation or conclusion.\n"
+                        "Then give 2-4 short reasons from the notes.\n"
+                        "If evidence is weak, say it is uncertain, but still provide a cautious recommendation when possible.\n"
+                        "Avoid phrases like \"this article discusses\", \"the text mainly talks about\", or \"the document says\" unless the user asked to summarize an article.\n"
                         "This may include game strategy, tech-tree lines, country/civilization choices, weapon choices, or build recommendations.\n"
                         "For game questions, it is safe to recommend in-game countries, factions, tech-tree lines, weapons, builds, or openings.\n"
                         "Do not refuse unless the request is about real-world harm.\n"
@@ -190,6 +196,18 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                         f"web_strategy success model={strategy_model} timeout={strategy_timeout} "
                         f"max_tokens={strategy_max_tokens} reply_chars={len(reply)} prompt={strategy_prompt[:80]!r}"
                     )
+                    summary_prefixes = [
+                        "\u8fd9\u7bc7\u6587\u7ae0",
+                        "\u8fd9\u4e2a\u6587\u672c",
+                        "\u8be5\u6587",
+                        "\u8d44\u6599\u4e3b\u8981",
+                        "\u6587\u4e2d\u63d0\u5230",
+                    ]
+                    if any(reply.startswith(prefix) for prefix in summary_prefixes):
+                        logger.warning(
+                            f"web_strategy summary_style_reply prompt={strategy_prompt[:80]!r} "
+                            f"reply_prefix={reply[:40]!r}"
+                        )
                 should_save_assistant = bool(reply)
             except Exception as e:
                 logger.warning(
