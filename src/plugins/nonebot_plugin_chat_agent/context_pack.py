@@ -11,6 +11,7 @@ from .tool_router import should_use_web_tool
 from .tool_intent import classify_tool_intent
 from .url_tools import build_direct_url_context, extract_urls
 from .web_tools import build_web_context, build_web_results, render_web_results_context, resolve_official_web_answer
+from .skill_store import render_skill_context, select_relevant_skills
 from datetime import datetime
 import re
 from urllib.parse import urlparse
@@ -700,6 +701,16 @@ def _build_explicit_history_direct_reply(prompt: str, summary_context: str, hist
 
 async def build_context_pack(config, session_info: dict, prompt: str, bot=None, event=None) -> dict:
     intent = classify_tool_intent(prompt)
+    group_id_raw = session_info.get("group_id")
+    group_id = str(group_id_raw).strip() if group_id_raw is not None else ""
+    selected_skills = await select_relevant_skills(
+        config,
+        prompt,
+        intent.kind,
+        group_id=group_id or None,
+        limit=3,
+    )
+    skill_context = render_skill_context(selected_skills)
     if intent.needs_time:
         now = datetime.now()
         time_context = (
@@ -872,6 +883,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     summary_retrieval_context = ""
     tool_notes = []
     tool_notes.extend(tool_notes_embed)
+    if selected_skills:
+        tool_notes.append("selected_skills=" + ",".join(skill.key for skill in selected_skills))
     tool_notes.append(f"intent={intent.kind}")
 
     style_profile = None
@@ -1184,6 +1197,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         "group_context": group_context,
         "retrieval_context": retrieval_context,
         "style_context": style_context,
+        "skill_context": skill_context,
         "summary_retrieval_context": summary_retrieval_context,
         "history_context": history_context,
         "memory_context": memory_context,
