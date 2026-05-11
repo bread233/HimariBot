@@ -202,6 +202,25 @@ def _init_storage_sync(db_path: Path) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_agent_skills (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key TEXT NOT NULL UNIQUE,
+                title TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                intent_kinds TEXT NOT NULL DEFAULT '',
+                trigger_terms TEXT NOT NULL DEFAULT '',
+                negative_terms TEXT NOT NULL DEFAULT '',
+                group_ids TEXT NOT NULL DEFAULT '',
+                priority REAL NOT NULL DEFAULT 1.0,
+                content TEXT NOT NULL DEFAULT '',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
         conn.commit()
     finally:
         conn.close()
@@ -602,6 +621,60 @@ async def upsert_log_import_file(config, row: dict) -> None:
 
 async def get_log_import_file(config, file_path: str) -> dict | None:
     return await asyncio.to_thread(_get_log_import_file_sync, config.chat_agent_db_path, str(file_path))
+
+
+def _list_enabled_chat_agent_skills_sync(db_path: Path, group_id: str | None = None) -> list[dict]:
+    if not db_path.exists():
+        return []
+    gid = str(group_id or "").strip()
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.execute(
+            """
+            SELECT
+                key, title, description, intent_kinds, trigger_terms, negative_terms,
+                group_ids, priority, content
+            FROM chat_agent_skills
+            WHERE enabled = 1
+            ORDER BY id ASC
+            LIMIT 200
+            """
+        )
+        rows = cur.fetchall()
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        conn.close()
+
+    out: list[dict] = []
+    for row in rows:
+        group_ids_text = str(row[6] or "").strip()
+        if gid:
+            if group_ids_text:
+                csv = "," + group_ids_text.replace(" ", "") + ","
+                if f",{gid}," not in csv:
+                    continue
+        else:
+            if group_ids_text:
+                continue
+        out.append(
+            {
+                "key": row[0],
+                "title": row[1],
+                "description": row[2],
+                "intent_kinds": row[3],
+                "trigger_terms": row[4],
+                "negative_terms": row[5],
+                "group_ids": row[6],
+                "priority": row[7],
+                "content": row[8],
+            }
+        )
+    return out
+
+
+async def list_enabled_chat_agent_skills(config, group_id: str | None = None) -> list[dict]:
+    return await asyncio.to_thread(_list_enabled_chat_agent_skills_sync, config.chat_agent_db_path, group_id)
 
 
 def _upsert_user_daily_summary_sync(db_path: Path, row: dict) -> None:

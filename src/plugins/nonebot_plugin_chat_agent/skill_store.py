@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from .evidence_pack import EvidenceItem
+from .storage import list_enabled_chat_agent_skills
 
 
 @dataclass(frozen=True)
@@ -106,9 +108,59 @@ def load_builtin_skills() -> list[Skill]:
 
 
 async def load_db_skills(config, group_id: str | None = None) -> list[Skill]:
-    _ = config
-    _ = group_id
-    return []
+    try:
+        rows = await list_enabled_chat_agent_skills(config, group_id)
+    except Exception:
+        return []
+    out: list[Skill] = []
+    for row in rows[:200]:
+        key = str(row.get("key", "") or "").strip()
+        if not key:
+            continue
+        title = str(row.get("title", "") or "").strip()[:120]
+        description = str(row.get("description", "") or "").strip()[:300]
+        content = str(row.get("content", "") or "").strip()[:600]
+        if not content and not description:
+            continue
+
+        def _parse_terms(value: object) -> tuple[str, ...]:
+            raw = str(value or "").strip()
+            if not raw:
+                return ()
+            if raw.startswith("[") and raw.endswith("]"):
+                try:
+                    arr = json.loads(raw)
+                    if isinstance(arr, list):
+                        return tuple(str(x).strip().lower() for x in arr if str(x).strip())
+                except Exception:
+                    pass
+            return tuple(x.strip().lower() for x in raw.split(",") if x.strip())
+
+        intent_kinds = _parse_terms(row.get("intent_kinds"))
+        trigger_terms = _parse_terms(row.get("trigger_terms"))
+        negative_terms = _parse_terms(row.get("negative_terms"))
+        group_ids = tuple(x.strip() for x in str(row.get("group_ids", "") or "").split(",") if x.strip())
+        if not intent_kinds and not trigger_terms:
+            continue
+        try:
+            priority = float(row.get("priority", 1.0) or 1.0)
+        except Exception:
+            priority = 1.0
+
+        out.append(
+            Skill(
+                key=key,
+                title=title or key,
+                description=description,
+                intent_kinds=intent_kinds,
+                trigger_terms=trigger_terms,
+                negative_terms=negative_terms,
+                group_ids=group_ids,
+                priority=priority,
+                content=content or description,
+            )
+        )
+    return out
 
 
 def _skill_score(skill: Skill, text: str, intent_kind: str, group_id: str | None) -> float:
@@ -120,9 +172,9 @@ def _skill_score(skill: Skill, text: str, intent_kind: str, group_id: str | None
     trigger_hits = sum(1 for t in skill.trigger_terms if t and t in text)
     intent_hit = bool(intent_kind and intent_kind in skill.intent_kinds)
 
-    if trigger_hits <= 0 and not intent_hit:
+    if str(intent_kind or "").strip().lower() == "general" and trigger_hits <= 0:
         return 0.0
-    if trigger_hits <= 0 and str(intent_kind or "").strip().lower() == "general":
+    if trigger_hits <= 0 and not intent_hit:
         return 0.0
 
     score = float(trigger_hits) + (2.0 if intent_hit else 0.0)
@@ -133,7 +185,10 @@ async def select_relevant_skills(config, prompt, intent_kind, group_id=None, lim
     text = str(prompt or "").strip().lower()
     kind = str(intent_kind or "").strip()
     gid = str(group_id or "").strip() or None
-    candidates = load_builtin_skills() + await load_db_skills(config, gid)
+    builtin = load_builtin_skills()
+    builtin_keys = {s.key for s in builtin}
+    db_skills = [s for s in await load_db_skills(config, gid) if s.key not in builtin_keys]
+    candidates = builtin + db_skills
 
     scored: list[tuple[float, Skill]] = []
     for s in candidates:
