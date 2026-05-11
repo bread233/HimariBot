@@ -143,6 +143,8 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 180.0,
                 max(10.0, float(getattr(config, "chat_agent_web_strategy_timeout", 60.0) or 60.0)),
             )
+            strategy_max_tokens = int(getattr(config, "chat_agent_web_strategy_max_tokens", 700) or 700)
+            strategy_max_tokens = min(2048, max(128, strategy_max_tokens))
             strategy_messages = [
                 {
                     "role": "system",
@@ -172,21 +174,28 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     model=strategy_model,
                     temperature=0.35,
                     top_p=0.7,
-                    max_tokens=300,
+                    max_tokens=strategy_max_tokens,
                 )
                 reply = truncate_reply(strip_thinking(reply), config.chat_agent_max_reply_length)
                 reply = str(reply or "").strip()
                 if not reply:
                     logger.warning(
                         f"web_strategy empty reply model={strategy_model} timeout={strategy_timeout} "
+                        f"max_tokens={strategy_max_tokens} context_chars={len(strategy_context)} "
                         f"prompt={strategy_prompt[:80]!r}"
                     )
                     reply = "\u6682\u65f6\u6ca1\u67e5\u5230\u7a33\u5b9a\u7684\u653b\u7565\u8d44\u6599\uff0c\u53ef\u4ee5\u6362\u4e2a\u66f4\u5177\u4f53\u7684\u95ee\u9898\u3002"
+                else:
+                    logger.info(
+                        f"web_strategy success model={strategy_model} timeout={strategy_timeout} "
+                        f"max_tokens={strategy_max_tokens} reply_chars={len(reply)} prompt={strategy_prompt[:80]!r}"
+                    )
                 should_save_assistant = bool(reply)
             except Exception as e:
                 logger.warning(
                     f"web_strategy failed type={type(e).__name__} model={strategy_model} "
-                    f"timeout={strategy_timeout} prompt={strategy_prompt[:80]!r} message={str(e)[:200]!r}"
+                    f"timeout={strategy_timeout} max_tokens={strategy_max_tokens} "
+                    f"context_chars={len(strategy_context)} prompt={strategy_prompt[:80]!r} message={str(e)[:200]!r}"
                 )
                 reply = "\u6682\u65f6\u6ca1\u67e5\u5230\u7a33\u5b9a\u7684\u653b\u7565\u8d44\u6599\uff0c\u53ef\u4ee5\u6362\u4e2a\u66f4\u5177\u4f53\u7684\u95ee\u9898\u3002"
             if _should_sanitize_task_reply(prompt, context_pack):
