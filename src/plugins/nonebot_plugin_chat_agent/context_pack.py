@@ -13,6 +13,7 @@ from .url_tools import build_direct_url_context, extract_urls
 from .web_tools import build_web_context, build_web_results, render_web_results_context, resolve_official_web_answer
 from .skill_store import render_skill_context, select_relevant_skills, skills_to_evidence_items
 from .evidence_pack import render_evidence_context
+from nonebot import logger
 from datetime import datetime
 import re
 from urllib.parse import urlparse
@@ -496,7 +497,10 @@ def _is_community_strategy_question(prompt: str, intent_kind: str | None) -> boo
         "\u4ecb\u7ecd", "\u63a8\u8350", "\u73a9\u6cd5", "\u600e\u4e48\u73a9", "\u653b\u7565",
         "\u65b0\u624b", "\u5f00\u5c40", "\u65b9\u6848", "\u8def\u7ebf", "\u5e2e\u6211\u9009",
         "\u9009\u54ea\u4e2a", "\u914d\u7f6e", "\u600e\u4e48\u914d", "\u804c\u4e1a", "\u56fd\u5bb6",
-        "\u89d2\u8272",
+        "\u89d2\u8272", "\u600e\u4e48\u9009", "\u9009\u4ec0\u4e48", "\u600e\u4e48\u9009\u62e9",
+        "\u6b66\u5668", "\u88c5\u5907", "\u6d41\u6d3e", "\u52a0\u70b9", "\u6280\u80fd",
+        "\u9635\u5bb9", "\u914d\u961f", "\u51fa\u88c5", "\u79d1\u6280\u7ebf", "\u5766\u514b\u7ebf",
+        "\u804c\u4e1a\u9009\u62e9",
     ]
     return any(t in text for t in strategy_markers)
 
@@ -572,14 +576,18 @@ def _build_web_strategy_queries(prompt: str) -> list[str]:
         _push("\u7fa4\u661f \u65b0\u624b \u653b\u7565 \u5f00\u5c40 \u73a9\u6cd5")
         _push("Stellaris beginner guide opening tips")
     if any(k in text for k in ["wot", "\u5766\u514b\u4e16\u754c", "world of tanks"]):
-        _push("\u5766\u514b\u4e16\u754c \u65b0\u624b \u63a8\u8350 \u79d1\u6280\u7ebf")
+        _push("\u5766\u514b\u4e16\u754c \u65b0\u624b \u63a8\u8350 \u79d1\u6280\u7ebf \u5766\u514b\u7ebf")
         _push("World of Tanks beginner tech tree line recommendation")
+    if any(k in text for k in ["\u71d5\u4e91\u5341\u516d\u58f0", "where winds meet"]):
+        _push("\u71d5\u4e91\u5341\u516d\u58f0 \u65b0\u624b \u6b66\u5668 \u63a8\u8350 \u9009\u62e9 \u653b\u7565")
+        _push("Where Winds Meet beginner weapon guide recommended weapons")
 
     _push(raw)
     return queries
 
 
 async def _build_web_strategy_distilled_context_multi(config, queries: list[str]) -> tuple[str, int, list[str], list[str], str]:
+    logger.info(f"web_strategy search start queries={queries[:3]!r}")
     merged: list[dict] = []
     errors: list[str] = []
     used_queries: list[str] = []
@@ -592,8 +600,10 @@ async def _build_web_strategy_distilled_context_multi(config, queries: list[str]
         used_queries.append(qs)
         try:
             results = await build_web_results(config, qs, intent_kind="community_strategy")
+            logger.info(f"web_strategy query result_count={len(results or [])} query={qs[:120]!r}")
         except Exception as e:
             errors.append(str(e)[:120])
+            logger.warning(f"web_strategy query error query={qs[:120]!r} message={str(e)[:200]!r}")
             continue
         for row in results or []:
             title = str(row.get("title", "") or "").strip()
@@ -607,6 +617,9 @@ async def _build_web_strategy_distilled_context_multi(config, queries: list[str]
             break
 
     if not merged:
+        logger.info(
+            f"web_strategy distilled result_count=0 top_titles=[] chars=0 used_queries={used_queries[:3]!r}"
+        )
         return "", 0, used_queries, [], (errors[0] if errors else "")
 
     top = merged[:5]
@@ -653,6 +666,10 @@ async def _build_web_strategy_distilled_context_multi(config, queries: list[str]
     out = "\n".join(notes).strip()
     if len(out) > 1500:
         out = out[:1500]
+    logger.info(
+        f"web_strategy distilled result_count={len(merged)} top_titles={top_titles[:3]!r} "
+        f"chars={len(out)} used_queries={used_queries[:3]!r}"
+    )
     return out, len(top), used_queries, top_titles[:3], (errors[0] if errors else "")
 
 
