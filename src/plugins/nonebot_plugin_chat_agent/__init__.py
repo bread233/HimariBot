@@ -269,6 +269,9 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             return
 
         messages = [{"role": "system", "content": build_system_prompt()}]
+        skill_context = str(context_pack.get("skill_context", "") or "").strip()
+        if skill_context:
+            _append_system(messages, "Relevant skill instructions:\n" + skill_context)
         _append_system(messages, context_pack.get("time_context", ""))
         _append_system(messages, context_pack.get("profile_context", ""))
         _append_system(messages, context_pack.get("group_context", ""))
