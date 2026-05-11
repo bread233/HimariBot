@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from .evidence_pack import EvidenceItem
 
 
 @dataclass(frozen=True)
@@ -127,4 +128,27 @@ def render_skill_context(skills: list[Skill]) -> str:
     out = "\n".join(lines).strip()
     if len(out) > 1200:
         out = out[:1200]
+    return out
+
+
+def skills_to_evidence_items(skills: list[Skill]) -> list[EvidenceItem]:
+    out: list[EvidenceItem] = []
+    for skill in skills or []:
+        title = str(skill.title or skill.key or "").strip()
+        content = str(skill.content or skill.description or "").strip()
+        if not content:
+            continue
+        key = str(skill.key or "").strip()
+        out.append(
+            EvidenceItem(
+                source_type="skill",
+                title=title,
+                content=content,
+                score=float(skill.priority or 0.0),
+                confidence="medium",
+                source=f"skill:{key}" if key else "skill",
+                answer_hint=content,
+                metadata={"key": key} if key else None,
+            )
+        )
     return out
