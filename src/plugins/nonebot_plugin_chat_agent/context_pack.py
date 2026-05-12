@@ -14,6 +14,7 @@ from .url_tools import build_direct_url_context, extract_urls
 from .web_tools import build_web_context, build_web_results, render_web_results_context, resolve_official_web_answer
 from .skill_store import render_skill_context, select_relevant_skills, skills_to_evidence_items
 from .evidence_pack import render_evidence_context
+from .knowledge_pack import search_knowledge_pack
 from nonebot import logger
 from datetime import datetime
 import re
@@ -746,6 +747,7 @@ async def _build_web_strategy_distilled_context_multi(config, queries: list[str]
 def _has_local_evidence_for_question(
     *,
     direct_reply: str | None,
+    retrieval_source: str,
     retrieval_context: str,
     summary_retrieval_context: str,
     history_context: str,
@@ -756,6 +758,14 @@ def _has_local_evidence_for_question(
     if str(direct_reply or "").strip():
         return True
     if simple_definition_hit or explicit_history_hit:
+        return True
+    if retrieval_source == "db" and str(retrieval_context or "").strip():
+        return True
+    if str(summary_retrieval_context or "").strip():
+        return True
+    if str(history_context or "").strip():
+        return True
+    if str(memory_context or "").strip():
         return True
     return False
 
@@ -1191,12 +1201,14 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     history_context = "\n".join(history_lines[-history_limit:]).strip()
 
     retrieval_context = ""
+    retrieval_source = "none"
     retrieval_score = 0.0
     retrieval_threshold = float(getattr(config, "chat_agent_retrieval_min_score", 0.45))
     embedding_status = "empty"
     if math_result is not None:
         retrieval_context = "确定性计算结果：" + str(math_result.get("result_text", "")).strip()
         retrieval_score = 1.0
+        retrieval_source = "math"
         tool_notes_embed = [
             "math_tool=numeric_compare",
             f"math_result={math_result.get('comparison', '')}",
@@ -1231,6 +1243,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         retrieval_score = float(embedding_result.get("score", 0.0) or 0.0)
         if embedding_status == "reliable":
             retrieval_context = str(embedding_result.get("content", "")).strip()
+            retrieval_source = "embedding"
     else:
         tool_notes_embed = ["embedding_retrieval=disabled"]
 
@@ -1245,6 +1258,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         )
         retrieval_context = retrieval["content"] if retrieval["source"] == "db" else ""
         retrieval_score = float(retrieval.get("score", 0.0) or 0.0)
+        retrieval_source = str(retrieval.get("source", "") or "none")
 
     web_relevance_threshold = float(getattr(config, "chat_agent_web_relevance_min_score", 0.35))
     web_final_threshold = float(getattr(config, "chat_agent_web_final_min_score", 0.30))
@@ -1485,6 +1499,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         tool_notes.append("evidence_gate=1")
         local_ok = _has_local_evidence_for_question(
             direct_reply=None,
+            retrieval_source=retrieval_source,
             retrieval_context=retrieval_context,
             summary_retrieval_context=summary_retrieval_context,
             history_context=history_context,
@@ -1492,7 +1507,92 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             simple_definition_hit=False,
             explicit_history_hit=False,
         )
+        if local_ok:
+            tool_notes.append("knowledge_pack=0")
+            tool_notes.append("knowledge_pack_result_count=0")
+            tool_notes.append("local_evidence=1")
+            tool_notes.append("evidence_gate_source=local")
+            return {
+                "direct_reply": None,
+                "should_call_llm": True,
+                "web_used": False,
+                "time_context": time_context,
+                "profile_context": profile_context,
+                "group_context": group_context,
+                "retrieval_context": retrieval_context,
+                "style_context": "",
+                "summary_retrieval_context": summary_retrieval_context,
+                "history_context": history_context,
+                "memory_context": memory_context,
+                "web_context": "",
+                "lightweight_mode": "",
+                "lightweight_prompt": "",
+                "tool_notes": "\n".join(tool_notes).strip(),
+            }
         if not local_ok:
+            try:
+                krows = await search_knowledge_pack(config, prompt, pack_key=None, limit=3, min_score=0.25)
+            except Exception as e:
+                krows = []
+                tool_notes.append(f"knowledge_pack_error={str(e)[:120]}")
+            if krows:
+                lines = ["\u672c\u5730\u77e5\u8bc6\u5e93\u8d44\u6599\uff1a"]
+                ktitles = []
+                for i, r in enumerate(krows[:3], 1):
+                    title = str(r.get("title", "") or "")
+                    section = str(r.get("section", "") or "")
+                    content = str(r.get("content", "") or "").strip()
+                    if len(content) > 260:
+                        content = content[:260] + "..."
+                    source = str(r.get("source_path", "") or r.get("source_url", "") or "")
+                    score = float(r.get("score", 0.0) or 0.0)
+                    ktitles.append(title[:50])
+                    lines.append(f"{i}. pack={r.get('pack_key','')} doc={r.get('doc_key','')} title={title} section={section} score={score:.3f}")
+                    lines.append(f"   source={source}")
+                    lines.append(f"   \u6458\u8981\uff1a{content}")
+                kctx = "\n".join(lines)
+                tool_notes.append("knowledge_pack=1")
+                tool_notes.append(f"knowledge_pack_result_count={len(krows)}")
+                tool_notes.append(f"knowledge_pack_top_titles={' || '.join(ktitles)}")
+                tool_notes.append(f"knowledge_pack_context_chars={len(kctx)}")
+                tool_notes.append("evidence_gate_source=knowledge")
+                direct_lines = ["本地知识库："]
+                for i, r in enumerate(krows[:3], 1):
+                    title = str(r.get("title", "") or "")
+                    section = str(r.get("section", "") or "")
+                    content = str(r.get("content", "") or "").strip()
+                    if len(content) > 260:
+                        content = content[:260] + "..."
+                    source = str(r.get("source_path", "") or r.get("source_url", "") or "")
+                    score = float(r.get("score", 0.0) or 0.0)
+                    direct_lines.append(
+                        f"【{r.get('pack_key','')} / {title} / {section}】score={score:.3f}"
+                    )
+                    direct_lines.append(content)
+                    direct_lines.append(f"来源：{source}")
+                direct_reply = "\n".join(direct_lines).strip()
+                return {
+                    "direct_reply": direct_reply,
+                    "should_call_llm": False,
+                    "web_used": False,
+                    "time_context": time_context,
+                    "profile_context": profile_context,
+                    "group_context": group_context,
+                    "retrieval_context": "",
+                    "style_context": "",
+                    "summary_retrieval_context": "",
+                    "history_context": "",
+                    "memory_context": "",
+                    "web_context": "",
+                    "lightweight_mode": "",
+                    "lightweight_prompt": "",
+                    "web_evidence_query": "",
+                    "web_evidence_context": "",
+                    "knowledge_evidence_context": kctx,
+                    "tool_notes": "\n".join(tool_notes).strip(),
+                }
+            tool_notes.append("knowledge_pack=0")
+            tool_notes.append("knowledge_pack_result_count=0")
             evidence_query = str(web_query or prompt or "").strip()
             evidence_context, evidence_count, evidence_titles, top_score, evidence_error, evaluation_signal_hit, evaluation_signal_terms = await _build_generic_web_evidence_context(
                 config, evidence_query
