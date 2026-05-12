@@ -224,11 +224,20 @@ def crawl_roco_world_source(config: RocoCrawlerConfig, fetch_json=None, fetch_te
         ("Category:家具", "furniture", int(limits.get("furniture", 50) or 50)),
     ]
 
+    cat_defs = [
+        ("\u0043\u0061\u0074\u0065\u0067\u006f\u0072\u0079\u003a\u7cbe\u7075", "pet", int(limits.get("pet", 1000) or 1000)),
+        ("\u0043\u0061\u0074\u0065\u0067\u006f\u0072\u0079\u003a\u6280\u80fd", "skill", int(limits.get("skill", 1000) or 1000)),
+        ("\u0043\u0061\u0074\u0065\u0067\u006f\u0072\u0079\u003a\u9053\u5177", "item", int(limits.get("item", 1000) or 1000)),
+        ("\u0043\u0061\u0074\u0065\u0067\u006f\u0072\u0079\u003a\u7cbe\u7075\u86cb", "egg", int(limits.get("egg", 500) or 500)),
+        ("\u0043\u0061\u0074\u0065\u0067\u006f\u0072\u0079\u003a\u5bb6\u5177", "furniture", int(limits.get("furniture", 500) or 500)),
+    ]
+
     errors: list[str] = []
     skipped = 0
     assets_count = 0
     records: list[dict] = []
     visited_titles: set[str] = set()
+    category_counts = {"pet": 0, "skill": 0, "item": 0, "egg": 0, "furniture": 0}
 
     for cmtitle, category, per_limit in cat_defs:
         if len(records) >= int(max(1, config.max_pages)):
@@ -286,6 +295,8 @@ def crawl_roco_world_source(config: RocoCrawlerConfig, fetch_json=None, fetch_te
                     except Exception as ie:
                         errors.append(f"image_failed:{title}:{type(ie).__name__}:{str(ie)[:120]}")
                 records.append(rec)
+                if category in category_counts:
+                    category_counts[category] = int(category_counts.get(category, 0) or 0) + 1
                 time.sleep(max(0.0, float(config.request_delay or 0.0)))
             except Exception as e:
                 errors.append(f"page_failed:{title}:{type(e).__name__}:{str(e)[:200]}")
@@ -301,6 +312,7 @@ def crawl_roco_world_source(config: RocoCrawlerConfig, fetch_json=None, fetch_te
         "base_url": base_url,
         "records_count": len(records),
         "assets_count": assets_count,
+        "category_counts": category_counts,
         "skipped_count": skipped,
         "errors": errors[:200],
     }
@@ -313,4 +325,5 @@ def crawl_roco_world_source(config: RocoCrawlerConfig, fetch_json=None, fetch_te
         "errors": errors[:50],
         "records_path": str(records_path),
         "assets_dir": str(assets_root),
+        "category_counts": category_counts,
     }
