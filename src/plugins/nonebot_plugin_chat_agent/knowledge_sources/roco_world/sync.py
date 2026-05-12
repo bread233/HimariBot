@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -39,7 +41,14 @@ class RocoWorldSyncService:
             "state": state,
         }
 
-    async def sync_from_records_jsonl(self, config, dry_run: bool = False) -> dict:
+    async def sync_from_records_jsonl(
+        self,
+        config,
+        dry_run: bool = False,
+        *,
+        embed_changed: bool = False,
+        embedding_limit: int | None = None,
+    ) -> dict:
         self.paths.source_dir.mkdir(parents=True, exist_ok=True)
         self.paths.assets_dir.mkdir(parents=True, exist_ok=True)
         if not self.paths.records_file.exists():
@@ -75,7 +84,7 @@ class RocoWorldSyncService:
                         "source_path": entry["source_path"],
                         "source_url": entry["source_url"],
                         "source_type": "knowledge_source_roco_world",
-                        "content_hash": "",
+                        "content_hash": hashlib.sha256(entry["content"].encode("utf-8", errors="ignore")).hexdigest(),
                         "metadata_json": entry["metadata_json"],
                         "enabled": 1,
                     }
@@ -88,7 +97,7 @@ class RocoWorldSyncService:
                         "title": entry["title"],
                         "section": entry["category"],
                         "content": entry["content"],
-                        "content_hash": "",
+                        "content_hash": hashlib.sha256(entry["content"].encode("utf-8", errors="ignore")).hexdigest(),
                         "source_path": entry["source_path"],
                         "source_url": entry["source_url"],
                         "chunk_index": 0,
@@ -99,6 +108,18 @@ class RocoWorldSyncService:
                     }
                 )
 
+        existing_map = self._load_existing_chunk_state(config, [str(x.get("chunk_key", "") or "") for x in chunk_rows])
+        for row in chunk_rows:
+            ck = str(row.get("chunk_key", "") or "")
+            old = existing_map.get(ck) or {}
+            if not old:
+                continue
+            if str(old.get("content_hash", "") or "") == str(row.get("content_hash", "") or ""):
+                old_emb = str(old.get("embedding_json", "") or "")
+                if old_emb:
+                    row["embedding_json"] = old_emb
+        embedding_plan = self._build_embedding_plan(chunk_rows, existing_map, embedding_limit=embedding_limit)
+
         if dry_run:
             return {
                 "ok": True,
@@ -107,6 +128,25 @@ class RocoWorldSyncService:
                 "records_count": count,
                 "would_import_docs": len(doc_rows),
                 "would_import_chunks": len(chunk_rows),
+                "embedding": (
+                    await self.embed_changed_knowledge_chunks(
+                        config,
+                        chunk_rows,
+                        dry_run=True,
+                        embedding_limit=embedding_limit,
+                    )
+                    if embed_changed
+                    else {
+                        "enabled": False,
+                        "dry_run": True,
+                        "changed_chunk_count": int(embedding_plan.get("changed_chunk_count", 0) or 0),
+                        "would_embed_count": 0,
+                        "embedded_count": 0,
+                        "skipped_unchanged_count": int(embedding_plan.get("skipped_unchanged_count", 0) or 0),
+                        "failed_count": 0,
+                        "failed": [],
+                    }
+                ),
                 "data_root": self.resolved_data_root(),
             }
 
@@ -140,13 +180,150 @@ class RocoWorldSyncService:
             ),
             encoding="utf-8",
         )
+        embedding_res = (
+            await self.embed_changed_knowledge_chunks(
+                config,
+                chunk_rows,
+                dry_run=False,
+                embedding_limit=embedding_limit,
+            )
+            if embed_changed
+            else {
+                "enabled": False,
+                "dry_run": False,
+                "changed_chunk_count": int(embedding_plan.get("changed_chunk_count", 0) or 0),
+                "would_embed_count": 0,
+                "embedded_count": 0,
+                "skipped_unchanged_count": int(embedding_plan.get("skipped_unchanged_count", 0) or 0),
+                "failed_count": 0,
+                "failed": [],
+            }
+        )
         return {
             "ok": True,
             "pack_key": self.pack_key,
             "records_count": count,
             "imported_docs": imported_docs,
             "imported_chunks": imported_chunks,
+            "embedding": embedding_res,
             "data_root": self.resolved_data_root(),
+        }
+
+    def _load_existing_chunk_state(self, config, chunk_keys: list[str]) -> dict[str, dict]:
+        db_path = Path(getattr(config, "chat_agent_db_path", "") or "")
+        if not db_path.exists():
+            return {}
+        keys = [str(x or "").strip() for x in chunk_keys if str(x or "").strip()]
+        if not keys:
+            return {}
+        conn = sqlite3.connect(db_path)
+        try:
+            out: dict[str, dict] = {}
+            batch = 200
+            for i in range(0, len(keys), batch):
+                part = keys[i : i + batch]
+                holders = ",".join(["?"] * len(part))
+                rows = conn.execute(
+                    f"SELECT chunk_key, content_hash, embedding_json FROM chat_agent_knowledge_chunks WHERE chunk_key IN ({holders})",
+                    part,
+                ).fetchall()
+                for r in rows:
+                    out[str(r[0])] = {
+                        "content_hash": str(r[1] or ""),
+                        "embedding_json": str(r[2] or ""),
+                    }
+            return out
+        finally:
+            conn.close()
+
+    def _build_embedding_plan(self, chunk_rows: list[dict], existing_map: dict[str, dict], embedding_limit: int | None) -> dict:
+        changed: list[dict] = []
+        for row in chunk_rows:
+            ck = str(row.get("chunk_key", "") or "")
+            if not ck:
+                continue
+            old = existing_map.get(ck)
+            new_hash = str(row.get("content_hash", "") or "")
+            if old is None:
+                changed.append(row)
+                continue
+            old_hash = str(old.get("content_hash", "") or "")
+            old_emb = str(old.get("embedding_json", "") or "").strip()
+            if (not old_hash) or old_hash != new_hash or (not old_emb):
+                changed.append(row)
+        if isinstance(embedding_limit, int) and embedding_limit > 0:
+            changed = changed[: int(embedding_limit)]
+        return {
+            "changed_rows": changed,
+            "changed_chunk_count": len(changed),
+            "skipped_unchanged_count": max(0, len(chunk_rows) - len(changed)),
+        }
+
+    async def embed_changed_knowledge_chunks(
+        self,
+        config,
+        chunk_rows: list[dict],
+        *,
+        dry_run: bool = False,
+        embedding_limit: int | None = None,
+    ) -> dict:
+        existing_map = self._load_existing_chunk_state(config, [str(x.get("chunk_key", "") or "") for x in chunk_rows])
+        plan = self._build_embedding_plan(chunk_rows, existing_map, embedding_limit)
+        changed_rows = list(plan.get("changed_rows") or [])
+        if dry_run:
+            return {
+                "enabled": True,
+                "dry_run": True,
+                "changed_chunk_count": int(plan.get("changed_chunk_count", 0) or 0),
+                "would_embed_count": int(plan.get("changed_chunk_count", 0) or 0),
+                "embedded_count": 0,
+                "skipped_unchanged_count": int(plan.get("skipped_unchanged_count", 0) or 0),
+                "failed_count": 0,
+                "failed": [],
+            }
+        if not changed_rows:
+            return {
+                "enabled": True,
+                "dry_run": False,
+                "changed_chunk_count": 0,
+                "would_embed_count": 0,
+                "embedded_count": 0,
+                "skipped_unchanged_count": int(plan.get("skipped_unchanged_count", 0) or 0),
+                "failed_count": 0,
+                "failed": [],
+            }
+        failed: list[dict] = []
+        embedded = 0
+        try:
+            try:
+                from ... import embedding_client  # type: ignore
+            except Exception:
+                import embedding_client  # type: ignore
+            items = [{"source": "knowledge_pack", "content": str(x.get("content", "") or "")} for x in changed_rows]
+            vecs = await embedding_client.embed_texts_with_cache(config, items)
+            patch_rows = []
+            for i, row in enumerate(changed_rows):
+                vec = vecs[i] if i < len(vecs) else []
+                if not vec:
+                    failed.append({"chunk_key": str(row.get("chunk_key", "") or ""), "error": "empty_embedding"})
+                    continue
+                patch = dict(row)
+                patch["embedding_json"] = json.dumps([float(x) for x in vec], ensure_ascii=False)
+                patch_rows.append(patch)
+            if patch_rows:
+                await upsert_knowledge_chunks(config, patch_rows)
+                embedded = len(patch_rows)
+        except Exception as e:
+            failed.append({"chunk_key": "*batch*", "error": f"{type(e).__name__}:{str(e)[:200]}"})
+        return {
+            "enabled": True,
+            "dry_run": False,
+            "changed_chunk_count": int(plan.get("changed_chunk_count", 0) or 0),
+            "would_embed_count": 0,
+            "embedded_count": int(embedded),
+            "skipped_unchanged_count": int(plan.get("skipped_unchanged_count", 0) or 0),
+            "failed_count": len(failed),
+            "failed": failed,
         }
 
     async def fix_missing_assets_from_records(self, dry_run: bool = True) -> dict:
@@ -181,6 +358,8 @@ class RocoWorldSyncService:
         config,
         *,
         dry_run: bool = True,
+        embed_changed: bool = False,
+        embedding_limit: int | None = None,
         limit: int | None = None,
         types: list[str] | None = None,
         base_url: str = "https://wiki.biligame.com/rocom",
@@ -203,6 +382,10 @@ class RocoWorldSyncService:
             }
         asset_res = await self.fix_missing_assets_from_records(dry_run=dry_run)
         if dry_run:
+            embedding_res = {"enabled": False, "dry_run": True, "changed_chunk_count": 0, "would_embed_count": 0, "embedded_count": 0, "skipped_unchanged_count": 0, "failed_count": 0, "failed": []}
+            if embed_changed:
+                embedding_res = await self.sync_from_records_jsonl(config, dry_run=True, embed_changed=True, embedding_limit=embedding_limit)
+                embedding_res = embedding_res.get("embedding", embedding_res)
             return {
                 "ok": True,
                 "dry_run": True,
@@ -216,9 +399,10 @@ class RocoWorldSyncService:
                 "entity_img_candidates_rejected": int(source_res.get("entity_img_candidates_rejected", 0) or 0),
                 "records_file": str(self.paths.records_file),
                 "asset": asset_res,
+                "embedding": embedding_res,
                 "data_root": self.resolved_data_root(),
             }
-        import_res = await self.sync_from_records_jsonl(config, dry_run=False)
+        import_res = await self.sync_from_records_jsonl(config, dry_run=False, embed_changed=embed_changed, embedding_limit=embedding_limit)
         return {
             "ok": bool(import_res.get("ok", False)),
             "dry_run": False,
@@ -227,5 +411,6 @@ class RocoWorldSyncService:
             "records_file": str(self.paths.records_file),
             "asset": asset_res,
             "import": import_res,
+            "embedding": import_res.get("embedding", {}),
             "data_root": self.resolved_data_root(),
         }
