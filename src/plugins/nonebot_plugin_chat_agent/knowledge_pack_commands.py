@@ -4,8 +4,10 @@ from collections.abc import Awaitable, Callable
 
 try:
     from .knowledge_pack_manager import knowledge_pack_manager
+    from .knowledge_sources.roco_world.sync import RocoWorldSyncService
 except Exception:  # pragma: no cover
     from knowledge_pack_manager import knowledge_pack_manager
+    from knowledge_sources.roco_world.sync import RocoWorldSyncService
 
 
 def parse_knowledge_command(prompt: str) -> dict | None:
@@ -20,6 +22,10 @@ def parse_knowledge_command(prompt: str) -> dict | None:
         return {"cmd": "update", "pack_key": text.split(" ", 1)[1].strip()}
     if text == "\u6d1b\u514b\u738b\u56fd\u4e16\u754c\u6570\u636e\u66f4\u65b0":
         return {"cmd": "update", "pack_key": "roco_world"}
+    if text == "/chatagent_knowledge roco status":
+        return {"cmd": "roco_status"}
+    if text == "/chatagent_knowledge roco sync --dry-run":
+        return {"cmd": "roco_sync", "dry_run": True}
     return None
 
 
@@ -103,4 +109,25 @@ async def handle_knowledge_command(
         if not started.get("ok"):
             return "update failed"
         return "\u5df2\u5f00\u59cb\u540e\u53f0\u66f4\u65b0\u6d1b\u514b\u738b\u56fd\u4e16\u754c\u6570\u636e\uff0c\u8bf7\u7a0d\u540e\u67e5\u770b\u7ed3\u679c\u3002"
+    if cmd["cmd"] == "roco_status":
+        if not _is_admin_or_superuser(event, superusers):
+            return "\u4ec5\u8d85\u7ea7\u7ba1\u7406\u5458\u6216\u7fa4\u7ba1\u7406\u5458\u53ef\u67e5\u770b roco \u540c\u6b65\u72b6\u6001\u3002"
+        svc = RocoWorldSyncService()
+        st = await svc.status()
+        return (
+            f"roco status | pack_key={st.get('pack_key','')} | data_root={st.get('data_root','')} "
+            f"| records_file_exists={int(bool(st.get('records_file_exists', False)))} "
+            f"| state_file_exists={int(bool(st.get('state_file_exists', False)))} | state={st.get('state', {})}"
+        )
+    if cmd["cmd"] == "roco_sync":
+        if not _is_admin_or_superuser(event, superusers):
+            return "\u4ec5\u8d85\u7ea7\u7ba1\u7406\u5458\u6216\u7fa4\u7ba1\u7406\u5458\u53ef\u6267\u884c roco \u540c\u6b65\u3002"
+        svc = RocoWorldSyncService()
+        out = await svc.sync_from_records_jsonl(config, dry_run=bool(cmd.get("dry_run", False)))
+        return (
+            f"roco sync | ok={int(bool(out.get('ok', False)))} | dry_run={int(bool(out.get('dry_run', False)))} "
+            f"| status={out.get('status','')} | records_count={out.get('records_count',0)} "
+            f"| would_import_docs={out.get('would_import_docs',0)} | would_import_chunks={out.get('would_import_chunks',0)} "
+            f"| data_root={out.get('data_root','')} | records_file={out.get('records_file','')}"
+        )
     return None
