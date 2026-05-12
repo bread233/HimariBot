@@ -223,6 +223,12 @@ async def handle_knowledge_command(
             embed_changed=bool(cmd.get("embed_changed", False)),
             embedding_limit=cmd.get("embedding_limit"),
         )
+        if str(out.get("status") or "") == "busy":
+            running = dict(out.get("running") or {})
+            return (
+                f"roco sync | ok=0 | status=busy | message={out.get('message','roco sync is already running')} "
+                f"| action={running.get('action','')} | started_at={running.get('started_at','')}"
+            )
         emb = dict(out.get("embedding") or {})
         asset = dict(out.get("asset") or {})
         imp = dict(out.get("import") or {})
@@ -231,7 +237,9 @@ async def handle_knowledge_command(
             f"roco sync | ok={int(bool(out.get('ok', False)))} | dry_run={int(bool(out.get('dry_run', False)))} "
             f"| records_count={out.get('records_count',0)} "
             f"| asset.total_assets={asset.get('total_assets',0)} | asset.existing_count={asset.get('existing_count',0)} "
+            f"| asset.skipped_existing_count={asset.get('skipped_existing_count',0)} "
             f"| asset.missing_count={asset.get('missing_count',0)} | asset.would_download_count={asset.get('would_download_count',0)} "
+            f"| asset.downloaded_count={asset.get('downloaded_count',0)} | asset.saved_count={asset.get('saved_count',0)} "
             f"| asset.failed_count={failed_cnt} "
             f"| import.imported_docs={imp.get('imported_docs',0)} | import.imported_chunks={imp.get('imported_chunks',0)} "
             f"| would_import_docs={out.get('would_import_docs',0)} | would_import_chunks={out.get('would_import_chunks',0)} "

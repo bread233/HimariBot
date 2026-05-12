@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import sqlite3
@@ -18,6 +19,9 @@ except Exception:  # pragma: no cover
 
 
 class RocoWorldSyncService:
+    _sync_lock: asyncio.Lock = asyncio.Lock()
+    _running_meta: dict = {}
+
     def __init__(self, data_root: Path | None = None, pack_key: str = "roco_world") -> None:
         self.paths: RocoWorldPaths = get_roco_world_paths(data_root)
         self.pack_key = str(pack_key or "roco_world").strip()
@@ -39,7 +43,42 @@ class RocoWorldSyncService:
             "records_file_exists": self.paths.records_file.exists(),
             "state_file_exists": self.paths.state_file.exists(),
             "state": state,
+            "running": bool(self.__class__._running_meta),
+            "running_meta": dict(self.__class__._running_meta or {}),
         }
+
+    @classmethod
+    def get_running_meta(cls) -> dict:
+        return dict(cls._running_meta or {})
+
+    async def _acquire_sync_lock(self, *, action: str, dry_run: bool, limit: int | None, types: list[str] | None, embed_changed: bool, embedding_limit: int | None) -> dict | None:
+        cls = self.__class__
+        if cls._sync_lock.locked():
+            return {
+                "ok": False,
+                "status": "busy",
+                "message": "roco sync is already running",
+                "running": cls.get_running_meta(),
+                "pack_key": self.pack_key,
+                "data_root": self.resolved_data_root(),
+            }
+        await cls._sync_lock.acquire()
+        cls._running_meta = {
+            "action": action,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "dry_run": bool(dry_run),
+            "limit": int(limit) if isinstance(limit, int) else None,
+            "types": list(types or []),
+            "embed_changed": bool(embed_changed),
+            "embedding_limit": int(embedding_limit) if isinstance(embedding_limit, int) else None,
+        }
+        return None
+
+    @classmethod
+    def _release_sync_lock(cls) -> None:
+        cls._running_meta = {}
+        if cls._sync_lock.locked():
+            cls._sync_lock.release()
 
     async def sync_from_records_jsonl(
         self,
@@ -364,53 +403,66 @@ class RocoWorldSyncService:
         types: list[str] | None = None,
         base_url: str = "https://wiki.biligame.com/rocom",
     ) -> dict:
-        source_res = await sync_roco_source_to_records(
-            paths=self.paths,
-            base_url=base_url,
-            timeout=20.0,
+        busy = await self._acquire_sync_lock(
+            action="sync_source",
+            dry_run=dry_run,
             limit=limit,
             types=types,
-            download_images=False,
+            embed_changed=embed_changed,
+            embedding_limit=embedding_limit,
         )
-        if not source_res.get("ok"):
+        if busy:
+            return busy
+        try:
+            source_res = await sync_roco_source_to_records(
+                paths=self.paths,
+                base_url=base_url,
+                timeout=20.0,
+                limit=limit,
+                types=types,
+                download_images=False,
+            )
+            if not source_res.get("ok"):
+                return {
+                    "ok": False,
+                    "status": source_res.get("status", "source_failed"),
+                    "source": source_res,
+                    "pack_key": self.pack_key,
+                    "data_root": self.resolved_data_root(),
+                }
+            asset_res = await self.fix_missing_assets_from_records(dry_run=dry_run)
+            if dry_run:
+                embedding_res = {"enabled": False, "dry_run": True, "changed_chunk_count": 0, "would_embed_count": 0, "embedded_count": 0, "skipped_unchanged_count": 0, "failed_count": 0, "failed": []}
+                if embed_changed:
+                    embedding_res = await self.sync_from_records_jsonl(config, dry_run=True, embed_changed=True, embedding_limit=embedding_limit)
+                    embedding_res = embedding_res.get("embedding", embedding_res)
+                return {
+                    "ok": True,
+                    "dry_run": True,
+                    "pack_key": self.pack_key,
+                    "records_count": int(source_res.get("records_count", 0) or 0),
+                    "valid_entity_assets": int(source_res.get("valid_entity_assets", 0) or 0),
+                    "rejected_generic_assets": int(source_res.get("rejected_generic_assets", 0) or 0),
+                    "unresolved_image_refs": int(source_res.get("unresolved_image_refs", 0) or 0),
+                    "entity_img_candidates_checked": int(source_res.get("entity_img_candidates_checked", 0) or 0),
+                    "entity_img_candidates_accepted": int(source_res.get("entity_img_candidates_accepted", 0) or 0),
+                    "entity_img_candidates_rejected": int(source_res.get("entity_img_candidates_rejected", 0) or 0),
+                    "records_file": str(self.paths.records_file),
+                    "asset": asset_res,
+                    "embedding": embedding_res,
+                    "data_root": self.resolved_data_root(),
+                }
+            import_res = await self.sync_from_records_jsonl(config, dry_run=False, embed_changed=embed_changed, embedding_limit=embedding_limit)
             return {
-                "ok": False,
-                "status": source_res.get("status", "source_failed"),
-                "source": source_res,
-                "pack_key": self.pack_key,
-                "data_root": self.resolved_data_root(),
-            }
-        asset_res = await self.fix_missing_assets_from_records(dry_run=dry_run)
-        if dry_run:
-            embedding_res = {"enabled": False, "dry_run": True, "changed_chunk_count": 0, "would_embed_count": 0, "embedded_count": 0, "skipped_unchanged_count": 0, "failed_count": 0, "failed": []}
-            if embed_changed:
-                embedding_res = await self.sync_from_records_jsonl(config, dry_run=True, embed_changed=True, embedding_limit=embedding_limit)
-                embedding_res = embedding_res.get("embedding", embedding_res)
-            return {
-                "ok": True,
-                "dry_run": True,
+                "ok": bool(import_res.get("ok", False)),
+                "dry_run": False,
                 "pack_key": self.pack_key,
                 "records_count": int(source_res.get("records_count", 0) or 0),
-                "valid_entity_assets": int(source_res.get("valid_entity_assets", 0) or 0),
-                "rejected_generic_assets": int(source_res.get("rejected_generic_assets", 0) or 0),
-                "unresolved_image_refs": int(source_res.get("unresolved_image_refs", 0) or 0),
-                "entity_img_candidates_checked": int(source_res.get("entity_img_candidates_checked", 0) or 0),
-                "entity_img_candidates_accepted": int(source_res.get("entity_img_candidates_accepted", 0) or 0),
-                "entity_img_candidates_rejected": int(source_res.get("entity_img_candidates_rejected", 0) or 0),
                 "records_file": str(self.paths.records_file),
                 "asset": asset_res,
-                "embedding": embedding_res,
+                "import": import_res,
+                "embedding": import_res.get("embedding", {}),
                 "data_root": self.resolved_data_root(),
             }
-        import_res = await self.sync_from_records_jsonl(config, dry_run=False, embed_changed=embed_changed, embedding_limit=embedding_limit)
-        return {
-            "ok": bool(import_res.get("ok", False)),
-            "dry_run": False,
-            "pack_key": self.pack_key,
-            "records_count": int(source_res.get("records_count", 0) or 0),
-            "records_file": str(self.paths.records_file),
-            "asset": asset_res,
-            "import": import_res,
-            "embedding": import_res.get("embedding", {}),
-            "data_root": self.resolved_data_root(),
-        }
+        finally:
+            self.__class__._release_sync_lock()
