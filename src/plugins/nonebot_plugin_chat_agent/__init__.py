@@ -106,7 +106,10 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         return
 
     superusers = {str(x) for x in getattr(driver.config, "superusers", set())}
-    cmd_reply = await handle_knowledge_command(config, event, prompt, superusers)
+    async def _notify_start(msg: str) -> None:
+        await chat_agent.send(_with_group_at(event, is_group, msg))
+
+    cmd_reply = await handle_knowledge_command(config, event, prompt, superusers, notify_start=_notify_start)
     if cmd_reply is not None:
         await chat_agent.finish(_with_group_at(event, is_group, cmd_reply))
         return

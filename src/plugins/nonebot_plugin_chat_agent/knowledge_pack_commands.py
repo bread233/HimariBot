@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+
 try:
     from .knowledge_pack_manager import knowledge_pack_manager
 except Exception:  # pragma: no cover
@@ -31,7 +33,13 @@ def _is_admin_or_superuser(event, superusers: set[str]) -> bool:
     return False
 
 
-async def handle_knowledge_command(config, event, prompt: str, superusers: set[str]) -> str | None:
+async def handle_knowledge_command(
+    config,
+    event,
+    prompt: str,
+    superusers: set[str],
+    notify_start: Callable[[str], Awaitable[None]] | None = None,
+) -> str | None:
     cmd = parse_knowledge_command(prompt)
     if not cmd:
         return None
@@ -56,6 +64,14 @@ async def handle_knowledge_command(config, event, prompt: str, superusers: set[s
         pack_key = str(cmd.get("pack_key") or "").strip()
         if not pack_key:
             return "pack not found"
+        st = await knowledge_pack_manager.get_status(config, pack_key)
+        if not st.get("ok"):
+            return "pack not found"
+        if knowledge_pack_manager._get_lock(pack_key).locked():
+            return "\u6b63\u5728\u66f4\u65b0"
+        start_tip = "\u5f00\u59cb\u66f4\u65b0\u6d1b\u514b\u738b\u56fd\u4e16\u754c\u6570\u636e\uff0c\u8bf7\u7a0d\u7b49\u2026\u2026"
+        if notify_start is not None:
+            await notify_start(start_tip)
         res = await knowledge_pack_manager.update_pack(config, pack_key, requested_by=str(getattr(event, "user_id", "")))
         if res.get("status") == "running":
             return "\u6b63\u5728\u66f4\u65b0"

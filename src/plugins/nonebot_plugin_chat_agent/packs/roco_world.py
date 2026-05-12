@@ -20,7 +20,7 @@ async def update_roco_world_pack(config, manifest: dict) -> dict:
     pack_dir = manifest_path.parent if manifest_path else Path("data/nonebot_chat_agent/knowledge_packs") / pack_key
     source_dir = pack_dir / "source"
     assets_dir = pack_dir / "assets"
-    online_source_url = str(manifest.get("online_source_url") or "").strip()
+    online_source_url = str(manifest.get("online_source_url") or "https://wiki.biligame.com/rocom").strip()
     src = Path(source_ref).expanduser() if source_ref else source_dir
 
     def _has_local_source(path: Path) -> bool:
