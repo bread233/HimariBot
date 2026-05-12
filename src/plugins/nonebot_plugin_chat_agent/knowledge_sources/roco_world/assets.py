@@ -58,6 +58,12 @@ class RocoWorldAssetManager:
             "skipped_existing": False,
             "invalid_url": False,
             "error": "",
+            "url": str(image_url or ""),
+            "http_status": 0,
+            "content_type": "",
+            "redirected": False,
+            "final_url": "",
+            "exception_type": "",
         }
         target = self._resolve_local(target_relative_path)
         if target.exists() and target.is_file() and target.stat().st_size > 0:
@@ -74,13 +80,29 @@ class RocoWorldAssetManager:
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             safe_url = "https:" + image_url if image_url.startswith("//") else image_url
-            req = urllib.request.Request(safe_url, headers={"User-Agent": "Mozilla/5.0 HimariBot/knowledge-source"})
+            out["final_url"] = safe_url
+            req = urllib.request.Request(
+                safe_url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 HimariBot/knowledge-source",
+                    "Referer": "https://wiki.biligame.com/rocom",
+                },
+            )
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 code = int(getattr(resp, "status", 200) or 200)
+                out["http_status"] = code
+                out["final_url"] = str(getattr(resp, "url", safe_url) or safe_url)
+                out["redirected"] = out["final_url"] != safe_url
+                out["content_type"] = str(getattr(resp, "headers", {}).get("Content-Type", "") or "")
                 if code != 200:
                     out["error"] = f"http_{code}"
                     return out
                 raw = resp.read()
+            ctype = out["content_type"].lower()
+            is_image = ctype.startswith("image/")
+            if not is_image and not any((out["final_url"] or safe_url).lower().endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp", ".gif"]):
+                out["error"] = "invalid_content_type"
+                return out
             if not raw:
                 out["error"] = "empty_body"
                 return out
@@ -91,6 +113,7 @@ class RocoWorldAssetManager:
             out["downloaded"] = True
             return out
         except Exception as e:
+            out["exception_type"] = type(e).__name__
             out["error"] = f"{type(e).__name__}:{str(e)[:120]}"
             return out
 
@@ -123,7 +146,18 @@ class RocoWorldAssetManager:
                     image_path=str(a.get("path") or image_path or ""),
                 )
                 targets.append(target_rel)
-                res = self.ensure_asset(str(a.get("url") or image_url or ""), target_rel, dry_run=dry_run)
+                candidates = list(meta.get("image_url_candidates") or [])
+                if not candidates:
+                    candidates = [{"url": str(a.get("url") or image_url or ""), "source": "single"}]
+                res = {"ok": False, "error": "no_candidate"}
+                used_url = ""
+                for c in candidates:
+                    used_url = str(c.get("url") or "").strip()
+                    if not used_url:
+                        continue
+                    res = self.ensure_asset(used_url, target_rel, dry_run=dry_run)
+                    if res.get("ok") or res.get("skipped_existing"):
+                        break
                 if res["skipped_existing"]:
                     existing_count += 1
                 elif res["invalid_url"]:
@@ -135,12 +169,23 @@ class RocoWorldAssetManager:
                     missing_count += 1
                 else:
                     missing_count += 1
-                    failed.append({"target": target_rel, "error": res.get("error", "")})
+                    failed.append(
+                        {
+                            "target": target_rel,
+                            "error": res.get("error", ""),
+                            "url": res.get("url", used_url),
+                            "http_status": res.get("http_status", 0),
+                            "content_type": res.get("content_type", ""),
+                            "redirected": res.get("redirected", False),
+                            "final_url": res.get("final_url", ""),
+                            "exception_type": res.get("exception_type", ""),
+                        }
+                    )
                 fixed_assets.append(
                     {
                         "kind": "image",
                         "path": target_rel if (res["ok"] or res["skipped_existing"]) else "",
-                        "url": str(a.get("url") or image_url or ""),
+                        "url": str(res.get("url") or used_url or a.get("url") or image_url or ""),
                         "role": str(a.get("role") or "primary"),
                     }
                 )
@@ -167,4 +212,3 @@ class RocoWorldAssetManager:
             "target_paths": targets,
             "records": updated_records,
         }
-
