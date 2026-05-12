@@ -47,8 +47,24 @@ async def update_roco_world_pack(config, manifest: dict, force_online_refresh: b
                     assets_dir=tmp_dir / "assets",
                     request_delay=float(manifest.get("request_delay", 0.5) or 0.5),
                     timeout=float(manifest.get("timeout", 20.0) or 20.0),
-                    max_pages=int(manifest.get("max_pages", 200) or 200),
+                    max_pages=int(
+                        manifest.get(
+                            "max_pages",
+                            sum(
+                                int((manifest.get("crawler_limits") or {}).get(k, d) or d)
+                                for k, d in (
+                                    ("pet", 3000),
+                                    ("skill", 3000),
+                                    ("item", 3000),
+                                    ("egg", 1000),
+                                    ("furniture", 1000),
+                                )
+                            ),
+                        )
+                        or 0
+                    ),
                     download_images=bool(manifest.get("download_images", True)),
+                    crawler_limits=(manifest.get("crawler_limits") or None),
                 )
             )
         except Exception as e:
