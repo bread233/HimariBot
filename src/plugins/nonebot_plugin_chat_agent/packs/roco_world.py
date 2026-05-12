@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 import json
 import shutil
@@ -11,6 +12,8 @@ try:
 except Exception:  # pragma: no cover
     from roco_world_importer import import_roco_world_pack
     from roco_world_crawler import RocoCrawlerConfig, crawl_roco_world_source
+
+logger = logging.getLogger("nonebot_plugin_chat_agent.roco_world")
 
 
 async def update_roco_world_pack(config, manifest: dict, force_online_refresh: bool = False) -> dict:
@@ -34,6 +37,14 @@ async def update_roco_world_pack(config, manifest: dict, force_online_refresh: b
         return False
 
     should_try_online = bool(online_source_url) and (force_online_refresh or not _has_local_source(src))
+    logger.info(
+        "roco update start pack=%s should_try_online=%s force_online_refresh=%s source=%s online_source_url=%s",
+        pack_key,
+        should_try_online,
+        force_online_refresh,
+        str(src),
+        bool(online_source_url),
+    )
 
     if should_try_online:
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -68,6 +79,7 @@ async def update_roco_world_pack(config, manifest: dict, force_online_refresh: b
                 )
             )
         except Exception as e:
+            logger.warning("roco crawler failed pack=%s error=%s", pack_key, str(e)[:300])
             return {
                 "ok": False,
                 "status": "crawl_failed",
@@ -76,6 +88,12 @@ async def update_roco_world_pack(config, manifest: dict, force_online_refresh: b
                 "update_source": "online_crawler",
             }
         if not crawl_res.get("ok"):
+            logger.warning(
+                "roco crawler result failed pack=%s errors=%s category_counts=%r",
+                pack_key,
+                len(crawl_res.get("errors", []) or []),
+                crawl_res.get("category_counts", {}),
+            )
             return {
                 "ok": False,
                 "status": "crawl_failed",
@@ -111,6 +129,13 @@ async def update_roco_world_pack(config, manifest: dict, force_online_refresh: b
             shutil.copytree(tmp_assets, assets_dir)
         src = source_dir
         update_source = "online_crawler"
+        logger.info(
+            "roco crawler done pack=%s records=%s assets=%s category_counts=%r",
+            pack_key,
+            crawl_res.get("records_count", 0),
+            crawl_res.get("assets_count", 0),
+            crawl_res.get("category_counts", {}),
+        )
     elif not _has_local_source(src):
         if not online_source_url:
             return {
@@ -129,6 +154,7 @@ async def update_roco_world_pack(config, manifest: dict, force_online_refresh: b
         title=str(manifest.get("title") or "roco world wiki"),
         description=str(manifest.get("description") or "roco world wiki local knowledge pack"),
     )
+    logger.info("roco import start pack=%s source=%s", pack_key, str(src))
     out["status"] = "ok" if out.get("ok") else "failed"
     out["records_count"] = int(out.get("imported_docs", 0) or 0)
     out["assets_count"] = int(out.get("imported_assets", 0) or 0)
@@ -141,6 +167,26 @@ async def update_roco_world_pack(config, manifest: dict, force_online_refresh: b
     out["item_count"] = int(cc.get("item", 0) or 0)
     out["egg_count"] = int(cc.get("egg", 0) or 0)
     out["furniture_count"] = int(cc.get("furniture", 0) or 0)
+    logger.info(
+        "roco import done pack=%s docs=%s chunks=%s assets=%s",
+        pack_key,
+        out.get("imported_docs", 0),
+        out.get("imported_chunks", 0),
+        out.get("imported_assets", 0),
+    )
+    logger.info(
+        "roco update done pack=%s update_source=%s records_count=%s category_counts=%r",
+        pack_key,
+        out.get("update_source", ""),
+        out.get("records_count", 0),
+        {
+            "pet": out.get("pet_count", 0),
+            "skill": out.get("skill_count", 0),
+            "item": out.get("item_count", 0),
+            "egg": out.get("egg_count", 0),
+            "furniture": out.get("furniture_count", 0),
+        },
+    )
     if manifest_path and manifest_path.exists():
         try:
             old = json.loads(manifest_path.read_text(encoding="utf-8-sig", errors="replace").lstrip("\ufeff") or "{}")

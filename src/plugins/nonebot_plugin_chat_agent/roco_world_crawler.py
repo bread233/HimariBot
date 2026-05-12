@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger("nonebot_plugin_chat_agent.roco_world")
 
 
 @dataclass
@@ -103,19 +107,47 @@ def _call_with_retry(fn, *, retries: int = 3, delay_base: float = 3.0, errors: l
             last_err = e
             code = int(getattr(e, "code", 0) or 0)
             if attempt < retries and code == 567:
+                logger.warning(
+                    "roco crawler retry label=%s attempt=%s error=HTTP %s wait=%s",
+                    label,
+                    attempt,
+                    code,
+                    max(0.0, float(delay_base)) * attempt,
+                )
                 time.sleep(max(0.0, float(delay_base)) * attempt)
                 continue
             if attempt < retries:
+                logger.warning(
+                    "roco crawler retry label=%s attempt=%s error=%s wait=%s",
+                    label,
+                    attempt,
+                    type(e).__name__,
+                    max(0.0, float(delay_base)) * 0.5 * attempt,
+                )
                 time.sleep(max(0.0, float(delay_base)) * 0.5 * attempt)
                 continue
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             last_err = e
             if attempt < retries:
+                logger.warning(
+                    "roco crawler retry label=%s attempt=%s error=%s wait=%s",
+                    label,
+                    attempt,
+                    type(e).__name__,
+                    max(0.0, float(delay_base)) * 0.5 * attempt,
+                )
                 time.sleep(max(0.0, float(delay_base)) * 0.5 * attempt)
                 continue
         except Exception as e:
             last_err = e
             if attempt < retries:
+                logger.warning(
+                    "roco crawler retry label=%s attempt=%s error=%s wait=%s",
+                    label,
+                    attempt,
+                    type(e).__name__,
+                    max(0.0, float(delay_base)) * 0.5 * attempt,
+                )
                 time.sleep(max(0.0, float(delay_base)) * 0.5 * attempt)
                 continue
     if errors is not None:
@@ -134,6 +166,7 @@ def fetch_category_members(api_url: str, category: str, timeout: float, limit: i
     f = fetch_json or fetch_json_with_retry
     out: list[dict] = []
     cont = ""
+    batch = 0
     while len(out) < max(1, int(limit or 1)):
         params = {
             "action": "query",
@@ -145,7 +178,16 @@ def fetch_category_members(api_url: str, category: str, timeout: float, limit: i
         if cont:
             params["cmcontinue"] = cont
         data = f(api_url, params, retries=3, timeout=timeout)
-        out.extend(((data.get("query") or {}).get("categorymembers") or []))
+        members = ((data.get("query") or {}).get("categorymembers") or [])
+        batch += 1
+        logger.info(
+            "roco crawler category page category=%s batch=%s batch_count=%s continue=%r",
+            category,
+            batch,
+            len(members),
+            cont,
+        )
+        out.extend(members)
         cont = str(((data.get("continue") or {}).get("cmcontinue") or "")).strip()
         if not cont:
             break
@@ -214,6 +256,7 @@ def crawl_roco_world_source(config: RocoCrawlerConfig, fetch_json=None, fetch_te
     assets_root = Path(config.assets_dir)
     source_dir.mkdir(parents=True, exist_ok=True)
     assets_root.mkdir(parents=True, exist_ok=True)
+    partial_path = source_dir / "crawl_state.partial.json"
 
     limits = dict(config.crawler_limits or {})
     cat_defs = [
@@ -238,6 +281,33 @@ def crawl_roco_world_source(config: RocoCrawlerConfig, fetch_json=None, fetch_te
     records: list[dict] = []
     visited_titles: set[str] = set()
     category_counts = {"pet": 0, "skill": 0, "item": 0, "egg": 0, "furniture": 0}
+    progress_interval = 20
+
+    def _write_partial(status: str, current_category: str = "", last_error: str = "") -> None:
+        try:
+            payload = {
+                "ok": status == "ok",
+                "status": status,
+                "base_url": base_url,
+                "records_count": len(records),
+                "assets_count": assets_count,
+                "category_counts": category_counts,
+                "current_category": current_category,
+                "errors_count": len(errors),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "last_error": str(last_error or "")[:300],
+            }
+            partial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    logger.info(
+        "roco crawler start base_url=%s limits=%r output_dir=%s",
+        base_url,
+        {k: v for _, k, v in cat_defs},
+        str(out_dir),
+    )
+    _write_partial("running")
 
     total_limit = int(config.max_pages or 0)
     if total_limit <= 0:
@@ -246,6 +316,12 @@ def crawl_roco_world_source(config: RocoCrawlerConfig, fetch_json=None, fetch_te
     for cmtitle, category, per_limit in cat_defs:
         if len(records) >= total_limit:
             break
+        logger.info(
+            "roco crawler category start category=%s wiki_category=%s limit=%s",
+            category,
+            cmtitle,
+            per_limit,
+        )
         try:
             members = _call_with_retry(
                 lambda: fetch_category_members(api_url, cmtitle, config.timeout, per_limit, fetch_json=fetch_json),
@@ -255,7 +331,14 @@ def crawl_roco_world_source(config: RocoCrawlerConfig, fetch_json=None, fetch_te
                 label=f"category:{cmtitle}:",
             )
         except Exception as e:
+            logger.warning(
+                "roco crawler category failed category=%s wiki_category=%s error=%s",
+                category,
+                cmtitle,
+                str(e)[:300],
+            )
             errors.append(f"category_failed:{cmtitle}:{type(e).__name__}:{str(e)[:200]}")
+            _write_partial("running", category, str(e))
             continue
         for m in members:
             if category_counts.get(category, 0) >= per_limit:
@@ -298,15 +381,51 @@ def crawl_roco_world_source(config: RocoCrawlerConfig, fetch_json=None, fetch_te
                         if download_image(image_url, local, timeout=config.timeout):
                             rec["image_path"] = str(local).replace("\\", "/")
                             assets_count += 1
+                            logger.info(
+                                "roco crawler image downloaded category=%s path=%s",
+                                category,
+                                rec["image_path"],
+                            )
                     except Exception as ie:
+                        logger.warning(
+                            "roco crawler image failed category=%s url=%s error=%s",
+                            category,
+                            image_url,
+                            str(ie)[:200],
+                        )
                         errors.append(f"image_failed:{title}:{type(ie).__name__}:{str(ie)[:120]}")
                 records.append(rec)
                 if category in category_counts:
                     category_counts[category] = int(category_counts.get(category, 0) or 0) + 1
+                if category_counts.get(category, 0) % progress_interval == 0:
+                    logger.info(
+                        "roco crawler progress category=%s category_count=%s total_records=%s assets=%s errors=%s",
+                        category,
+                        category_counts.get(category, 0),
+                        len(records),
+                        assets_count,
+                        len(errors),
+                    )
+                    _write_partial("running", category)
                 time.sleep(max(0.0, float(config.request_delay or 0.0)))
             except Exception as e:
+                logger.warning(
+                    "roco crawler page failed category=%s title=%s error=%s",
+                    category,
+                    title,
+                    str(e)[:300],
+                )
                 errors.append(f"page_failed:{title}:{type(e).__name__}:{str(e)[:200]}")
                 skipped += 1
+                _write_partial("running", category, str(e))
+        logger.info(
+            "roco crawler category done category=%s count=%s total_records=%s errors=%s",
+            category,
+            category_counts.get(category, 0),
+            len(records),
+            len(errors),
+        )
+        _write_partial("running", category)
 
     records_path = source_dir / "records.jsonl"
     with records_path.open("w", encoding="utf-8") as wf:
@@ -315,6 +434,7 @@ def crawl_roco_world_source(config: RocoCrawlerConfig, fetch_json=None, fetch_te
 
     state = {
         "ok": True,
+        "status": "ok",
         "base_url": base_url,
         "records_count": len(records),
         "assets_count": assets_count,
@@ -323,6 +443,14 @@ def crawl_roco_world_source(config: RocoCrawlerConfig, fetch_json=None, fetch_te
         "errors": errors[:200],
     }
     (source_dir / "crawl_state.json").write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_partial("ok")
+    logger.info(
+        "roco crawler done records=%s assets=%s category_counts=%r errors=%s",
+        len(records),
+        assets_count,
+        category_counts,
+        len(errors),
+    )
     return {
         "ok": True,
         "records_count": len(records),
