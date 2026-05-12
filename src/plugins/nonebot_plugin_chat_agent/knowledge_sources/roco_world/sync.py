@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .normalizer import normalize_record_to_entry
 from .paths import RocoWorldPaths, get_roco_world_paths
+from .assets import RocoWorldAssetManager
 
 try:
     from ...storage import upsert_knowledge_pack, upsert_knowledge_documents, upsert_knowledge_chunks
@@ -146,3 +147,30 @@ class RocoWorldSyncService:
             "imported_chunks": imported_chunks,
             "data_root": self.resolved_data_root(),
         }
+
+    async def fix_missing_assets_from_records(self, dry_run: bool = True) -> dict:
+        self.paths.source_dir.mkdir(parents=True, exist_ok=True)
+        self.paths.assets_dir.mkdir(parents=True, exist_ok=True)
+        if not self.paths.records_file.exists():
+            return {
+                "ok": False,
+                "dry_run": bool(dry_run),
+                "status": "missing_records",
+                "records_file": str(self.paths.records_file),
+                "data_root": self.resolved_data_root(),
+            }
+        rows: list[dict] = []
+        with self.paths.records_file.open("r", encoding="utf-8-sig", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except Exception:
+                    continue
+        mgr = RocoWorldAssetManager(self.paths)
+        out = mgr.fix_missing_assets(rows, dry_run=dry_run)
+        out["pack_key"] = self.pack_key
+        out["data_root"] = self.resolved_data_root()
+        return out
