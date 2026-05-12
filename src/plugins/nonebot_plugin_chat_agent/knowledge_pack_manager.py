@@ -127,7 +127,8 @@ class KnowledgePackManager:
                 return {"ok": False, "status": "not_found", "pack_key": pack_key}
             if pack_key != "roco_world":
                 return {"ok": False, "status": "updater_not_implemented", "pack_key": pack_key}
-            res = await update_roco_world_pack(config, item)
+            force_online_refresh = str(requested_by or "").strip().lower() != "startup"
+            res = await update_roco_world_pack(config, item, force_online_refresh=force_online_refresh)
             now = datetime.now(timezone.utc).isoformat()
             res["last_update_at"] = now
             if res.get("ok"):
