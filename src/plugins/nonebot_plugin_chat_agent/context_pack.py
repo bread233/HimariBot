@@ -503,7 +503,8 @@ def _is_community_strategy_question(prompt: str, intent_kind: str | None) -> boo
         "\u89d2\u8272", "\u600e\u4e48\u9009", "\u9009\u4ec0\u4e48", "\u600e\u4e48\u9009\u62e9",
         "\u6b66\u5668", "\u88c5\u5907", "\u6d41\u6d3e", "\u52a0\u70b9", "\u6280\u80fd",
         "\u9635\u5bb9", "\u914d\u961f", "\u51fa\u88c5", "\u79d1\u6280\u7ebf", "\u5766\u514b\u7ebf",
-        "\u804c\u4e1a\u9009\u62e9",
+        "\u804c\u4e1a\u9009\u62e9", "\u5165\u5751", "\u5165\u5751\u6307\u5357", "\u65b0\u624b\u6307\u5357",
+        "\u517b\u6210", "\u63a8\u8350\u8def\u7ebf", "beginner guide", "guide", "tips", "walkthrough", "starter guide",
     ]
     return any(t in text for t in strategy_markers)
 
@@ -1440,6 +1441,50 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "tool_notes": "\n".join(tool_notes).strip(),
             }
     if _is_community_strategy_question(prompt, intent.kind):
+        try:
+            strategy_krows = await search_knowledge_pack(config, prompt, pack_key=None, limit=3, min_score=0.25)
+        except Exception as e:
+            strategy_krows = []
+            tool_notes.append(f"knowledge_pack_error={str(e)[:120]}")
+        if strategy_krows:
+            lines = ["本地知识库："]
+            ktitles = []
+            for i, r in enumerate(strategy_krows[:3], 1):
+                title = str(r.get("title", "") or "")
+                section = str(r.get("section", "") or "")
+                content = str(r.get("content", "") or "").strip()
+                if len(content) > 260:
+                    content = content[:260] + "..."
+                source = str(r.get("source_path", "") or r.get("source_url", "") or "")
+                score = float(r.get("score", 0.0) or 0.0)
+                ktitles.append(title[:50])
+                lines.append(f"【{r.get('pack_key','')} / {title} / {section}】score={score:.3f}")
+                lines.append(content)
+                lines.append(f"来源：{source}")
+            kctx = "\n".join(lines).strip()
+            tool_notes.append("knowledge_pack=1")
+            tool_notes.append(f"knowledge_pack_result_count={len(strategy_krows)}")
+            tool_notes.append(f"knowledge_pack_top_titles={' || '.join(ktitles)}")
+            tool_notes.append(f"knowledge_pack_context_chars={len(kctx)}")
+            tool_notes.append("evidence_gate_source=knowledge")
+            return {
+                "direct_reply": kctx,
+                "should_call_llm": False,
+                "web_used": False,
+                "time_context": time_context,
+                "profile_context": profile_context,
+                "group_context": group_context,
+                "retrieval_context": "",
+                "style_context": "",
+                "summary_retrieval_context": "",
+                "history_context": "",
+                "memory_context": "",
+                "web_context": "",
+                "lightweight_mode": "",
+                "lightweight_prompt": "",
+                "knowledge_evidence_context": kctx,
+                "tool_notes": "\n".join(tool_notes).strip(),
+            }
         strategy_query = str(prompt or "").strip()
         strategy_queries = _build_web_strategy_queries(strategy_query)
         distilled_context, strategy_count, used_queries, top_titles, strategy_error = await _build_web_strategy_distilled_context_multi(
