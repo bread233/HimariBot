@@ -85,6 +85,7 @@ async def handle_knowledge_command(
             return "update failed"
         return (
             f"ok pack={res.get('pack_key','')} docs={res.get('imported_docs',0)} "
-            f"chunks={res.get('imported_chunks',0)} assets={res.get('imported_assets',0)}"
+            f"chunks={res.get('imported_chunks',0)} assets={res.get('imported_assets',0)} "
+            f"update_source={res.get('update_source','')} records_count={res.get('records_count',0)}"
         )
     return None
