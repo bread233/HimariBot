@@ -331,6 +331,28 @@ def _init_storage_sync(db_path: Path) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_agent_knowledge_chunks_doc_key ON chat_agent_knowledge_chunks(doc_key)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_agent_knowledge_chunks_content_hash ON chat_agent_knowledge_chunks(content_hash)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_agent_knowledge_chunks_pack_doc_chunk ON chat_agent_knowledge_chunks(pack_key, doc_key, chunk_index)")
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_agent_embedding_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cache_key TEXT NOT NULL UNIQUE,
+                source TEXT NOT NULL,
+                content TEXT NOT NULL,
+                embedding_json TEXT NOT NULL,
+                model TEXT NOT NULL,
+                dim INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_chat_agent_embedding_cache_source
+            ON chat_agent_embedding_cache(source)
+            """
+        )
         conn.commit()
     finally:
         conn.close()
