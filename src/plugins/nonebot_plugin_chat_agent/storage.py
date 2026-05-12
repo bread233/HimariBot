@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -251,9 +252,387 @@ def _init_storage_sync(db_path: Path) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_agent_knowledge_packs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pack_key TEXT NOT NULL UNIQUE,
+                title TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                source_type TEXT NOT NULL DEFAULT '',
+                source_ref TEXT NOT NULL DEFAULT '',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_agent_knowledge_documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pack_key TEXT NOT NULL,
+                doc_key TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                source_path TEXT NOT NULL DEFAULT '',
+                source_url TEXT NOT NULL DEFAULT '',
+                source_type TEXT NOT NULL DEFAULT '',
+                content_hash TEXT NOT NULL DEFAULT '',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(pack_key, doc_key)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_agent_knowledge_chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pack_key TEXT NOT NULL,
+                doc_key TEXT NOT NULL,
+                chunk_key TEXT NOT NULL UNIQUE,
+                title TEXT NOT NULL DEFAULT '',
+                section TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                content_hash TEXT NOT NULL DEFAULT '',
+                source_path TEXT NOT NULL DEFAULT '',
+                source_url TEXT NOT NULL DEFAULT '',
+                chunk_index INTEGER NOT NULL DEFAULT 0,
+                token_count INTEGER NOT NULL DEFAULT 0,
+                embedding_json TEXT NOT NULL DEFAULT '',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_agent_knowledge_assets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pack_key TEXT NOT NULL,
+                asset_key TEXT NOT NULL UNIQUE,
+                asset_type TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL DEFAULT '',
+                local_path TEXT NOT NULL DEFAULT '',
+                source_url TEXT NOT NULL DEFAULT '',
+                content_hash TEXT NOT NULL DEFAULT '',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_agent_knowledge_chunks_pack_enabled ON chat_agent_knowledge_chunks(pack_key, enabled)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_agent_knowledge_chunks_doc_key ON chat_agent_knowledge_chunks(doc_key)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_agent_knowledge_chunks_content_hash ON chat_agent_knowledge_chunks(content_hash)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_agent_knowledge_chunks_pack_doc_chunk ON chat_agent_knowledge_chunks(pack_key, doc_key, chunk_index)")
         conn.commit()
     finally:
         conn.close()
+
+
+def _is_valid_pack_key(pack_key: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z0-9_.-]+", str(pack_key or "").strip()))
+
+
+def _clamp_limit(limit: int, lo: int = 1, hi: int = 100) -> int:
+    try:
+        v = int(limit)
+    except Exception:
+        v = lo
+    return max(lo, min(hi, v))
+
+
+def _upsert_knowledge_pack_sync(db_path: Path, row: dict) -> None:
+    _init_storage_sync(db_path)
+    pack_key = str(row.get("pack_key", "")).strip()
+    if not _is_valid_pack_key(pack_key):
+        raise ValueError("invalid pack_key")
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO chat_agent_knowledge_packs (
+                pack_key, title, description, source_type, source_ref, enabled, metadata_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(pack_key) DO UPDATE SET
+                title=excluded.title,
+                description=excluded.description,
+                source_type=excluded.source_type,
+                source_ref=excluded.source_ref,
+                enabled=excluded.enabled,
+                metadata_json=excluded.metadata_json,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (
+                pack_key,
+                str(row.get("title", "") or "")[:120],
+                str(row.get("description", "") or "")[:300],
+                str(row.get("source_type", "") or "")[:64],
+                str(row.get("source_ref", "") or "")[:300],
+                int(row.get("enabled", 1) or 1),
+                str(row.get("metadata_json", "{}") or "{}"),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _upsert_knowledge_documents_sync(db_path: Path, rows: list[dict]) -> int:
+    _init_storage_sync(db_path)
+    conn = sqlite3.connect(db_path)
+    count = 0
+    try:
+        for row in rows or []:
+            pack_key = str(row.get("pack_key", "")).strip()
+            doc_key = str(row.get("doc_key", "")).strip()
+            if not (_is_valid_pack_key(pack_key) and doc_key):
+                continue
+            conn.execute(
+                """
+                INSERT INTO chat_agent_knowledge_documents (
+                    pack_key, doc_key, title, source_path, source_url, source_type, content_hash, metadata_json, enabled, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(pack_key, doc_key) DO UPDATE SET
+                    title=excluded.title,
+                    source_path=excluded.source_path,
+                    source_url=excluded.source_url,
+                    source_type=excluded.source_type,
+                    content_hash=excluded.content_hash,
+                    metadata_json=excluded.metadata_json,
+                    enabled=excluded.enabled,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    pack_key, doc_key,
+                    str(row.get("title", "") or "")[:200],
+                    str(row.get("source_path", "") or ""),
+                    str(row.get("source_url", "") or ""),
+                    str(row.get("source_type", "") or "")[:64],
+                    str(row.get("content_hash", "") or "")[:64],
+                    str(row.get("metadata_json", "{}") or "{}"),
+                    int(row.get("enabled", 1) or 1),
+                ),
+            )
+            count += 1
+        conn.commit()
+        return count
+    finally:
+        conn.close()
+
+
+def _upsert_knowledge_chunks_sync(db_path: Path, rows: list[dict]) -> int:
+    _init_storage_sync(db_path)
+    conn = sqlite3.connect(db_path)
+    count = 0
+    try:
+        for row in rows or []:
+            pack_key = str(row.get("pack_key", "")).strip()
+            doc_key = str(row.get("doc_key", "")).strip()
+            chunk_key = str(row.get("chunk_key", "")).strip()
+            if not (_is_valid_pack_key(pack_key) and doc_key and chunk_key):
+                continue
+            conn.execute(
+                """
+                INSERT INTO chat_agent_knowledge_chunks (
+                    pack_key, doc_key, chunk_key, title, section, content, content_hash, source_path, source_url,
+                    chunk_index, token_count, embedding_json, metadata_json, enabled, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(chunk_key) DO UPDATE SET
+                    pack_key=excluded.pack_key,
+                    doc_key=excluded.doc_key,
+                    title=excluded.title,
+                    section=excluded.section,
+                    content=excluded.content,
+                    content_hash=excluded.content_hash,
+                    source_path=excluded.source_path,
+                    source_url=excluded.source_url,
+                    chunk_index=excluded.chunk_index,
+                    token_count=excluded.token_count,
+                    embedding_json=excluded.embedding_json,
+                    metadata_json=excluded.metadata_json,
+                    enabled=excluded.enabled,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    pack_key, doc_key, chunk_key,
+                    str(row.get("title", "") or "")[:200],
+                    str(row.get("section", "") or "")[:200],
+                    str(row.get("content", "") or ""),
+                    str(row.get("content_hash", "") or "")[:64],
+                    str(row.get("source_path", "") or ""),
+                    str(row.get("source_url", "") or ""),
+                    int(row.get("chunk_index", 0) or 0),
+                    int(row.get("token_count", 0) or 0),
+                    str(row.get("embedding_json", "") or ""),
+                    str(row.get("metadata_json", "{}") or "{}"),
+                    int(row.get("enabled", 1) or 1),
+                ),
+            )
+            count += 1
+        conn.commit()
+        return count
+    finally:
+        conn.close()
+
+
+def _list_knowledge_packs_sync(db_path: Path, include_disabled: bool = False) -> list[dict]:
+    if not db_path.exists():
+        return []
+    conn = sqlite3.connect(db_path)
+    try:
+        q = "SELECT pack_key,title,description,source_type,source_ref,enabled,metadata_json,created_at,updated_at FROM chat_agent_knowledge_packs"
+        if not include_disabled:
+            q += " WHERE enabled=1"
+        q += " ORDER BY pack_key ASC"
+        rows = conn.execute(q).fetchall()
+        return [
+            {
+                "pack_key": r[0], "title": r[1], "description": r[2], "source_type": r[3], "source_ref": r[4],
+                "enabled": r[5], "metadata_json": r[6], "created_at": r[7], "updated_at": r[8],
+            }
+            for r in rows
+        ]
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        conn.close()
+
+
+def _list_knowledge_chunks_sync(db_path: Path, pack_key: str | None = None, limit: int = 100) -> list[dict]:
+    if not db_path.exists():
+        return []
+    limit = _clamp_limit(limit, 1, 500)
+    conn = sqlite3.connect(db_path)
+    try:
+        params: list = []
+        q = """
+            SELECT c.pack_key,c.doc_key,c.chunk_key,c.title,c.section,c.content,c.content_hash,c.source_path,c.source_url,c.chunk_index,c.token_count,c.embedding_json,c.metadata_json,c.enabled,
+                   d.enabled as doc_enabled,p.enabled as pack_enabled
+            FROM chat_agent_knowledge_chunks c
+            LEFT JOIN chat_agent_knowledge_documents d ON c.pack_key=d.pack_key AND c.doc_key=d.doc_key
+            LEFT JOIN chat_agent_knowledge_packs p ON c.pack_key=p.pack_key
+        """
+        if pack_key:
+            q += " WHERE c.pack_key=?"
+            params.append(pack_key)
+        q += " ORDER BY c.pack_key, c.doc_key, c.chunk_index LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(q, tuple(params)).fetchall()
+        return [
+            {
+                "pack_key": r[0], "doc_key": r[1], "chunk_key": r[2], "title": r[3], "section": r[4], "content": r[5],
+                "content_hash": r[6], "source_path": r[7], "source_url": r[8], "chunk_index": r[9], "token_count": r[10],
+                "embedding_json": r[11], "metadata_json": r[12], "enabled": r[13], "doc_enabled": r[14], "pack_enabled": r[15],
+            }
+            for r in rows
+        ]
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        conn.close()
+
+
+def _search_knowledge_chunks_lexical_sync(db_path: Path, query: str, pack_key: str | None = None, limit: int = 5, min_score: float = 0.25) -> list[dict]:
+    rows = _list_knowledge_chunks_sync(db_path, pack_key=pack_key, limit=1000)
+    q_raw = str(query or "").lower().strip()
+    if not q_raw:
+        return []
+    q_no_stop = re.sub(r"(是什么|怎么|如何|一下|吗|呢|么|嘛)", "", q_raw)
+    q = re.sub(r"[^\w\u4e00-\u9fff]+", "", q_no_stop)
+    zh_groups = [x for x in re.findall(r"[\u4e00-\u9fff]{2,}", q) if len(x) >= 2]
+    zh_ngrams = set()
+    for g in zh_groups:
+        for n in range(2, 7):
+            if len(g) < n:
+                continue
+            for i in range(0, len(g) - n + 1):
+                zh_ngrams.add(g[i : i + n])
+    en_tokens = [x for x in re.findall(r"[a-z0-9]{2,}", q_no_stop) if len(x) >= 2]
+    all_tokens = list(dict.fromkeys([*sorted(zh_ngrams, key=len, reverse=True), *en_tokens]))
+    if not all_tokens:
+        return []
+    out = []
+    for r in rows:
+        if int(r.get("enabled", 0) or 0) != 1:
+            continue
+        if int(r.get("doc_enabled", 0) or 0) != 1:
+            continue
+        if int(r.get("pack_enabled", 0) or 0) != 1:
+            continue
+        title = str(r.get("title", "") or "").lower().lstrip("\ufeff")
+        section = str(r.get("section", "") or "").lower().lstrip("\ufeff")
+        content = str(r.get("content", "") or "").lower().lstrip("\ufeff")
+        title_norm = re.sub(r"[^\w\u4e00-\u9fff]+", "", title)
+        section_norm = re.sub(r"[^\w\u4e00-\u9fff]+", "", section)
+        content_norm = re.sub(r"[^\w\u4e00-\u9fff]+", "", content)
+        blob = " ".join([title, section, content])
+        blob_norm = "".join([title_norm, section_norm, content_norm])
+        score = 0.0
+        for t in all_tokens[:30]:
+            is_zh = bool(re.search(r"[\u4e00-\u9fff]", t))
+            if t in title_norm or t in section_norm:
+                score += 0.16 if is_zh else 0.10
+            elif t in content_norm:
+                score += 0.10 if is_zh else 0.10
+        if q in blob or q in blob_norm:
+            score += 0.15
+        if score >= float(min_score):
+            x = dict(r)
+            x["score"] = round(score, 4)
+            out.append(x)
+    out.sort(key=lambda x: (float(x.get("score", 0.0)), -int(x.get("token_count", 0) or 0)), reverse=True)
+    return out[: _clamp_limit(limit, 1, 20)]
+
+
+def _delete_knowledge_pack_sync(db_path: Path, pack_key: str) -> int:
+    _init_storage_sync(db_path)
+    if not _is_valid_pack_key(pack_key):
+        raise ValueError("invalid pack_key")
+    conn = sqlite3.connect(db_path)
+    try:
+        cur1 = conn.execute("DELETE FROM chat_agent_knowledge_chunks WHERE pack_key=?", (pack_key,))
+        cur2 = conn.execute("DELETE FROM chat_agent_knowledge_documents WHERE pack_key=?", (pack_key,))
+        cur3 = conn.execute("DELETE FROM chat_agent_knowledge_assets WHERE pack_key=?", (pack_key,))
+        cur4 = conn.execute("DELETE FROM chat_agent_knowledge_packs WHERE pack_key=?", (pack_key,))
+        conn.commit()
+        return int(cur1.rowcount or 0) + int(cur2.rowcount or 0) + int(cur3.rowcount or 0) + int(cur4.rowcount or 0)
+    finally:
+        conn.close()
+
+
+async def upsert_knowledge_pack(config, row: dict) -> None:
+    await asyncio.to_thread(_upsert_knowledge_pack_sync, config.chat_agent_db_path, row)
+
+
+async def upsert_knowledge_documents(config, rows: list[dict]) -> int:
+    return await asyncio.to_thread(_upsert_knowledge_documents_sync, config.chat_agent_db_path, rows)
+
+
+async def upsert_knowledge_chunks(config, rows: list[dict]) -> int:
+    return await asyncio.to_thread(_upsert_knowledge_chunks_sync, config.chat_agent_db_path, rows)
+
+
+async def list_knowledge_packs(config, include_disabled: bool = False) -> list[dict]:
+    return await asyncio.to_thread(_list_knowledge_packs_sync, config.chat_agent_db_path, include_disabled)
+
+
+async def list_knowledge_chunks(config, pack_key: str | None = None, limit: int = 100) -> list[dict]:
+    return await asyncio.to_thread(_list_knowledge_chunks_sync, config.chat_agent_db_path, pack_key, limit)
+
+
+async def search_knowledge_chunks_lexical(config, query: str, pack_key: str | None = None, limit: int = 5, min_score: float = 0.25) -> list[dict]:
+    return await asyncio.to_thread(_search_knowledge_chunks_lexical_sync, config.chat_agent_db_path, query, pack_key, limit, min_score)
+
+
+async def delete_knowledge_pack(config, pack_key: str) -> int:
+    return await asyncio.to_thread(_delete_knowledge_pack_sync, config.chat_agent_db_path, pack_key)
 
 
 def _save_message_sync(db_path: Path, session_info: dict, role: str, content: str) -> None:
