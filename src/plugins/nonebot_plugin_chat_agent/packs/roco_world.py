@@ -67,6 +67,11 @@ async def update_roco_world_pack(config, manifest: dict, force_online_refresh: b
                 "message": str(crawl_res.get("errors", ["crawl failed"])[0])[:300],
                 "update_source": "online_crawler",
                 "crawl_errors_count": len(crawl_res.get("errors", []) or []),
+                "pet_count": int(((crawl_res.get("category_counts") or {}).get("pet", 0) or 0)),
+                "skill_count": int(((crawl_res.get("category_counts") or {}).get("skill", 0) or 0)),
+                "item_count": int(((crawl_res.get("category_counts") or {}).get("item", 0) or 0)),
+                "egg_count": int(((crawl_res.get("category_counts") or {}).get("egg", 0) or 0)),
+                "furniture_count": int(((crawl_res.get("category_counts") or {}).get("furniture", 0) or 0)),
             }
         source_dir.mkdir(parents=True, exist_ok=True)
         assets_dir.mkdir(parents=True, exist_ok=True)
@@ -114,6 +119,12 @@ async def update_roco_world_pack(config, manifest: dict, force_online_refresh: b
     out["update_source"] = update_source
     out["source_ref"] = str(src)
     out["crawl_errors_count"] = int(len(out.get("errors", []) or []))
+    cc = (crawl_res.get("category_counts") or {}) if should_try_online else {}
+    out["pet_count"] = int(cc.get("pet", 0) or 0)
+    out["skill_count"] = int(cc.get("skill", 0) or 0)
+    out["item_count"] = int(cc.get("item", 0) or 0)
+    out["egg_count"] = int(cc.get("egg", 0) or 0)
+    out["furniture_count"] = int(cc.get("furniture", 0) or 0)
     if manifest_path and manifest_path.exists():
         try:
             old = json.loads(manifest_path.read_text(encoding="utf-8-sig", errors="replace").lstrip("\ufeff") or "{}")
@@ -128,6 +139,11 @@ async def update_roco_world_pack(config, manifest: dict, force_online_refresh: b
             old["records_count"] = int(out.get("records_count", 0) or 0)
             old["assets_count"] = int(out.get("assets_count", 0) or 0)
             old["source_ref"] = str(src)
+            old["pet_count"] = int(out.get("pet_count", 0) or 0)
+            old["skill_count"] = int(out.get("skill_count", 0) or 0)
+            old["item_count"] = int(out.get("item_count", 0) or 0)
+            old["egg_count"] = int(out.get("egg_count", 0) or 0)
+            old["furniture_count"] = int(out.get("furniture_count", 0) or 0)
             manifest_path.write_text(json.dumps(old, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception:
             pass
