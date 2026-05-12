@@ -52,6 +52,7 @@ class KnowledgePackManager:
             "blocking_startup": bool(data.get("blocking_startup", False)),
             "source_type": str(data.get("source_type", "") or ""),
             "source_ref": str(data.get("source_ref", "") or ""),
+            "online_source_url": str(data.get("online_source_url", "") or ""),
             "last_update_at": str(data.get("last_update_at", "") or ""),
             "last_import_at": str(data.get("last_import_at", "") or ""),
             "status": str(data.get("status", "unknown") or "unknown"),
@@ -72,8 +73,10 @@ class KnowledgePackManager:
             src = Path(item["source_ref"]).expanduser() if item.get("source_ref") else Path("")
             if pack_key == "roco_world":
                 has_source = bool(src and src.exists())
-                if not has_source:
+                if not has_source and not item.get("online_source_url"):
                     item["status"] = "missing_resources"
+                elif not has_source and item.get("online_source_url"):
+                    item["status"] = "missing_local_source"
             found[pack_key] = item
         self._manifests = found
         return dict(found)
@@ -89,9 +92,9 @@ class KnowledgePackManager:
                 logger.info(f"knowledge_pack updater not implemented pack={pack_key}")
                 continue
             if item.get("blocking_startup", False):
-                await self.update_pack(config, pack_key, requested_by="startup")
+                await self.update_pack(config, pack_key, requested_by="startup", manifest_override=item)
             else:
-                asyncio.create_task(self.update_pack(config, pack_key, requested_by="startup"))
+                asyncio.create_task(self.update_pack(config, pack_key, requested_by="startup", manifest_override=item))
 
     async def get_status(self, config, pack_key: str | None = None) -> dict:
         manifests = await self.scan_manifests()
@@ -111,13 +114,15 @@ class KnowledgePackManager:
             items.append(y)
         return {"ok": True, "items": items}
 
-    async def update_pack(self, config, pack_key: str, requested_by: str = "") -> dict:
+    async def update_pack(self, config, pack_key: str, requested_by: str = "", manifest_override: dict | None = None) -> dict:
         lock = self._get_lock(pack_key)
         if lock.locked():
             return {"ok": False, "status": "running", "pack_key": pack_key}
         async with lock:
-            manifests = await self.scan_manifests()
-            item = manifests.get(pack_key)
+            item = dict(manifest_override or {})
+            if not item:
+                manifests = await self.scan_manifests()
+                item = manifests.get(pack_key) or {}
             if not item:
                 return {"ok": False, "status": "not_found", "pack_key": pack_key}
             if pack_key != "roco_world":
