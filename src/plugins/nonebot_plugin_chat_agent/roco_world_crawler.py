@@ -10,6 +10,17 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from .roco_world_image_downloader import (
+    download_image as safe_download_image,
+    download_item_image_sync,
+    download_pet_sprite_sync,
+    download_skill_icon_sync,
+    extract_egg_image_url,
+    extract_furniture_image_url,
+    extract_item_image_url,
+    extract_pet_sprite_url,
+    extract_skill_icon_url,
+)
 
 logger = logging.getLogger("nonebot_plugin_chat_agent.roco_world")
 
@@ -223,6 +234,20 @@ def _strip_markup(raw: str) -> str:
     return text.strip()
 
 
+def _extract_image_url_for_category(category: str, text: str, title: str, page_url: str) -> str:
+    if category == "pet":
+        return str(extract_pet_sprite_url(text, title, page_url) or "")
+    if category == "skill":
+        return str(extract_skill_icon_url(text, title, page_url) or "")
+    if category == "item":
+        return str(extract_item_image_url(text, title, page_url) or "")
+    if category == "egg":
+        return str(extract_egg_image_url(text, title, page_url) or "")
+    if category == "furniture":
+        return str(extract_furniture_image_url(text, title, page_url) or "")
+    return ""
+
+
 def _fetch_page_content(base_url: str, title: str, timeout: float, fetch_text=None) -> tuple[str, str]:
     page_url = urllib.parse.urljoin(base_url.rstrip("/") + "/", urllib.parse.quote(title))
     raw_url = urllib.parse.urljoin(base_url.rstrip("/") + "/", f"index.php?title={urllib.parse.quote(title)}&action=raw")
@@ -358,7 +383,7 @@ def crawl_roco_world_source(config: RocoCrawlerConfig, fetch_json=None, fetch_te
                     label=f"page:{title}:",
                 )
                 plain = _strip_markup(raw_or_html)[:8000]
-                image_url = _extract_image_url(raw_or_html, page_url)
+                image_url = _extract_image_url_for_category(category, raw_or_html, title, page_url)
                 rec = {
                     "category": category,
                     "name": title,
@@ -374,18 +399,19 @@ def crawl_roco_world_source(config: RocoCrawlerConfig, fetch_json=None, fetch_te
                 }
                 if image_url and config.download_images:
                     try:
-                        u = urllib.parse.urlparse(image_url)
-                        ext = Path(u.path).suffix or ".png"
-                        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", title)[:80] or f"p{len(records)+1}"
-                        local = assets_root / "images" / category / f"{safe_name}{ext}"
-                        if download_image(image_url, local, timeout=config.timeout):
-                            rec["image_path"] = str(local).replace("\\", "/")
+                        local_path = ""
+                        if category == "pet":
+                            local_path = str(download_pet_sprite_sync(image_url, assets_root, title, config.timeout) or "")
+                        elif category == "skill":
+                            local_path = str(download_skill_icon_sync(image_url, assets_root, title, config.timeout) or "")
+                        elif category in {"item", "egg", "furniture"}:
+                            local_path = str(download_item_image_sync(image_url, assets_root, title, config.timeout) or "")
+                        else:
+                            local_path = str(safe_download_image(image_url, assets_root / "images" / "other", title, config.timeout) or "")
+                        if local_path:
+                            rec["image_path"] = local_path.replace("\\", "/")
                             assets_count += 1
-                            logger.info(
-                                "roco crawler image downloaded category=%s path=%s",
-                                category,
-                                rec["image_path"],
-                            )
+                            logger.info("roco crawler image downloaded category=%s path=%s", category, rec["image_path"])
                     except Exception as ie:
                         logger.warning(
                             "roco crawler image failed category=%s url=%s error=%s",
