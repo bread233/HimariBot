@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 from pathlib import Path
 import json
 import shutil
@@ -51,33 +52,32 @@ async def update_roco_world_pack(config, manifest: dict, force_online_refresh: b
         tmp_dir = pack_dir / "tmp" / f"update_{ts}"
         tmp_dir.mkdir(parents=True, exist_ok=True)
         try:
-            crawl_res = crawl_roco_world_source(
-                RocoCrawlerConfig(
-                    base_url=online_source_url,
-                    output_dir=tmp_dir,
-                    assets_dir=tmp_dir / "assets",
-                    request_delay=float(manifest.get("request_delay", 0.5) or 0.5),
-                    timeout=float(manifest.get("timeout", 20.0) or 20.0),
-                    max_pages=int(
-                        manifest.get(
-                            "max_pages",
-                            sum(
-                                int((manifest.get("crawler_limits") or {}).get(k, d) or d)
-                                for k, d in (
-                                    ("pet", 3000),
-                                    ("skill", 3000),
-                                    ("item", 3000),
-                                    ("egg", 1000),
-                                    ("furniture", 1000),
-                                )
-                            ),
-                        )
-                        or 0
-                    ),
-                    download_images=bool(manifest.get("download_images", True)),
-                    crawler_limits=(manifest.get("crawler_limits") or None),
-                )
+            crawl_cfg = RocoCrawlerConfig(
+                base_url=online_source_url,
+                output_dir=tmp_dir,
+                assets_dir=tmp_dir / "assets",
+                request_delay=float(manifest.get("request_delay", 0.5) or 0.5),
+                timeout=float(manifest.get("timeout", 20.0) or 20.0),
+                max_pages=int(
+                    manifest.get(
+                        "max_pages",
+                        sum(
+                            int((manifest.get("crawler_limits") or {}).get(k, d) or d)
+                            for k, d in (
+                                ("pet", 3000),
+                                ("skill", 3000),
+                                ("item", 3000),
+                                ("egg", 1000),
+                                ("furniture", 1000),
+                            )
+                        ),
+                    )
+                    or 0
+                ),
+                download_images=bool(manifest.get("download_images", True)),
+                crawler_limits=(manifest.get("crawler_limits") or None),
             )
+            crawl_res = await asyncio.to_thread(crawl_roco_world_source, crawl_cfg)
         except Exception as e:
             logger.warning("roco crawler failed pack=%s error=%s", pack_key, str(e)[:300])
             return {

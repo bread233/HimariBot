@@ -29,6 +29,8 @@ class KnowledgePackManager:
     def __init__(self) -> None:
         self._locks: dict[str, asyncio.Lock] = {}
         self._manifests: dict[str, dict] = {}
+        self._background_tasks: set[asyncio.Task] = set()
+        self._running: set[str] = set()
 
     def _manifest_root(self) -> Path:
         return Path("data/nonebot_chat_agent/knowledge_packs")
@@ -37,6 +39,9 @@ class KnowledgePackManager:
         if pack_key not in self._locks:
             self._locks[pack_key] = asyncio.Lock()
         return self._locks[pack_key]
+
+    def is_running(self, pack_key: str) -> bool:
+        return pack_key in self._running or self._get_lock(pack_key).locked()
 
     def _load_manifest(self, manifest_path: Path) -> dict:
         text = manifest_path.read_text(encoding="utf-8-sig", errors="replace").lstrip("\ufeff")
@@ -104,12 +109,22 @@ class KnowledgePackManager:
                 return {"ok": False, "error": "pack_not_found"}
             chunks = await list_knowledge_chunks(config, pack_key=pack_key, limit=500)
             x = dict(x)
+            if self.is_running(pack_key):
+                x["status"] = "running"
+                x["running"] = 1
+            else:
+                x["running"] = 0
             x["chunks"] = len(chunks)
             return {"ok": True, "item": x}
         items = []
         for key, x in sorted(manifests.items(), key=lambda kv: kv[0]):
             chunks = await list_knowledge_chunks(config, pack_key=key, limit=500)
             y = dict(x)
+            if self.is_running(key):
+                y["status"] = "running"
+                y["running"] = 1
+            else:
+                y["running"] = 0
             y["chunks"] = len(chunks)
             items.append(y)
         return {"ok": True, "items": items}
@@ -134,6 +149,47 @@ class KnowledgePackManager:
             if res.get("ok"):
                 res["last_import_at"] = now
             return res
+
+    async def start_background_update(
+        self,
+        config,
+        pack_key: str,
+        requested_by: str = "",
+        manifest_override: dict | None = None,
+        notify_done=None,
+    ) -> dict:
+        lock = self._get_lock(pack_key)
+        if self.is_running(pack_key):
+            return {"ok": False, "status": "running", "pack_key": pack_key}
+        self._running.add(pack_key)
+
+        async def _runner() -> None:
+            try:
+                res = await self.update_pack(
+                    config,
+                    pack_key,
+                    requested_by=requested_by,
+                    manifest_override=manifest_override,
+                )
+                if notify_done is not None:
+                    await notify_done(res)
+            except Exception as e:
+                if notify_done is not None:
+                    await notify_done(
+                        {
+                            "ok": False,
+                            "status": "failed",
+                            "pack_key": pack_key,
+                            "message": f"{type(e).__name__}:{str(e)[:200]}",
+                        }
+                    )
+            finally:
+                self._running.discard(pack_key)
+
+        task = asyncio.create_task(_runner())
+        self._background_tasks.add(task)
+        task.add_done_callback(lambda t: self._background_tasks.discard(t))
+        return {"ok": True, "status": "started", "pack_key": pack_key}
 
 
 knowledge_pack_manager = KnowledgePackManager()
