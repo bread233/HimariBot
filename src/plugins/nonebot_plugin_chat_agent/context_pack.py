@@ -802,10 +802,45 @@ def _fallback_lexical_relevance(query: str, title: str, snippet: str, url: str) 
     return min(0.55, max(0.0, score))
 
 
-async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, int, list[str], float, str]:
+def _is_evaluative_question(prompt: str) -> bool:
+    text = str(prompt or "")
+    if not text:
+        return False
+    markers = [
+        "\u597d\u73a9\u5417", "\u503c\u5f97\u73a9\u5417", "\u503c\u5f97\u5165\u624b\u5417", "\u63a8\u8350\u5417",
+        "\u8bc4\u4ef7\u4e00\u4e0b", "\u70b9\u8bc4\u4e00\u4e0b", "\u8868\u73b0\u600e\u4e48\u6837",
+        "\u6700\u8fd1\u8868\u73b0", "\u600e\u4e48\u6837", "\u503c\u4e0d\u503c\u5f97",
+    ]
+    return any(x in text for x in markers)
+
+
+def _has_evaluation_signal_from_results(rows: list[dict]) -> tuple[bool, list[str]]:
+    strong_markers = [
+        "\u8bc4\u6d4b", "\u8bc4\u5206", "\u4f18\u70b9", "\u7f3a\u70b9", "\u753b\u9762", "\u624b\u611f", "\u6027\u80fd", "\u4f18\u5316",
+        "\u5267\u60c5", "\u73a9\u6cd5", "\u73a9\u5bb6\u8bc4\u4ef7", "\u53e3\u7891", "\u5dee\u8bc4", "\u597d\u8bc4",
+        "\u8912\u8d2c\u4e0d\u4e00", "\u5b9e\u673a", "\u53d1\u552e", "\u8bd5\u73a9",
+        "steam", "ign", "metacritic", "opencritic", "review", "gameplay", "performance",
+    ]
+    hits: list[str] = []
+    for row in rows or []:
+        text = " ".join(
+            [
+                str(row.get("title", "") or ""),
+                str(row.get("snippet", "") or ""),
+                str(row.get("domain", "") or ""),
+                str(row.get("url", "") or ""),
+            ]
+        ).lower()
+        for marker in strong_markers:
+            if marker in text and marker not in hits:
+                hits.append(marker)
+    return (len(hits) > 0), hits
+
+
+async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, int, list[str], float, str, bool, list[str]]:
     q = str(query or "").strip()
     if not q:
-        return "", 0, [], 0.0, "empty_query"
+        return "", 0, [], 0.0, "empty_query", False, []
     logger.info(f"web_evidence search start query={q[:120]!r}")
     try:
         results = await build_web_results(config, q, intent_kind="evidence_route")
@@ -813,7 +848,7 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
     except Exception as e:
         msg = str(e)[:200]
         logger.warning(f"web_evidence query error query={q[:120]!r} message={msg!r}")
-        return "", 0, [], 0.0, msg
+        return "", 0, [], 0.0, msg, False, []
     merged: list[dict] = []
     top_score = 0.0
     today = date.today()
@@ -870,7 +905,7 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
             break
     if not merged:
         logger.info("web_evidence distilled result_count=0 top_titles=[] chars=0")
-        return "", 0, [], top_score, ""
+        return "", 0, [], top_score, "", False, []
     merged.sort(
         key=lambda x: (
             float(x.get("final_score", 0.0)),
@@ -888,10 +923,10 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
     top_score = max((float(x.get("score", 0.0)) for x in merged), default=0.0)
     if not merged:
         logger.info("web_evidence distilled all_results_filtered_out=1")
-        return "", 0, [], top_score, ""
+        return "", 0, [], top_score, "", False, []
     if freshness_sensitive and not any((x.get("recency_days") is not None and int(x.get("recency_days")) <= 365) for x in merged[:5]):
         logger.info("web_evidence freshness_sensitive_no_recent=1")
-        return "", len(merged[:5]), [str(x.get("title", ""))[:60] for x in merged[:3]], top_score, "no_recent_within_1y"
+        return "", len(merged[:5]), [str(x.get("title", ""))[:60] for x in merged[:3]], top_score, "no_recent_within_1y", False, []
     notes = [
         "\u5df2\u67e5\u5230\u7684\u7f51\u9875\u8d44\u6599\uff1a",
         "- \u8fd9\u662f\u4e00\u4e2a\u9700\u8981\u4f9d\u636e\u8d44\u6599\u7684\u95ee\u9898\u3002",
@@ -933,7 +968,8 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
     logger.info(
         f"web_evidence distilled result_count={len(merged[:5])} top_titles={top_titles[:3]!r} chars={len(out)} top_score={top_score:.3f}"
     )
-    return out, len(merged[:5]), [t for t in top_titles[:3] if t], top_score, ""
+    eval_hit, eval_hits = _has_evaluation_signal_from_results(merged[:5])
+    return out, len(merged[:5]), [t for t in top_titles[:3] if t], top_score, "", eval_hit, eval_hits[:8]
 
 
 def _is_freshness_sensitive_prompt(prompt: str) -> bool:
@@ -1458,7 +1494,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         )
         if not local_ok:
             evidence_query = str(web_query or prompt or "").strip()
-            evidence_context, evidence_count, evidence_titles, top_score, evidence_error = await _build_generic_web_evidence_context(
+            evidence_context, evidence_count, evidence_titles, top_score, evidence_error, evaluation_signal_hit, evaluation_signal_terms = await _build_generic_web_evidence_context(
                 config, evidence_query
             )
             tool_notes.append("web_evidence=1")
@@ -1469,19 +1505,26 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             tool_notes.append(f"web_evidence_top_score={top_score:.3f}")
             if evidence_error:
                 tool_notes.append(f"web_evidence_error={evidence_error[:120]}")
+            tool_notes.append(f"web_evidence_eval_signals={','.join(evaluation_signal_terms)}")
             snippet_lens = [len(x.strip()) for x in re.findall(r"\u6458\u8981\uff1a(.*)", evidence_context)]
             max_snippet_len = max(snippet_lens) if snippet_lens else 0
             has_official = "\u662f\u5426\u5b98\u65b9\uff1a\u662f" in evidence_context
-            weak_hits = sum(1 for w in ["\u8bc4\u4ef7", "\u4e24\u6781\u5206\u5316", "\u503c\u5f97\u5165\u624b"] if w in evidence_context)
+            weak_hits = sum(1 for w in ["\u4e24\u6781\u5206\u5316", "\u503c\u5f97\u5165\u624b"] if w in evidence_context)
             weak_single = evidence_count == 1 and max_snippet_len < 80 and weak_hits > 0
+            is_eval = _is_evaluative_question(prompt)
+            has_eval_signal = evaluation_signal_hit
+            eval_short_ok = is_eval and has_eval_signal and evidence_count == 1 and max_snippet_len >= 30
             evidence_sufficient = (
                 evidence_count >= 2
                 or (evidence_count == 1 and max_snippet_len >= 80)
                 or (evidence_count == 1 and has_official and top_score >= 0.35)
+                or eval_short_ok
             ) and not weak_single
             tool_notes.append(f"web_evidence_filtered_count={evidence_count}")
             tool_notes.append(f"web_evidence_sufficient={1 if evidence_sufficient else 0}")
-            if weak_single:
+            if eval_short_ok:
+                tool_notes.append("web_evidence_reason=evaluation_signal")
+            elif weak_single:
                 tool_notes.append("web_evidence_reason=weak_single_snippet")
             elif evidence_count == 0:
                 tool_notes.append("web_evidence_reason=no_filtered_results")
@@ -1489,8 +1532,20 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 tool_notes.append("web_evidence_reason=single_short_snippet")
             else:
                 tool_notes.append("web_evidence_reason=sufficient")
+            eval_weak_words = sum(1 for w in ["\u503c\u5f97\u5165\u624b", "\u4e24\u6781\u5206\u5316", "\u63a8\u8350", "\u6307\u5357", "\u699c\u5355"] if w in evidence_context)
+            eval_answerable = True
+            eval_reason = "non_evaluative"
+            if is_eval:
+                cond_multi = evidence_count >= 2 and has_eval_signal
+                cond_single_long = evidence_count == 1 and max_snippet_len >= 80 and has_eval_signal
+                cond_single_official = evidence_count == 1 and has_official and top_score >= 0.35 and has_eval_signal
+                cond_signal_short = evidence_count == 1 and max_snippet_len >= 30 and has_eval_signal
+                eval_answerable = (cond_multi or cond_single_long or cond_single_official or cond_signal_short) and not (eval_weak_words > 0 and not has_eval_signal)
+                eval_reason = "evaluation_signal" if eval_answerable else "weak_evaluation_evidence"
+            tool_notes.append(f"web_evidence_answerable={1 if eval_answerable else 0}")
+            tool_notes.append(f"web_evidence_answerability_reason={eval_reason}")
             min_score = 0.35
-            if evidence_context and top_score >= min_score and evidence_sufficient:
+            if evidence_context and top_score >= min_score and evidence_sufficient and eval_answerable:
                 tool_notes.append("evidence_gate_source=web")
                 return {
                     "direct_reply": None,
@@ -1516,6 +1571,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             tool_notes.append("evidence_gate_source=none")
             tool_notes.append("evidence_gate_no_answer=1")
             unknown_reply = "\u6682\u65f6\u6ca1\u67e5\u5230\u53ef\u9760\u8d44\u6599\uff0c\u6211\u4e0d\u77e5\u9053\u3002"
+            if is_eval and not eval_answerable:
+                unknown_reply = "\u6682\u65f6\u6ca1\u67e5\u5230\u8db3\u591f\u53ef\u9760\u7684\u8bc4\u4ef7\u8d44\u6599\uff0c\u6211\u4e0d\u77e5\u9053\u3002"
             if evidence_error == "no_recent_within_1y":
                 unknown_reply = "\u6682\u65f6\u6ca1\u67e5\u5230\u4e00\u5e74\u5185\u7684\u53ef\u9760\u8d44\u6599\uff0c\u6211\u4e0d\u77e5\u9053\u3002"
             return {
