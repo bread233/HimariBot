@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from shlex import split as shlex_split
 
 try:
     from .knowledge_pack_manager import knowledge_pack_manager
@@ -10,7 +11,70 @@ except Exception:  # pragma: no cover
     from knowledge_sources.roco_world.sync import RocoWorldSyncService
 
 
-def parse_knowledge_command(prompt: str) -> dict | None:
+def _is_group_at_bot(event) -> bool:
+    try:
+        fn = getattr(event, "is_tome", None)
+        if callable(fn):
+            return bool(fn())
+    except Exception:
+        pass
+    return bool(getattr(event, "to_me", False))
+
+
+def _parse_roco_sync_args(arg_text: str) -> dict:
+    out = {
+        "cmd": "roco_sync",
+        "dry_run": False,
+        "embed_changed": False,
+        "limit": None,
+        "embedding_limit": None,
+        "types": None,
+    }
+    unknown: list[str] = []
+    tokens = shlex_split(arg_text or "")
+    i = 0
+    while i < len(tokens):
+        t = str(tokens[i] or "").strip()
+        if t == "--dry-run":
+            out["dry_run"] = True
+            i += 1
+            continue
+        if t == "--embed":
+            out["embed_changed"] = True
+            i += 1
+            continue
+        if t == "--all-confirm":
+            out["all_confirm"] = True
+            i += 1
+            continue
+        if t in {"--limit", "--embedding-limit", "--types"}:
+            if i + 1 >= len(tokens):
+                return {"cmd": "roco_error", "error": f"missing value for {t}"}
+            v = str(tokens[i + 1] or "").strip()
+            if t == "--types":
+                vals = [x.strip().lower() for x in v.split(",") if x.strip()]
+                out["types"] = vals or None
+            else:
+                try:
+                    n = int(v)
+                except Exception:
+                    return {"cmd": "roco_error", "error": f"invalid integer for {t}: {v}"}
+                if n <= 0:
+                    return {"cmd": "roco_error", "error": f"invalid value for {t}: {v}"}
+                if t == "--limit":
+                    out["limit"] = n
+                else:
+                    out["embedding_limit"] = n
+            i += 2
+            continue
+        unknown.append(t)
+        i += 1
+    if unknown:
+        return {"cmd": "roco_error", "error": "unknown argument(s): " + " ".join(unknown)}
+    return out
+
+
+def parse_knowledge_command(prompt: str, event=None) -> dict | None:
     text = str(prompt or "").strip()
     if not text:
         return None
@@ -22,10 +86,28 @@ def parse_knowledge_command(prompt: str) -> dict | None:
         return {"cmd": "update", "pack_key": text.split(" ", 1)[1].strip()}
     if text == "\u6d1b\u514b\u738b\u56fd\u4e16\u754c\u6570\u636e\u66f4\u65b0":
         return {"cmd": "update", "pack_key": "roco_world"}
-    if text == "/chatagent_knowledge roco status":
-        return {"cmd": "roco_status"}
-    if text == "/chatagent_knowledge roco sync --dry-run":
-        return {"cmd": "roco_sync", "dry_run": True}
+
+    if text.startswith("/chatagent_knowledge "):
+        body = text[len("/chatagent_knowledge ") :].strip()
+        if body == "roco status":
+            return {"cmd": "roco_status"}
+        if body.startswith("roco sync"):
+            args = body[len("roco sync") :].strip()
+            return _parse_roco_sync_args(args)
+        return None
+
+    # Chinese alias (group requires @bot)
+    if text.startswith("\u6d1b\u514b\u738b\u56fd"):
+        is_group = bool(getattr(event, "group_id", None))
+        if is_group and not _is_group_at_bot(event):
+            return None
+        body = text[len("\u6d1b\u514b\u738b\u56fd") :].strip()
+        if body == "status":
+            return {"cmd": "roco_status"}
+        if body.startswith("\u66f4\u65b0"):
+            args = body[len("\u66f4\u65b0") :].strip()
+            return _parse_roco_sync_args(args)
+        return {"cmd": "roco_error", "error": "usage: 洛克王国 status | 洛克王国 更新 [--dry-run] [--limit N] [--embed] [--embedding-limit N] [--types a,b]"}
     return None
 
 
@@ -47,9 +129,11 @@ async def handle_knowledge_command(
     notify_start: Callable[[str], Awaitable[None]] | None = None,
     notify_done: Callable[[str], Awaitable[None]] | None = None,
 ) -> str | None:
-    cmd = parse_knowledge_command(prompt)
+    cmd = parse_knowledge_command(prompt, event=event)
     if not cmd:
         return None
+    if cmd["cmd"] == "roco_error":
+        return str(cmd.get("error") or "invalid roco command")
     if cmd["cmd"] == "status":
         st = await knowledge_pack_manager.get_status(config, cmd.get("pack_key") or None)
         if not st.get("ok"):
@@ -122,12 +206,38 @@ async def handle_knowledge_command(
     if cmd["cmd"] == "roco_sync":
         if not _is_admin_or_superuser(event, superusers):
             return "\u4ec5\u8d85\u7ea7\u7ba1\u7406\u5458\u6216\u7fa4\u7ba1\u7406\u5458\u53ef\u6267\u884c roco \u540c\u6b65\u3002"
+        dry_run = bool(cmd.get("dry_run", False))
+        limit = cmd.get("limit")
+        all_confirm = bool(cmd.get("all_confirm", False))
+        if (not dry_run) and (limit is None) and (not all_confirm):
+            return (
+                "拒绝裸 sync：请使用 --dry-run 或 --limit N；"
+                "全量执行需显式 --all-confirm。"
+            )
         svc = RocoWorldSyncService()
-        out = await svc.sync_from_records_jsonl(config, dry_run=bool(cmd.get("dry_run", False)))
+        out = await svc.sync_source(
+            config,
+            dry_run=dry_run,
+            limit=limit,
+            types=cmd.get("types"),
+            embed_changed=bool(cmd.get("embed_changed", False)),
+            embedding_limit=cmd.get("embedding_limit"),
+        )
+        emb = dict(out.get("embedding") or {})
+        asset = dict(out.get("asset") or {})
+        imp = dict(out.get("import") or {})
+        failed_cnt = len(asset.get("failed") or [])
         return (
             f"roco sync | ok={int(bool(out.get('ok', False)))} | dry_run={int(bool(out.get('dry_run', False)))} "
-            f"| status={out.get('status','')} | records_count={out.get('records_count',0)} "
+            f"| records_count={out.get('records_count',0)} "
+            f"| asset.total_assets={asset.get('total_assets',0)} | asset.existing_count={asset.get('existing_count',0)} "
+            f"| asset.missing_count={asset.get('missing_count',0)} | asset.would_download_count={asset.get('would_download_count',0)} "
+            f"| asset.failed_count={failed_cnt} "
+            f"| import.imported_docs={imp.get('imported_docs',0)} | import.imported_chunks={imp.get('imported_chunks',0)} "
             f"| would_import_docs={out.get('would_import_docs',0)} | would_import_chunks={out.get('would_import_chunks',0)} "
-            f"| data_root={out.get('data_root','')} | records_file={out.get('records_file','')}"
+            f"| embedding.enabled={int(bool(emb.get('enabled', False)))} | embedding.changed_chunk_count={emb.get('changed_chunk_count',0)} "
+            f"| embedding.embedded_count={emb.get('embedded_count',0)} | embedding.would_embed_count={emb.get('would_embed_count',0)} "
+            f"| embedding.failed_count={emb.get('failed_count',0)} "
+            f"| records_file={out.get('records_file','')} | data_root={out.get('data_root','')}"
         )
     return None
