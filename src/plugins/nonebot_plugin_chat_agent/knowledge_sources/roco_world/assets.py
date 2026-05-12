@@ -119,8 +119,11 @@ class RocoWorldAssetManager:
 
     def fix_missing_assets(self, records: list[dict], dry_run: bool = True) -> dict:
         existing_count = 0
+        skipped_existing_count = 0
         missing_count = 0
         would_download_count = 0
+        downloaded_count = 0
+        saved_count = 0
         invalid_url_count = 0
         failed: list[dict] = []
         targets: list[str] = []
@@ -160,6 +163,7 @@ class RocoWorldAssetManager:
                         break
                 if res["skipped_existing"]:
                     existing_count += 1
+                    skipped_existing_count += 1
                 elif res["invalid_url"]:
                     invalid_url_count += 1
                 elif res["ok"] and res["dry_run"]:
@@ -167,6 +171,8 @@ class RocoWorldAssetManager:
                     would_download_count += 1
                 elif res["ok"] and res["downloaded"]:
                     missing_count += 1
+                    downloaded_count += 1
+                    saved_count += 1
                 else:
                     missing_count += 1
                     failed.append(
@@ -205,8 +211,11 @@ class RocoWorldAssetManager:
             "dry_run": bool(dry_run),
             "total_assets": len(targets),
             "existing_count": existing_count,
+            "skipped_existing_count": skipped_existing_count,
             "missing_count": missing_count,
             "would_download_count": would_download_count if dry_run else 0,
+            "downloaded_count": 0 if dry_run else downloaded_count,
+            "saved_count": 0 if dry_run else saved_count,
             "invalid_url_count": invalid_url_count,
             "failed": failed,
             "target_paths": targets,
