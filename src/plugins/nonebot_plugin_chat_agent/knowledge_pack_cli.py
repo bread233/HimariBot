@@ -9,9 +9,11 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from storage import init_storage, list_knowledge_packs, list_knowledge_chunks, delete_knowledge_pack
     from knowledge_pack import import_knowledge_path, search_knowledge_pack
+    from roco_world_importer import import_roco_world_pack
 else:
     from .storage import init_storage, list_knowledge_packs, list_knowledge_chunks, delete_knowledge_pack
     from .knowledge_pack import import_knowledge_path, search_knowledge_pack
+    from .roco_world_importer import import_roco_world_pack
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -35,6 +37,11 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--limit", type=int, default=5)
     s = sub.add_parser("delete")
     s.add_argument("--pack", required=True)
+    s = sub.add_parser("import-roco")
+    s.add_argument("--source", required=True)
+    s.add_argument("--pack", default="roco_world")
+    s.add_argument("--title", default="roco world wiki")
+    s.add_argument("--description", default="roco world wiki local knowledge pack")
     return p
 
 
@@ -55,6 +62,14 @@ async def _run(args: argparse.Namespace) -> dict:
     if args.cmd == "delete":
         n = await delete_knowledge_pack(cfg, args.pack)
         return {"ok": True, "deleted": int(n)}
+    if args.cmd == "import-roco":
+        return await import_roco_world_pack(
+            cfg,
+            args.source,
+            pack_key=args.pack,
+            title=args.title,
+            description=args.description,
+        )
     return {"ok": False, "error": "unknown command"}
 
 
