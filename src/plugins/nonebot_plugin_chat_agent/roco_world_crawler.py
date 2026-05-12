@@ -239,8 +239,12 @@ def crawl_roco_world_source(config: RocoCrawlerConfig, fetch_json=None, fetch_te
     visited_titles: set[str] = set()
     category_counts = {"pet": 0, "skill": 0, "item": 0, "egg": 0, "furniture": 0}
 
+    total_limit = int(config.max_pages or 0)
+    if total_limit <= 0:
+        total_limit = sum(x[2] for x in cat_defs)
+
     for cmtitle, category, per_limit in cat_defs:
-        if len(records) >= int(max(1, config.max_pages)):
+        if len(records) >= total_limit:
             break
         try:
             members = _call_with_retry(
@@ -254,7 +258,9 @@ def crawl_roco_world_source(config: RocoCrawlerConfig, fetch_json=None, fetch_te
             errors.append(f"category_failed:{cmtitle}:{type(e).__name__}:{str(e)[:200]}")
             continue
         for m in members:
-            if len(records) >= int(max(1, config.max_pages)):
+            if category_counts.get(category, 0) >= per_limit:
+                break
+            if len(records) >= total_limit:
                 break
             title = str(m.get("title", "") or "").strip()
             if not title or title in visited_titles:

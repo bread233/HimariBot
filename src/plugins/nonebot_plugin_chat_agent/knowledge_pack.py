@@ -10,6 +10,7 @@ try:
         upsert_knowledge_documents,
         upsert_knowledge_chunks,
         search_knowledge_chunks_lexical,
+        search_knowledge_chunks_hybrid,
     )
 except ImportError:
     from storage import (
@@ -17,6 +18,7 @@ except ImportError:
         upsert_knowledge_documents,
         upsert_knowledge_chunks,
         search_knowledge_chunks_lexical,
+        search_knowledge_chunks_hybrid,
     )
 
 
@@ -215,8 +217,21 @@ async def import_knowledge_path(config, pack_key: str, path: str, title: str = "
     return {"ok": True, "pack_key": pack_key, "imported_docs": imported_docs, "imported_chunks": imported_chunks}
 
 
-async def search_knowledge_pack(config, query: str, pack_key: str | None = None, limit: int = 5, min_score: float = 0.25) -> list[dict]:
-    rows = await search_knowledge_chunks_lexical(config, query, pack_key=pack_key, limit=limit, min_score=min_score)
+async def search_knowledge_pack(
+    config,
+    query: str,
+    pack_key: str | None = None,
+    limit: int = 5,
+    min_score: float = 0.25,
+    mode: str = "hybrid",
+) -> list[dict]:
+    mode_v = str(mode or "hybrid").strip().lower()
+    if mode_v == "lexical":
+        rows = await search_knowledge_chunks_lexical(config, query, pack_key=pack_key, limit=limit, min_score=min_score)
+    elif mode_v == "vector":
+        rows = await search_knowledge_chunks_hybrid(config, query, pack_key=pack_key, limit=limit, min_score=min_score)
+    else:
+        rows = await search_knowledge_chunks_hybrid(config, query, pack_key=pack_key, limit=limit, min_score=min_score)
     out = []
     for r in rows:
         out.append(

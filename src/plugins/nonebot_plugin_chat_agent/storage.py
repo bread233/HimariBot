@@ -631,6 +631,118 @@ async def search_knowledge_chunks_lexical(config, query: str, pack_key: str | No
     return await asyncio.to_thread(_search_knowledge_chunks_lexical_sync, config.chat_agent_db_path, query, pack_key, limit, min_score)
 
 
+def _tokenize_text_for_knowledge(text: str) -> tuple[str, list[str], list[str], list[str]]:
+    q_raw = str(text or "").lower().strip()
+    q_no_stop = re.sub(r"(是什么|怎么|如何|一下|吗|呢|？|\?)", "", q_raw)
+    q_norm = re.sub(r"[^\w\u4e00-\u9fff]+", "", q_no_stop)
+    zh_groups = [x for x in re.findall(r"[\u4e00-\u9fff]{2,}", q_norm) if len(x) >= 2]
+    zh_ngrams = set()
+    for g in zh_groups:
+        for n in range(2, 7):
+            if len(g) < n:
+                continue
+            for i in range(0, len(g) - n + 1):
+                zh_ngrams.add(g[i : i + n])
+    en_tokens = [x for x in re.findall(r"[a-z0-9]{2,}", q_no_stop) if len(x) >= 2]
+    digit_tokens = [x for x in re.findall(r"\d+", q_no_stop) if x]
+    return q_norm, sorted(zh_ngrams, key=len, reverse=True), en_tokens, digit_tokens
+
+
+def _pseudo_vector_score(query_norm: str, zh_tokens: list[str], en_tokens: list[str], row: dict) -> float:
+    title = str(row.get("title", "") or "").lower()
+    section = str(row.get("section", "") or "").lower()
+    content = str(row.get("content", "") or "").lower()
+    blob = f"{title} {section} {content}"
+    title_norm = re.sub(r"[^\w\u4e00-\u9fff]+", "", title)
+    section_norm = re.sub(r"[^\w\u4e00-\u9fff]+", "", section)
+    content_norm = re.sub(r"[^\w\u4e00-\u9fff]+", "", content)
+    blob_norm = title_norm + section_norm + content_norm
+    score = 0.0
+    for t in zh_tokens[:40]:
+        if t in title_norm:
+            score += 0.14
+        elif t in section_norm:
+            score += 0.10
+        elif t in content_norm:
+            score += 0.08
+    for t in en_tokens[:20]:
+        if t in title_norm:
+            score += 0.12
+        elif t in section_norm:
+            score += 0.08
+        elif t in content_norm:
+            score += 0.06
+    if query_norm and query_norm in blob_norm:
+        score += 0.12
+    if any(x in section for x in ("pet", "skill", "item", "egg", "furniture")):
+        score += 0.03
+    return min(1.0, max(0.0, score))
+
+
+def _search_knowledge_chunks_hybrid_sync(
+    db_path: Path,
+    query: str,
+    pack_key: str | None = None,
+    limit: int = 5,
+    min_score: float = 0.25,
+) -> list[dict]:
+    all_rows = _list_knowledge_chunks_sync(db_path, pack_key=pack_key, limit=1000)
+    q_norm, zh_tokens, en_tokens, digit_tokens = _tokenize_text_for_knowledge(query)
+    if not q_norm and not zh_tokens and not en_tokens and not digit_tokens:
+        return []
+    merged: dict[str, dict] = {}
+    for r in all_rows:
+        if int(r.get("enabled", 0) or 0) != 1 or int(r.get("doc_enabled", 0) or 0) != 1 or int(r.get("pack_enabled", 0) or 0) != 1:
+            continue
+        key = str(r.get("chunk_key", "") or f"{r.get('doc_key','')}#{r.get('chunk_index',0)}")
+        x = dict(r)
+        # Lightweight lexical score computed from normalized tokens
+        title_norm = re.sub(r"[^\w\u4e00-\u9fff]+", "", str(x.get("title", "")).lower())
+        section_norm = re.sub(r"[^\w\u4e00-\u9fff]+", "", str(x.get("section", "")).lower())
+        content_norm = re.sub(r"[^\w\u4e00-\u9fff]+", "", str(x.get("content", "")).lower())
+        lexical_score = 0.0
+        for t in zh_tokens[:30]:
+            if t in title_norm or t in section_norm:
+                lexical_score += 0.16
+            elif t in content_norm:
+                lexical_score += 0.10
+        for t in en_tokens[:20]:
+            if t in title_norm or t in section_norm:
+                lexical_score += 0.10
+            elif t in content_norm:
+                lexical_score += 0.08
+        if q_norm and (q_norm in title_norm or q_norm in section_norm or q_norm in content_norm):
+            lexical_score += 0.15
+        x["lexical_score"] = lexical_score
+        x["vector_score"] = _pseudo_vector_score(q_norm, zh_tokens, en_tokens, x)
+        merged[key] = x
+    out: list[dict] = []
+    for x in merged.values():
+        title = str(x.get("title", "") or "")
+        title_norm = re.sub(r"[^\w\u4e00-\u9fff]+", "", title.lower())
+        title_bonus = 0.0
+        if q_norm and title_norm == q_norm:
+            title_bonus = 0.8
+        elif q_norm and q_norm in title_norm:
+            title_bonus = 0.35
+        category_bonus = 0.08 if any(s in str(x.get("section", "")).lower() for s in ("pet", "skill", "item", "egg", "furniture")) else 0.0
+        if digit_tokens:
+            content_norm = re.sub(r"[^\w\u4e00-\u9fff]+", "", str(x.get("content", "")).lower())
+            blob = f"{title_norm}{content_norm}"
+            if not all(d in blob for d in digit_tokens):
+                x["vector_score"] = min(float(x.get("vector_score", 0.0) or 0.0), 0.25)
+        final = float(x.get("lexical_score", 0.0) or 0.0) * 0.65 + float(x.get("vector_score", 0.0) or 0.0) * 0.35 + title_bonus + category_bonus
+        x["score"] = round(final, 4)
+        if final >= float(min_score):
+            out.append(x)
+    out.sort(key=lambda a: (float(a.get("score", 0.0)), float(a.get("lexical_score", 0.0)), float(a.get("vector_score", 0.0))), reverse=True)
+    return out[: _clamp_limit(limit, 1, 20)]
+
+
+async def search_knowledge_chunks_hybrid(config, query: str, pack_key: str | None = None, limit: int = 5, min_score: float = 0.25) -> list[dict]:
+    return await asyncio.to_thread(_search_knowledge_chunks_hybrid_sync, config.chat_agent_db_path, query, pack_key, limit, min_score)
+
+
 async def delete_knowledge_pack(config, pack_key: str) -> int:
     return await asyncio.to_thread(_delete_knowledge_pack_sync, config.chat_agent_db_path, pack_key)
 
