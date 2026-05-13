@@ -739,19 +739,23 @@ def _search_knowledge_chunks_hybrid_sync(
     query_embedding: list[float] | None = None,
     max_vector_scan: int = 1000,
 ) -> list[dict]:
-    all_rows = _list_knowledge_chunks_sync(db_path, pack_key=pack_key, limit=max(100, int(max_vector_scan or 1000)))
+    scan_cap = max(100, int(max_vector_scan or 1000))
+    all_rows = _list_knowledge_chunks_sync(db_path, pack_key=pack_key, limit=scan_cap)
     q_norm, zh_tokens, en_tokens, digit_tokens = _tokenize_text_for_knowledge(query)
     if not q_norm and not zh_tokens and not en_tokens and not digit_tokens:
         return []
     qvec = list(query_embedding or [])
     has_query_vec = bool(qvec)
     vector_error = ""
-    vector_scanned = 0
-    merged: dict[str, dict] = {}
+    lexical_candidates: dict[str, dict] = {}
+    vector_candidates: list[dict] = []
     try:
         from . import embedding_client  # type: ignore
     except Exception:
         embedding_client = None  # type: ignore
+
+    vector_topn = max(_clamp_limit(limit, 1, 20) * 5, 20)
+
     for r in all_rows:
         if int(r.get("enabled", 0) or 0) != 1 or int(r.get("doc_enabled", 0) or 0) != 1 or int(r.get("pack_enabled", 0) or 0) != 1:
             continue
@@ -775,21 +779,47 @@ def _search_knowledge_chunks_hybrid_sync(
         if q_norm and (q_norm in title_norm or q_norm in section_norm or q_norm in content_norm):
             lexical_score += 0.15
         x["lexical_score"] = lexical_score
-        vector_score = _pseudo_vector_score(q_norm, zh_tokens, en_tokens, x)
-        vector_source = "pseudo"
-        if has_query_vec and vector_scanned < max(1, int(max_vector_scan or 1000)) and embedding_client is not None:
+        if lexical_score > 0.0:
+            lexical_candidates[key] = x
+
+        if has_query_vec and embedding_client is not None:
             cvec = _parse_embedding_json_safe(str(x.get("embedding_json", "") or ""))
             if cvec:
-                vector_scanned += 1
                 try:
                     raw_cos = float(embedding_client.cosine_similarity(qvec, cvec))
-                    vector_score = _normalize_cosine_to_unit(raw_cos)
-                    vector_source = "embedding_json"
+                    vs = _normalize_cosine_to_unit(raw_cos)
+                    vx = dict(x)
+                    vx["vector_score"] = vs
+                    vx["vector_source"] = "embedding_json"
+                    vector_candidates.append(vx)
                 except Exception as e:
                     vector_error = str(e)[:160]
-        x["vector_score"] = vector_score
-        x["vector_source"] = vector_source
-        merged[key] = x
+
+    if vector_candidates:
+        vector_candidates.sort(key=lambda a: float(a.get("vector_score", 0.0) or 0.0), reverse=True)
+        vector_candidates = vector_candidates[: min(vector_topn, scan_cap)]
+
+    merged: dict[str, dict] = {}
+    for key, row in lexical_candidates.items():
+        z = dict(row)
+        z["vector_score"] = _pseudo_vector_score(q_norm, zh_tokens, en_tokens, z)
+        z["vector_source"] = "pseudo"
+        merged[key] = z
+
+    for x in vector_candidates:
+        key = str(x.get("chunk_key", "") or f"{x.get('doc_key','')}#{x.get('chunk_index',0)}")
+        old = merged.get(key)
+        if not old:
+            z = dict(x)
+            z.setdefault("lexical_score", 0.0)
+            merged[key] = z
+            continue
+        old_vs = float(old.get("vector_score", 0.0) or 0.0)
+        new_vs = float(x.get("vector_score", 0.0) or 0.0)
+        if new_vs >= old_vs:
+            old["vector_score"] = new_vs
+            old["vector_source"] = "embedding_json"
+
     out: list[dict] = []
     for x in merged.values():
         title = str(x.get("title", "") or "")
