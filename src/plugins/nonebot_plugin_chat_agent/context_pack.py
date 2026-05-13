@@ -523,11 +523,13 @@ def _build_rag_strict_instruction(rag_policy: dict, route_key: str) -> str:
     lines = [
         "【RAG约束】必须严格基于当前提供的资料回答。",
         "【RAG约束】资料不足时直接说不知道，不能凭参数记忆补事实。",
+        "【RAG约束】当资料能支持基本结论时，必须先给出简短结论，并明确“根据当前资料”。",
+        "【RAG约束】禁止使用资料外信息补全事实。",
     ]
     if system_prompt:
         lines.append(f"【RAG策略】{system_prompt}")
-    if unknown_reply:
-        lines.append(f"【资料不足回复】{unknown_reply}")
+    # unknown_reply 仅用于无资料/不可答分支，不在正常 evidence prompt 顶部注入
+    _ = unknown_reply
     return "\n".join(lines).strip()
 
 
@@ -1451,6 +1453,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     tool_notes.append(f"question_category={question_intent.category}")
     tool_notes.append(f"question_web_eligible={1 if question_intent.web_eligible else 0}")
     tool_notes.append(f"question_matched_terms={','.join(question_intent.matched_terms[:8])}")
+    tool_notes.append(f"rag_prompt route=web_evidence route_prompt={1 if '【RAG策略】' in rag_web_evidence else 0} unknown_in_prompt=0")
+    tool_notes.append(f"rag_prompt route=web_strategy route_prompt={1 if '【RAG策略】' in rag_web_strategy else 0} unknown_in_prompt=0")
     tool_notes.append(f"rag_policy_enabled={1 if bool(rag_web_evidence or rag_web_strategy) else 0}")
     tool_notes.append(f"persona_enabled={1 if bool(persona_casual or persona_web_evidence or persona_web_strategy) else 0}")
 
