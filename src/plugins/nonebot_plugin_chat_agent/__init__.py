@@ -278,6 +278,21 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             evidence_max_tokens = min(2048, max(128, evidence_max_tokens))
             tool_notes = str(context_pack.get("tool_notes", "") or "")
             answerable = "web_evidence_answerable=1" in tool_notes
+            sports_stats_first = "web_evidence answer_style=sports_stats_first" in tool_notes
+            definition_summary = "web_evidence answer_style=definition_summary" in tool_notes
+            style_extra = ""
+            if sports_stats_first:
+                style_extra += (
+                    "\n【体育回答要求】优先基于数据页/球员页/技术统计页回答。"
+                    "用户问“最近表现”时，先总结最近表现，不要回答淘汰原因。"
+                    "禁止根据新闻标题推测因果。不要编造具体得分/篮板/助攻数字；"
+                    "若资料未给出明确数字，直接说明“当前资料没有给出可确认的具体数据”。"
+                )
+            if definition_summary:
+                style_extra += (
+                    "\n【定义回答要求】先给一句定义，再给1-2点特征。"
+                    "避免宣传化措辞，回答不要过短。"
+                )
             evidence_messages = [
                 {
                     "role": "system",
@@ -298,6 +313,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                         "\u5982\u679c\u8d44\u6599\u6ca1\u6709\u5177\u4f53\u4f18\u7f3a\u70b9\u3001\u8bc4\u5206\u3001\u73a9\u5bb6\u8bc4\u4ef7\u3001\u5b9e\u673a\u6216\u8bc4\u6d4b\u5185\u5bb9\uff0c\u53ea\u80fd\u8bf4\u8d44\u6599\u4e0d\u8db3\u3002\n"
                         "\u4e0d\u8981\u57fa\u4e8e\u6807\u9898\u6269\u5199\u8bc4\u4ef7\u3002\n"
                         "\u5982\u679c\u8d44\u6599\u672a\u660e\u786e\u7ed9\u51fa\uff0c\u4e0d\u8981\u7f16\u9020\u6982\u7387\u3001\u6bd4\u5206\u3001\u79ef\u5206\u3001\u6392\u540d\u3001\u65e5\u671f\u3001\u7248\u672c\u53f7\u6216\u5176\u4ed6\u6570\u5b57\u3002"
+                        f"{style_extra}"
                     ),
                 },
                 {
@@ -367,6 +383,32 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                         reply = _fallback_from_evidence_context(evidence_context)
                 except Exception:
                     reply = _fallback_from_evidence_context(evidence_context)
+            if answerable and len(str(reply or "").strip()) < 25:
+                logger.info(f"web_evidence short_answer_retry=1 reply_chars={len(str(reply or '').strip())}")
+                retry_short_messages = list(evidence_messages)
+                retry_short_messages.insert(
+                    1,
+                    {
+                        "role": "system",
+                        "content": "回答太短。请基于参考资料，用一句定义或结论 + 两点依据回答。不要宣传化，不要编造。",
+                    },
+                )
+                try:
+                    retry_short = await chat_completions(
+                        retry_short_messages,
+                        config,
+                        timeout=evidence_timeout,
+                        model=evidence_model,
+                        temperature=0.25,
+                        top_p=0.7,
+                        max_tokens=evidence_max_tokens,
+                    )
+                    retry_short = truncate_reply(strip_thinking(retry_short), config.chat_agent_max_reply_length)
+                    retry_short = str(retry_short or "").strip()
+                    if retry_short:
+                        reply = retry_short
+                except Exception:
+                    pass
             if _should_sanitize_task_reply(prompt, context_pack):
                 reply = sanitize_task_reply(reply) or reply
             if config.chat_agent_enable_history and reply and should_save_assistant:
