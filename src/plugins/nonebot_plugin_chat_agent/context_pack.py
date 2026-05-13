@@ -1724,7 +1724,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             max_snippet_len = max(snippet_lens) if snippet_lens else 0
             has_official = "\u662f\u5426\u5b98\u65b9\uff1a\u662f" in evidence_context
             final_top_score = 0.0
-            m_final = re.search(r"final_top_score=([0-9]+(?:\\.[0-9]+)?)", evidence_context)
+            m_final = re.search(r"final_top_score=([0-9]+(?:\.[0-9]+)?)", evidence_context)
             if m_final:
                 try:
                     final_top_score = float(m_final.group(1))
@@ -1751,6 +1751,12 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             tool_notes.append(
                 f"web_evidence answerable={1 if web_evidence_answerable else 0} reason={answerable_reason} final_top_score={final_top_score:.3f} raw_top_score={top_score:.3f}"
             )
+            if trusted_stats_page_evidence or _is_sports_recent_query(prompt):
+                tool_notes.append(
+                    f"web_evidence answer_style=sports_stats_first trusted_stats={1 if trusted_stats_page_evidence else 0}"
+                )
+            if _is_definition_query(prompt):
+                tool_notes.append("web_evidence answer_style=definition_summary")
             weak_hits = sum(1 for w in ["\u4e24\u6781\u5206\u5316", "\u503c\u5f97\u5165\u624b"] if w in evidence_context)
             weak_single = evidence_count == 1 and max_snippet_len < 80 and weak_hits > 0
             is_eval = _is_evaluative_question(prompt)
