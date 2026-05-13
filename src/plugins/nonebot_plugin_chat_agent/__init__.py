@@ -7,8 +7,6 @@ from nonebot.typing import T_State
 
 from .config import get_chat_agent_config
 from .context_pack import build_context_pack
-from .knowledge_pack_commands import handle_knowledge_command
-from .knowledge_pack_manager import knowledge_pack_manager
 from .llm_client import chat_completions
 from .memory import detect_feedback
 from .profile_store import init_profile_storage, upsert_user_seen
@@ -86,7 +84,6 @@ async def _init_chat_agent_storage() -> None:
         await init_storage(config)
     await init_profile_storage(config)
     await init_retrieval_storage(config)
-    await knowledge_pack_manager.startup_refresh(config)
 
 
 @chat_agent.handle()
@@ -103,24 +100,6 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
 
     if not prompt:
         await chat_agent.finish("叫我有什么事？" if is_group else "你想聊什么呀？")
-        return
-
-    superusers = {str(x) for x in getattr(driver.config, "superusers", set())}
-    async def _notify_start(msg: str) -> None:
-        await chat_agent.send(_with_group_at(event, is_group, msg))
-    async def _notify_done(msg: str) -> None:
-        await chat_agent.send(_with_group_at(event, is_group, msg))
-
-    cmd_reply = await handle_knowledge_command(
-        config,
-        event,
-        prompt,
-        superusers,
-        notify_start=_notify_start,
-        notify_done=_notify_done,
-    )
-    if cmd_reply is not None:
-        await chat_agent.finish(_with_group_at(event, is_group, cmd_reply))
         return
 
     lock = get_chat_agent_lock()
