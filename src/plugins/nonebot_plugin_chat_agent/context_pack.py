@@ -1106,6 +1106,29 @@ def _is_software_version_query(prompt: str) -> bool:
     return any(m in text for m in version_markers) and any(s in text for s in software_markers)
 
 
+def _is_definition_query(prompt: str) -> bool:
+    q = str(prompt or "").strip().lower()
+    if not q:
+        return False
+    if _is_software_version_query(q):
+        return False
+    return any(
+        term in q
+        for term in (
+            "是什么",
+            "是什麼",
+            "是啥",
+            "什么游戏",
+            "什麼遊戲",
+            "介绍",
+            "简介",
+            "百科",
+            "what is",
+            "who is",
+        )
+    )
+
+
 def _has_official_software_release_page(rows: list[dict], query: str) -> bool:
     if not _is_software_version_query(query):
         return False
