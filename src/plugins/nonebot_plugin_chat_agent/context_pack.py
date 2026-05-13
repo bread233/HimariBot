@@ -12,6 +12,7 @@ from .tool_intent import classify_tool_intent
 from .question_intent import detect_question_like
 from .url_tools import build_direct_url_context, extract_urls
 from .web_tools import build_web_context, build_web_results, render_web_results_context, resolve_official_web_answer
+from .runtime_config import get_persona_profile, get_rag_policy
 from .skill_store import render_skill_context, select_relevant_skills, skills_to_evidence_items
 from .evidence_pack import render_evidence_context
 from nonebot import logger
@@ -505,6 +506,53 @@ def _is_community_strategy_question(prompt: str, intent_kind: str | None) -> boo
         "\u804c\u4e1a\u9009\u62e9",
     ]
     return any(t in text for t in strategy_markers)
+
+
+def _build_rag_strict_instruction(rag_policy: dict, route_key: str) -> str:
+    default_cfg = (rag_policy or {}).get("default") if isinstance(rag_policy, dict) else {}
+    route_cfg = ((rag_policy or {}).get("routes") or {}).get(route_key) if isinstance(rag_policy, dict) else {}
+    if not isinstance(default_cfg, dict):
+        default_cfg = {}
+    if not isinstance(route_cfg, dict):
+        route_cfg = {}
+    strict = bool(route_cfg.get("strict_grounding", default_cfg.get("strict_grounding", True)))
+    if not strict:
+        return ""
+    system_prompt = str(route_cfg.get("system_prompt", default_cfg.get("system_prompt", "")) or "").strip()
+    unknown_reply = str(route_cfg.get("unknown_reply", default_cfg.get("unknown_reply", "资料里没有明确说明。")) or "").strip()
+    lines = [
+        "【RAG约束】必须严格基于当前提供的资料回答。",
+        "【RAG约束】资料不足时直接说不知道，不能凭参数记忆补事实。",
+    ]
+    if system_prompt:
+        lines.append(f"【RAG策略】{system_prompt}")
+    if unknown_reply:
+        lines.append(f"【资料不足回复】{unknown_reply}")
+    return "\n".join(lines).strip()
+
+
+def _build_persona_style_hint(persona: dict, route_key: str) -> str:
+    if not isinstance(persona, dict) or not bool(persona.get("enabled", True)):
+        return ""
+    display_name = str(persona.get("display_name", "") or "").strip() or str((persona.get("core_identity") or {}).get("name", "") or "").strip()
+    tone = str((persona.get("speaking_style") or {}).get("tone", "") or "").strip()
+    sentence_style = str((persona.get("speaking_style") or {}).get("sentence_style", "") or "").strip()
+    unknown_policy = str((persona.get("behavior_rules") or {}).get("unknown_policy", "") or "").strip()
+    route_cfg = ((persona.get("route_overrides") or {}).get(route_key) or {}) if isinstance(persona.get("route_overrides"), dict) else {}
+    strength = str(route_cfg.get("style_strength", "low") or "low").strip().lower()
+    prefix = "【人设语气(弱)】" if strength in {"very_low", "low"} else "【人设语气】"
+    bits = []
+    if display_name:
+        bits.append(display_name)
+    if tone:
+        bits.append(tone)
+    if sentence_style:
+        bits.append(sentence_style)
+    if unknown_policy:
+        bits.append(unknown_policy)
+    if not bits:
+        return ""
+    return f"{prefix}" + "；".join(bits)
 
 
 async def _build_web_strategy_distilled_context(config, query: str) -> tuple[str, int]:
@@ -1387,6 +1435,13 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     summary_retrieval_context = ""
     tool_notes = []
     tool_notes.extend(tool_notes_embed)
+    rag_policy = get_rag_policy(config)
+    persona_profile = get_persona_profile(config)
+    rag_web_evidence = _build_rag_strict_instruction(rag_policy, "web_evidence")
+    rag_web_strategy = _build_rag_strict_instruction(rag_policy, "web_strategy")
+    persona_web_evidence = _build_persona_style_hint(persona_profile, "web_evidence")
+    persona_web_strategy = _build_persona_style_hint(persona_profile, "web_strategy")
+    persona_casual = _build_persona_style_hint(persona_profile, "casual_chat")
     if selected_skills:
         tool_notes.append("selected_skills=" + ",".join(skill.key for skill in selected_skills))
     tool_notes.append(f"skill_evidence_items={len(skill_evidence_items)}")
@@ -1396,6 +1451,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     tool_notes.append(f"question_category={question_intent.category}")
     tool_notes.append(f"question_web_eligible={1 if question_intent.web_eligible else 0}")
     tool_notes.append(f"question_matched_terms={','.join(question_intent.matched_terms[:8])}")
+    tool_notes.append(f"rag_policy_enabled={1 if bool(rag_web_evidence or rag_web_strategy) else 0}")
+    tool_notes.append(f"persona_enabled={1 if bool(persona_casual or persona_web_evidence or persona_web_strategy) else 0}")
 
     style_profile = None
     style_profile_error = ""
@@ -1602,7 +1659,9 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             "lightweight_mode": "web_strategy",
             "lightweight_prompt": prompt,
             "web_strategy_query": strategy_query,
-            "web_strategy_context": distilled_context,
+            "web_strategy_context": "\n".join(
+                x for x in [rag_web_strategy, distilled_context, persona_web_strategy] if x
+            ).strip(),
             "tool_notes": "\n".join(tool_notes).strip(),
         }
     if (
@@ -1678,6 +1737,9 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             min_score = 0.35
             if evidence_context and top_score >= min_score and evidence_sufficient and eval_answerable:
                 tool_notes.append("evidence_gate_source=web")
+                composed_web_evidence_context = "\n".join(
+                    x for x in [rag_web_evidence, evidence_context, persona_web_evidence] if x
+                ).strip()
                 return {
                     "direct_reply": None,
                     "should_call_llm": True,
@@ -1694,18 +1756,24 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     "lightweight_mode": "web_evidence",
                     "lightweight_prompt": prompt,
                     "web_evidence_query": evidence_query,
-                    "web_evidence_context": evidence_context,
+                    "web_evidence_context": composed_web_evidence_context,
                     "tool_notes": "\n".join(tool_notes).strip(),
                 }
             if evidence_context and top_score < min_score:
                 tool_notes.append("web_evidence_low_score=1")
             tool_notes.append("evidence_gate_source=none")
             tool_notes.append("evidence_gate_no_answer=1")
-            unknown_reply = "\u6682\u65f6\u6ca1\u67e5\u5230\u53ef\u9760\u8d44\u6599\uff0c\u6211\u4e0d\u77e5\u9053\u3002"
+            unknown_reply = "暂时没查到可靠资料，我不知道。"
             if is_eval and not eval_answerable:
-                unknown_reply = "\u6682\u65f6\u6ca1\u67e5\u5230\u8db3\u591f\u53ef\u9760\u7684\u8bc4\u4ef7\u8d44\u6599\uff0c\u6211\u4e0d\u77e5\u9053\u3002"
+                unknown_reply = "暂时没查到足够可靠的评价资料，我不知道。"
             if evidence_error == "no_recent_within_1y":
-                unknown_reply = "\u6682\u65f6\u6ca1\u67e5\u5230\u4e00\u5e74\u5185\u7684\u53ef\u9760\u8d44\u6599\uff0c\u6211\u4e0d\u77e5\u9053\u3002"
+                unknown_reply = "暂时没查到一年内的可靠资料，我不知道。"
+            route_unknown = ((rag_policy.get("routes") or {}).get("web_evidence") or {}).get("unknown_reply", "")
+            default_unknown = (rag_policy.get("default") or {}).get("unknown_reply", "")
+            if isinstance(route_unknown, str) and route_unknown.strip():
+                unknown_reply = route_unknown.strip()
+            elif isinstance(default_unknown, str) and default_unknown.strip():
+                unknown_reply = default_unknown.strip()
             return {
                 "direct_reply": unknown_reply,
                 "should_call_llm": False,
@@ -1816,6 +1884,10 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     if memory_reminder:
         tool_notes.append("memory_reminder_ready")
 
+    final_style_context = style_context
+    if persona_casual:
+        final_style_context = "\n".join(x for x in [style_context, persona_casual] if x).strip()
+
     return {
         "direct_reply": None,
         "should_call_llm": True,
@@ -1824,7 +1896,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         "profile_context": profile_context,
         "group_context": group_context,
         "retrieval_context": retrieval_context,
-        "style_context": style_context,
+        "style_context": final_style_context,
         "skill_context": skill_context,
         "skill_evidence_context": skill_evidence_context,
         "summary_retrieval_context": summary_retrieval_context,
