@@ -128,6 +128,95 @@ def _is_sports_recent_query(query: str) -> bool:
     return any(x in text for x in sports_markers)
 
 
+def _is_software_version_query(query: str) -> bool:
+    text = str(query or "").lower().strip()
+    if not text:
+        return False
+    version_markers = [
+        "latest version", "stable version", "release notes", "current version",
+        "最新版", "最新版本", "当前版本", "稳定版", "发布版本", "release", "version",
+    ]
+    software_markers = [
+        "ruby", "node", "nodejs", "node.js", "python", "postgresql", "redis", "docker", "go", "rust",
+    ]
+    return any(v in text for v in version_markers) and any(s in text for s in software_markers)
+
+
+def _is_game_definition_query(query: str) -> bool:
+    text = str(query or "").lower().strip()
+    if not text:
+        return False
+    return ("是什么" in text or "什么游戏" in text or "介绍" in text) and any(
+        x in text for x in ["游戏", "world", "王国", "roco", "洛克", "taptap"]
+    )
+
+
+def _rewrite_web_query_hints(query: str) -> str:
+    q = str(query or "").strip()
+    if not q:
+        return q
+    low = q.lower()
+    if _is_software_version_query(q):
+        if "ruby" in low:
+            return f"{q} Ruby latest stable release ruby-lang.org downloads releases"
+        return f"{q} latest stable release official release notes downloads"
+    if _is_game_definition_query(q):
+        return f"{q} 官方 TapTap 百科 wikipedia"
+    return q
+
+
+def _generic_source_quality_adjustment(url: str, title: str, snippet: str, query: str) -> tuple[float, bool, bool, bool]:
+    host = (urlparse(str(url or "")).netloc or "").lower()
+    path = (urlparse(str(url or "")).path or "").lower()
+    merged = f"{host} {path} {str(title or '').lower()} {str(snippet or '').lower()} {str(query or '').lower()}"
+    boost = 0.0
+    penalty = 0.0
+    boosted = False
+    low_quality_penalized = False
+    entity_mismatch_penalized = False
+
+    official_like_domains = [
+        "ruby-lang.org", "nodejs.org", "python.org", "postgresql.org", "redis.io", "docs.docker.com",
+        "docker.com", "go.dev", "rust-lang.org", "rocom.qq.com", "taptap.cn",
+        "wikipedia.org", "baike.baidu.com", "steampowered.com", "playstation.com", "nintendo.com", "xbox.com",
+    ]
+    if any(d in host for d in official_like_domains):
+        boost += 0.28
+        boosted = True
+
+    if "rocom.qq.com" in host:
+        boost += 0.22
+        boosted = True
+    if "taptap.cn" in host:
+        boost += 0.18
+        boosted = True
+
+    low_quality_signals = [
+        "aiyouxi", "igame", "wanbo", "mangosports", "bsport", "b-sport", "hth", "huatihui",
+        "milan", "crown", "bandao", "kaiyun", "leyu", "jiuyou",
+        "qiutan-sports", "home-qiutan-sports", "sports-livezone", "blog-xmsports", "zh-", "outline-cn-igame",
+        "sports-news/a", "news-20", "crack", "破解版", "中文破解版", "激活版", "下载站", "软件园",
+        "万博", "芒果体育", "爱游戏", "华体", "华体会", "米兰体育", "皇冠", "半岛", "开云", "乐鱼", "九游", "体育app下载",
+        "xclient", "myqqjd", "ymkuzhan",
+    ]
+    if any(s in merged for s in low_quality_signals):
+        penalty -= 0.70
+        low_quality_penalized = True
+
+    if _is_software_version_query(query):
+        software_release_signals = ["release", "releases", "release notes", "changelog", "latest", "stable", "version", "downloads"]
+        if any(s in merged for s in software_release_signals) and any(d in host for d in official_like_domains):
+            boost += 0.25
+            boosted = True
+        if "ruby" in str(query or "").lower():
+            mismatch_signals = ["rubymine", "jetbrains", "rails", "plugin", "ide", "破解版", "crack"]
+            if any(s in merged for s in mismatch_signals):
+                penalty -= 0.80
+                entity_mismatch_penalized = True
+
+    return boost + penalty, boosted, low_quality_penalized, entity_mismatch_penalized
+
+
 def _sports_source_adjustment(url: str, title: str, snippet: str) -> tuple[float, bool, bool]:
     host = (urlparse(str(url or "")).netloc or "").lower()
     path = (urlparse(str(url or "")).path or "").lower()
@@ -418,6 +507,37 @@ async def get_nodejs_latest_version(timeout: float = 8.0) -> dict | None:
     }
 
 
+async def get_ruby_latest_version(timeout: float = 8.0) -> dict | None:
+    candidates = [
+        "https://www.ruby-lang.org/en/downloads/",
+        "https://www.ruby-lang.org/zh_cn/downloads/",
+    ]
+    pattern = re.compile(r"\bRuby\s+(\d+\.\d+\.\d+)\b", re.I)
+    for endpoint in candidates:
+        try:
+            async with httpx.AsyncClient(timeout=float(timeout), trust_env=False, follow_redirects=True) as client:
+                resp = await client.get(endpoint)
+                resp.raise_for_status()
+                html = str(resp.text or "")
+        except Exception:
+            continue
+        matches = pattern.findall(html)
+        if not matches:
+            continue
+        # 取页面中出现的第一个语义版本，宁可保守
+        version = str(matches[0]).strip()
+        if not version:
+            continue
+        return {
+            "kind": "ruby_latest",
+            "answer": f"Ruby 最新稳定版是 {version}。",
+            "version": version,
+            "source": endpoint,
+            "confidence": "high",
+        }
+    return None
+
+
 OFFICIAL_WEB_RESOLVERS = [
     {
         "key": "nodejs_latest",
@@ -425,6 +545,13 @@ OFFICIAL_WEB_RESOLVERS = [
         "entity_patterns": ["nodejs", "node.js", r"\bnode\b"],
         "query_patterns": ["latest", "version", "\u6700\u65b0\u7248", "\u6700\u65b0", "\u7248\u672c"],
         "handler": get_nodejs_latest_version,
+    },
+    {
+        "key": "ruby_latest",
+        "intent_kind": "current_fact",
+        "entity_patterns": [r"\bruby\b", "ruby语言", "ruby 语言"],
+        "query_patterns": ["latest", "version", "stable", "release", "\u6700\u65b0\u7248", "\u6700\u65b0", "\u7248\u672c", "\u7a33\u5b9a\u7248"],
+        "handler": get_ruby_latest_version,
     },
 ]
 
@@ -757,7 +884,8 @@ def _source_flags(item: dict, query: str, current_sensitive: bool = False) -> li
 
 async def build_web_results(config, query: str, intent_kind: str | None = None) -> list[dict]:
     try:
-        results = await search_web(config, query)
+        query_for_search = _rewrite_web_query_hints(query)
+        results = await search_web(config, query_for_search)
     except Exception:
         return []
     if not results:
@@ -767,8 +895,12 @@ async def build_web_results(config, query: str, intent_kind: str | None = None) 
     excerpt_max = int(getattr(config, "chat_agent_web_excerpt_max_chars", 400))
     current_sensitive = _is_current_sensitive_query(query, intent_kind=intent_kind)
     sports_recent_query = _is_sports_recent_query(query)
+    software_version_query = _is_software_version_query(query)
     sports_source_boost_count = 0
     sports_low_quality_penalty_count = 0
+    official_source_boost_count = 0
+    generic_low_quality_penalty_count = 0
+    entity_mismatch_penalty_count = 0
     rows: list[dict] = []
     for idx, item in enumerate(results[:max_results]):
         title = _clean_text(item.get("title", ""))
@@ -805,6 +937,16 @@ async def build_web_results(config, query: str, intent_kind: str | None = None) 
         authority = _authority_score(temp_item, query, current_sensitive=current_sensitive)
         flags = _source_flags(temp_item, query, current_sensitive=current_sensitive)
         web_rank_score = float(weighted_score) + float(freshness) + float(authority)
+        generic_adjust, official_boosted, generic_penalized, entity_mismatch_penalized = _generic_source_quality_adjustment(
+            url, title, snippet, query
+        )
+        web_rank_score += float(generic_adjust)
+        if official_boosted:
+            official_source_boost_count += 1
+        if generic_penalized:
+            generic_low_quality_penalty_count += 1
+        if entity_mismatch_penalized:
+            entity_mismatch_penalty_count += 1
         sports_adjust = 0.0
         if sports_recent_query:
             sports_adjust, boosted, penalized = _sports_source_adjustment(url, title, snippet)
@@ -831,6 +973,8 @@ async def build_web_results(config, query: str, intent_kind: str | None = None) 
                 "extracted_years": extracted_years,
                 "sports_recent_query": 1 if sports_recent_query else 0,
                 "sports_adjust": float(sports_adjust),
+                "software_version_query": 1 if software_version_query else 0,
+                "generic_adjust": float(generic_adjust),
                 "_idx": idx,
             }
         )
@@ -842,6 +986,13 @@ async def build_web_results(config, query: str, intent_kind: str | None = None) 
             f"web_results sports_recent_query=1 sports_source_boost_count={sports_source_boost_count} "
             f"sports_low_quality_penalty_count={sports_low_quality_penalty_count}"
         )
+    if software_version_query:
+        logger.info("web_results software_version_query=1")
+    logger.info(
+        f"web_results official_source_boost_count={official_source_boost_count} "
+        f"generic_low_quality_penalty_count={generic_low_quality_penalty_count} "
+        f"entity_mismatch_penalty_count={entity_mismatch_penalty_count}"
+    )
     return rows
 
 
