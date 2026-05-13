@@ -851,6 +851,7 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
         return "", 0, [], 0.0, msg, False, []
     merged: list[dict] = []
     top_score = 0.0
+    final_top_score = 0.0
     today = date.today()
     freshness_sensitive = _is_freshness_sensitive_prompt(q)
     sports_recent_query = _is_sports_recent_query(q)
@@ -885,6 +886,8 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
         final_score = score + official_weight + freshness_weight
         if score > top_score:
             top_score = score
+        if final_score > final_top_score:
+            final_top_score = final_score
         if len(snippet) > 240:
             snippet = snippet[:240] + "..."
         merged.append(
@@ -922,15 +925,21 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
     ]
     merged = filtered
     top_score = max((float(x.get("score", 0.0)) for x in merged), default=0.0)
+    final_top_score = max((float(x.get("final_score", 0.0)) for x in merged), default=0.0)
     if not merged:
         logger.info("web_evidence distilled all_results_filtered_out=1")
         return "", 0, [], top_score, "", False, []
     stats_page_evidence = _has_stats_page_evidence(merged)
+    trusted_stats_page_evidence, trusted_stats_page_count = _has_trusted_stats_page_evidence(merged)
     if sports_recent_query:
-        logger.info(f"web_evidence sports_recent_query=1 stats_page_evidence={1 if stats_page_evidence else 0}")
+        logger.info(
+            f"web_evidence sports_recent_query=1 stats_page_evidence={1 if stats_page_evidence else 0} "
+            f"trusted_stats_page_evidence={1 if trusted_stats_page_evidence else 0} "
+            f"stats_page_evidence_source_count={trusted_stats_page_count}"
+        )
     if freshness_sensitive and not any((x.get("recency_days") is not None and int(x.get("recency_days")) <= 365) for x in merged[:5]):
-        if stats_page_evidence:
-            logger.info("web_evidence freshness_bypass_reason=stats_page_evidence")
+        if trusted_stats_page_evidence:
+            logger.info("web_evidence freshness_bypass_reason=trusted_stats_page_evidence")
         else:
             logger.info("web_evidence freshness_sensitive_no_recent=1")
             return "", len(merged[:5]), [str(x.get("title", ""))[:60] for x in merged[:3]], top_score, "no_recent_within_1y", False, []
@@ -973,7 +982,8 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
     if len(out) > 1800:
         out = out[:1800]
     logger.info(
-        f"web_evidence distilled result_count={len(merged[:5])} top_titles={top_titles[:3]!r} chars={len(out)} top_score={top_score:.3f}"
+        f"web_evidence distilled result_count={len(merged[:5])} top_titles={top_titles[:3]!r} chars={len(out)} "
+        f"top_score={top_score:.3f} raw_top_score={top_score:.3f} final_top_score={final_top_score:.3f}"
     )
     eval_hit, eval_hits = _has_evaluation_signal_from_results(merged[:5])
     return out, len(merged[:5]), [t for t in top_titles[:3] if t], top_score, "", eval_hit, eval_hits[:8]
@@ -1018,6 +1028,39 @@ def _has_stats_page_evidence(rows: list[dict]) -> bool:
         if any(m in blob for m in stats_markers):
             return True
     return False
+
+
+def _has_trusted_stats_page_evidence(rows: list[dict]) -> tuple[bool, int]:
+    trusted_domains = [
+        "nba.com", "espn.com", "basketball-reference.com", "statmuse.com",
+        "nba.hupu.com", "qiumiwu.com", "slamdunk.sports.sina.com.cn",
+        "sports.cctv.com", "sports.qq.com", "sports.sina.com.cn",
+    ]
+    stats_markers = ["stats", "stat", "player", "players", "game log", "gamelog", "boxscore", "技术统计", "数据", "赛后"]
+    low_quality_markers = [
+        "aiyouxi", "igame", "wanbo", "mangosports", "bsport", "b-sport",
+        "hth", "milan", "leyu", "kaiyun", "jiuyou", "crown", "huatihui", "bandao",
+        "qiutan-sports", "home-qiutan-sports", "sports-livezone", "blog-xmsports",
+        "万博", "芒果体育", "爱游戏", "华体", "华体会", "米兰体育", "皇冠", "半岛", "开云", "乐鱼",
+    ]
+    count = 0
+    for row in rows or []:
+        host = str((row or {}).get("domain", "") or "").lower()
+        if not host:
+            host = (urlparse(str((row or {}).get("url", "") or "").strip()).netloc or "").lower()
+        blob = " ".join(
+            [
+                host,
+                str((row or {}).get("title", "") or "").lower(),
+                str((row or {}).get("url", "") or "").lower(),
+                str((row or {}).get("snippet", "") or "").lower(),
+            ]
+        )
+        if any(m in blob for m in low_quality_markers):
+            continue
+        if any(d in host for d in trusted_domains) and any(m in blob for m in stats_markers):
+            count += 1
+    return count > 0, count
 
 
 def _extract_recency_days(text: str, today: date) -> tuple[int | None, str]:
