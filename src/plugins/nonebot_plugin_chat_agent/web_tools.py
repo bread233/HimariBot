@@ -1,13 +1,107 @@
 from __future__ import annotations
 
 import re
+import json
+import os
 from datetime import datetime
 from html import unescape
+from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 from nonebot import logger
+
+_WEB_QUALITY_RULES_CACHE: dict[str, dict] = {}
+_WEB_QUALITY_RULES_DEFAULT_PATH = "data/nonebot_chat_agent/web_quality_rules.json"
+
+
+def _get_web_quality_rules_path(config) -> str:
+    cfg_path = str(getattr(config, "chat_agent_web_quality_rules_path", "") or "").strip()
+    if cfg_path:
+        return cfg_path
+    env_path = str(os.getenv("CHAT_AGENT_WEB_QUALITY_RULES_PATH", "") or "").strip()
+    if env_path:
+        return env_path
+    return _WEB_QUALITY_RULES_DEFAULT_PATH
+
+
+def _normalize_rule_list(value) -> set[str]:
+    if not isinstance(value, list):
+        return set()
+    out: set[str] = set()
+    for item in value:
+        s = str(item or "").strip().lower()
+        if s:
+            out.add(s)
+    return out
+
+
+def _normalize_domain_list(value) -> set[str]:
+    raw = _normalize_rule_list(value)
+    out: set[str] = set()
+    for d in raw:
+        if d.startswith("www."):
+            d = d[4:]
+        out.add(d)
+    return out
+
+
+def _load_web_quality_rules(config) -> dict:
+    path = _get_web_quality_rules_path(config)
+    try:
+        resolved = str(Path(path).expanduser().resolve())
+    except Exception:
+        resolved = str(path)
+    if resolved in _WEB_QUALITY_RULES_CACHE:
+        return _WEB_QUALITY_RULES_CACHE[resolved]
+
+    empty = {
+        "low_quality_keywords_extra": set(),
+        "official_domains_extra": set(),
+        "sports_trusted_domains_extra": set(),
+        "sports_low_quality_keywords_extra": set(),
+        "software_mismatch_keywords_extra": set(),
+        "entity_rules": {},
+    }
+    p = Path(path).expanduser()
+    if not p.exists():
+        _WEB_QUALITY_RULES_CACHE[resolved] = empty
+        return empty
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning(f"web_quality_rules invalid_json path={path!r} message={str(e)[:160]!r}")
+        _WEB_QUALITY_RULES_CACHE[resolved] = empty
+        return empty
+    if not isinstance(data, dict):
+        logger.warning(f"web_quality_rules invalid_root path={path!r} root_type={type(data).__name__}")
+        _WEB_QUALITY_RULES_CACHE[resolved] = empty
+        return empty
+
+    entity_rules: dict[str, dict[str, set[str]]] = {}
+    raw_entity_rules = data.get("entity_rules")
+    if isinstance(raw_entity_rules, dict):
+        for k, v in raw_entity_rules.items():
+            key = str(k or "").strip().lower()
+            if not key or not isinstance(v, dict):
+                continue
+            entity_rules[key] = {
+                "official_domains": _normalize_domain_list(v.get("official_domains")),
+                "mismatch_keywords": _normalize_rule_list(v.get("mismatch_keywords")),
+                "low_quality_keywords": _normalize_rule_list(v.get("low_quality_keywords")),
+            }
+
+    parsed = {
+        "low_quality_keywords_extra": _normalize_rule_list(data.get("low_quality_keywords_extra")),
+        "official_domains_extra": _normalize_domain_list(data.get("official_domains_extra")),
+        "sports_trusted_domains_extra": _normalize_domain_list(data.get("sports_trusted_domains_extra")),
+        "sports_low_quality_keywords_extra": _normalize_rule_list(data.get("sports_low_quality_keywords_extra")),
+        "software_mismatch_keywords_extra": _normalize_rule_list(data.get("software_mismatch_keywords_extra")),
+        "entity_rules": entity_rules,
+    }
+    _WEB_QUALITY_RULES_CACHE[resolved] = parsed
+    return parsed
 
 def _clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "")).strip()
@@ -165,7 +259,7 @@ def _rewrite_web_query_hints(query: str) -> str:
     return q
 
 
-def _generic_source_quality_adjustment(url: str, title: str, snippet: str, query: str) -> tuple[float, bool, bool, bool]:
+def _generic_source_quality_adjustment(url: str, title: str, snippet: str, query: str, config=None) -> tuple[float, bool, bool, bool]:
     host = (urlparse(str(url or "")).netloc or "").lower()
     path = (urlparse(str(url or "")).path or "").lower()
     merged = f"{host} {path} {str(title or '').lower()} {str(snippet or '').lower()} {str(query or '').lower()}"
@@ -175,11 +269,13 @@ def _generic_source_quality_adjustment(url: str, title: str, snippet: str, query
     low_quality_penalized = False
     entity_mismatch_penalized = False
 
-    official_like_domains = [
+    official_like_domains = {
         "ruby-lang.org", "nodejs.org", "python.org", "postgresql.org", "redis.io", "docs.docker.com",
         "docker.com", "go.dev", "rust-lang.org", "rocom.qq.com", "taptap.cn",
         "wikipedia.org", "baike.baidu.com", "steampowered.com", "playstation.com", "nintendo.com", "xbox.com",
-    ]
+    }
+    rules = _load_web_quality_rules(config) if config is not None else {}
+    official_like_domains = official_like_domains | set(rules.get("official_domains_extra", set()))
     if any(d in host for d in official_like_domains):
         boost += 0.28
         boosted = True
@@ -199,25 +295,38 @@ def _generic_source_quality_adjustment(url: str, title: str, snippet: str, query
         "万博", "芒果体育", "爱游戏", "华体", "华体会", "米兰体育", "皇冠", "半岛", "开云", "乐鱼", "九游", "体育app下载",
         "xclient", "myqqjd", "ymkuzhan",
     ]
+    low_quality_signals = set(low_quality_signals) | set(rules.get("low_quality_keywords_extra", set()))
     if any(s in merged for s in low_quality_signals):
         penalty -= 0.70
         low_quality_penalized = True
 
     if _is_software_version_query(query):
+        mismatch_extras = set(rules.get("software_mismatch_keywords_extra", set()))
         software_release_signals = ["release", "releases", "release notes", "changelog", "latest", "stable", "version", "downloads"]
         if any(s in merged for s in software_release_signals) and any(d in host for d in official_like_domains):
             boost += 0.25
             boosted = True
         if "ruby" in str(query or "").lower():
-            mismatch_signals = ["rubymine", "jetbrains", "rails", "plugin", "ide", "破解版", "crack"]
+            mismatch_signals = set(["rubymine", "jetbrains", "rails", "plugin", "ide", "破解版", "crack"]) | mismatch_extras
+            entity_rules = (rules.get("entity_rules", {}) or {}).get("ruby", {})
+            mismatch_signals = mismatch_signals | set(entity_rules.get("mismatch_keywords", set()))
+            official_like_domains = official_like_domains | set(entity_rules.get("official_domains", set()))
             if any(s in merged for s in mismatch_signals):
                 penalty -= 0.80
                 entity_mismatch_penalized = True
 
+    if "roco" in str(query or "").lower() or "洛克王国世界" in str(query or ""):
+        entity_rules = (rules.get("entity_rules", {}) or {}).get("roco_world", {})
+        official_like_domains = official_like_domains | set(entity_rules.get("official_domains", set()))
+        roco_low = set(entity_rules.get("low_quality_keywords", set()))
+        if any(s in merged for s in roco_low):
+            penalty -= 0.60
+            low_quality_penalized = True
+
     return boost + penalty, boosted, low_quality_penalized, entity_mismatch_penalized
 
 
-def _sports_source_adjustment(url: str, title: str, snippet: str) -> tuple[float, bool, bool]:
+def _sports_source_adjustment(url: str, title: str, snippet: str, config=None) -> tuple[float, bool, bool]:
     host = (urlparse(str(url or "")).netloc or "").lower()
     path = (urlparse(str(url or "")).path or "").lower()
     merged = f"{host} {path} {str(title or '').lower()} {str(snippet or '').lower()}"
@@ -229,6 +338,8 @@ def _sports_source_adjustment(url: str, title: str, snippet: str) -> tuple[float
         "nba.hupu.com", "qiumiwu.com", "slamdunk.sports.sina.com.cn",
         "sports.cctv.com", "sports.qq.com", "sports.sina.com.cn",
     ]
+    rules = _load_web_quality_rules(config) if config is not None else {}
+    quality_domains = set(quality_domains) | set(rules.get("sports_trusted_domains_extra", set()))
     strong_stats_signals = ["player", "players", "stats", "stat", "game log", "gamelog", "boxscore", "数据", "技术统计"]
     if any(d in host for d in quality_domains) and any(s in merged for s in strong_stats_signals):
         boost += 0.35
@@ -266,6 +377,7 @@ def _sports_source_adjustment(url: str, title: str, snippet: str) -> tuple[float
         "qiutan-sports", "home-qiutan-sports", "sports-livezone", "blog-xmsports", "zh-", "sports-news/a", "news-20",
         "华体", "华体会", "皇冠", "米兰体育", "开云", "乐鱼", "半岛", "万博", "芒果体育", "爱游戏", "球探壳站", "体育app下载",
     ]
+    low_quality_signals = set(low_quality_signals) | set(rules.get("sports_low_quality_keywords_extra", set()))
     if any(s in merged for s in low_quality_signals):
         penalty -= 0.60
         penalized = True
@@ -953,7 +1065,7 @@ async def build_web_results(config, query: str, intent_kind: str | None = None) 
         flags = _source_flags(temp_item, query, current_sensitive=current_sensitive)
         web_rank_score = float(weighted_score) + float(freshness) + float(authority)
         generic_adjust, official_boosted, generic_penalized, entity_mismatch_penalized = _generic_source_quality_adjustment(
-            url, title, snippet, query
+            url, title, snippet, query, config=config
         )
         web_rank_score += float(generic_adjust)
         if official_boosted:
@@ -964,7 +1076,7 @@ async def build_web_results(config, query: str, intent_kind: str | None = None) 
             entity_mismatch_penalty_count += 1
         sports_adjust = 0.0
         if sports_recent_query:
-            sports_adjust, boosted, penalized = _sports_source_adjustment(url, title, snippet)
+            sports_adjust, boosted, penalized = _sports_source_adjustment(url, title, snippet, config=config)
             web_rank_score += float(sports_adjust)
             if boosted:
                 sports_source_boost_count += 1
