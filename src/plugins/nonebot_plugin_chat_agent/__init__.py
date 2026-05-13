@@ -76,6 +76,42 @@ def _should_sanitize_task_reply(prompt: str, context_pack: dict) -> bool:
     )
 
 
+def _is_unknown_like_reply(reply: str) -> bool:
+    text = str(reply or "").strip().lower()
+    if not text:
+        return True
+    markers = [
+        "资料不足以确认",
+        "资料里没有明确说明",
+        "我查到了相关网页，但资料不足以确认",
+        "不知道",
+        "我不知道",
+    ]
+    return any(m in text for m in markers)
+
+
+def _fallback_from_evidence_context(evidence_context: str) -> str:
+    lines = str(evidence_context or "").splitlines()
+    points: list[str] = []
+    current_title = ""
+    for line in lines:
+        s = line.strip()
+        if s.startswith("标题："):
+            current_title = s.replace("标题：", "", 1).strip()
+        elif s.startswith("摘要："):
+            snip = s.replace("摘要：", "", 1).strip()
+            if snip:
+                if current_title:
+                    points.append(f"{current_title}：{snip}")
+                else:
+                    points.append(snip)
+        if len(points) >= 2:
+            break
+    if not points:
+        return "根据当前网页资料：已有相关来源，但暂缺可直接摘录的摘要细节。"
+    return "根据当前网页资料：\n1. " + "\n2. ".join(points[:2])
+
+
 @driver.on_startup
 async def _init_chat_agent_storage() -> None:
     config = get_chat_agent_config()
@@ -240,6 +276,8 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             )
             evidence_max_tokens = int(getattr(config, "chat_agent_web_strategy_max_tokens", 700) or 700)
             evidence_max_tokens = min(2048, max(128, evidence_max_tokens))
+            tool_notes = str(context_pack.get("tool_notes", "") or "")
+            answerable = "web_evidence_answerable=1" in tool_notes
             evidence_messages = [
                 {
                     "role": "system",
@@ -301,6 +339,34 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     f"context_chars={len(evidence_context)} prompt={evidence_prompt[:80]!r} message={str(e)[:200]!r}"
                 )
                 reply = "\u6682\u65f6\u6ca1\u67e5\u5230\u53ef\u9760\u8d44\u6599\uff0c\u53ef\u4ee5\u6362\u4e2a\u66f4\u5177\u4f53\u7684\u95ee\u9898\u3002"
+            if answerable and _is_unknown_like_reply(reply):
+                logger.warning("web_evidence over_refusal=1 reply_matches_unknown=1 answerable=1")
+                retry_messages = list(evidence_messages)
+                retry_messages.insert(
+                    1,
+                    {
+                        "role": "system",
+                        "content": "当前参考资料已经足以支持基本结论。禁止回复资料不足。请基于参考资料给出一句结论和一到两点依据。",
+                    },
+                )
+                try:
+                    retry_reply = await chat_completions(
+                        retry_messages,
+                        config,
+                        timeout=evidence_timeout,
+                        model=evidence_model,
+                        temperature=0.2,
+                        top_p=0.7,
+                        max_tokens=evidence_max_tokens,
+                    )
+                    retry_reply = truncate_reply(strip_thinking(retry_reply), config.chat_agent_max_reply_length)
+                    retry_reply = str(retry_reply or "").strip()
+                    if retry_reply and not _is_unknown_like_reply(retry_reply):
+                        reply = retry_reply
+                    else:
+                        reply = _fallback_from_evidence_context(evidence_context)
+                except Exception:
+                    reply = _fallback_from_evidence_context(evidence_context)
             if _should_sanitize_task_reply(prompt, context_pack):
                 reply = sanitize_task_reply(reply) or reply
             if config.chat_agent_enable_history and reply and should_save_assistant:
