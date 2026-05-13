@@ -115,6 +115,54 @@ def _source_preference_score(url: str, query: str) -> float:
     return score
 
 
+def _is_sports_recent_query(query: str) -> bool:
+    text = str(query or "").lower()
+    if not text:
+        return False
+    sports_markers = [
+        "nba", "cba", "lakers", "warriors", "thunder", "lebron", "james", "curry", "doncic",
+        "詹姆斯", "勒布朗", "湖人", "勇士", "雷霆", "东契奇", "库里", "球员", "球队",
+        "最近", "近况", "表现", "数据", "最近一场", "对阵", "得分", "篮板", "助攻", "命中率", "战绩", "赛程", "赛后",
+    ]
+    return any(x in text for x in sports_markers)
+
+
+def _sports_source_adjustment(url: str, title: str, snippet: str) -> tuple[float, bool, bool]:
+    host = (urlparse(str(url or "")).netloc or "").lower()
+    path = (urlparse(str(url or "")).path or "").lower()
+    merged = f"{host} {path} {str(title or '').lower()} {str(snippet or '').lower()}"
+
+    boost = 0.0
+    boosted = False
+    quality_domains = [
+        "nba.com", "espn.com", "basketball-reference.com", "statmuse.com",
+        "nba.hupu.com", "qiumiwu.com", "slamdunk.sports.sina.com.cn",
+        "sports.cctv.com", "sports.qq.com", "sports.sina.com.cn",
+    ]
+    stats_signals = ["player", "players", "stats", "stat", "game log", "gamelog", "boxscore", "数据", "技术统计"]
+    if any(d in host for d in quality_domains) and any(s in merged for s in stats_signals):
+        boost += 0.25
+        boosted = True
+    elif any(d in host for d in quality_domains):
+        boost += 0.12
+        boosted = True
+
+    penalty = 0.0
+    penalized = False
+    low_quality_signals = [
+        "aiyouxi", "hth", "milan", "leyu", "kaiyun", "jiuyou", "crown", "huatihui",
+        "华体", "皇冠", "米兰体育", "开云", "乐鱼", "半岛", "体育app下载", "sports-news/a",
+    ]
+    if any(s in merged for s in low_quality_signals):
+        penalty -= 0.30
+        penalized = True
+    generic_seo = ["从天赋少年到传奇", "全球偶像", "伟大历程", "巅峰揭秘"]
+    if any(s.lower() in merged for s in generic_seo):
+        penalty -= 0.18
+        penalized = True
+    return boost + penalty, boosted, penalized
+
+
 def _clean_html_text(html_text: str) -> str:
     text = str(html_text or "")
     if not text:
@@ -694,6 +742,9 @@ async def build_web_results(config, query: str, intent_kind: str | None = None) 
     snippet_max = int(getattr(config, "chat_agent_web_snippet_max_chars", 260))
     excerpt_max = int(getattr(config, "chat_agent_web_excerpt_max_chars", 400))
     current_sensitive = _is_current_sensitive_query(query, intent_kind=intent_kind)
+    sports_recent_query = _is_sports_recent_query(query)
+    sports_source_boost_count = 0
+    sports_low_quality_penalty_count = 0
     rows: list[dict] = []
     for idx, item in enumerate(results[:max_results]):
         title = _clean_text(item.get("title", ""))
@@ -730,6 +781,14 @@ async def build_web_results(config, query: str, intent_kind: str | None = None) 
         authority = _authority_score(temp_item, query, current_sensitive=current_sensitive)
         flags = _source_flags(temp_item, query, current_sensitive=current_sensitive)
         web_rank_score = float(weighted_score) + float(freshness) + float(authority)
+        sports_adjust = 0.0
+        if sports_recent_query:
+            sports_adjust, boosted, penalized = _sports_source_adjustment(url, title, snippet)
+            web_rank_score += float(sports_adjust)
+            if boosted:
+                sports_source_boost_count += 1
+            if penalized:
+                sports_low_quality_penalty_count += 1
         if current_sensitive and ("official" in flags or "docs" in flags):
             web_rank_score += 0.05
         rows.append(
@@ -746,12 +805,19 @@ async def build_web_results(config, query: str, intent_kind: str | None = None) 
                 "web_rank_score": float(web_rank_score),
                 "source_flags": flags,
                 "extracted_years": extracted_years,
+                "sports_recent_query": 1 if sports_recent_query else 0,
+                "sports_adjust": float(sports_adjust),
                 "_idx": idx,
             }
         )
     rows.sort(key=lambda r: (-float(r.get("web_rank_score", 0.0)), int(r.get("_idx", 0))))
     for r in rows:
         r.pop("_idx", None)
+    if sports_recent_query:
+        logger.info(
+            f"web_results sports_recent_query=1 sports_source_boost_count={sports_source_boost_count} "
+            f"sports_low_quality_penalty_count={sports_low_quality_penalty_count}"
+        )
     return rows
 
 

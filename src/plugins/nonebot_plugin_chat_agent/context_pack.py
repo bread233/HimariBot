@@ -853,6 +853,7 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
     top_score = 0.0
     today = date.today()
     freshness_sensitive = _is_freshness_sensitive_prompt(q)
+    sports_recent_query = _is_sports_recent_query(q)
     seen = set()
     for row in results or []:
         title = str((row or {}).get("title", "") or "").strip()
@@ -924,9 +925,15 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
     if not merged:
         logger.info("web_evidence distilled all_results_filtered_out=1")
         return "", 0, [], top_score, "", False, []
+    stats_page_evidence = _has_stats_page_evidence(merged)
+    if sports_recent_query:
+        logger.info(f"web_evidence sports_recent_query=1 stats_page_evidence={1 if stats_page_evidence else 0}")
     if freshness_sensitive and not any((x.get("recency_days") is not None and int(x.get("recency_days")) <= 365) for x in merged[:5]):
-        logger.info("web_evidence freshness_sensitive_no_recent=1")
-        return "", len(merged[:5]), [str(x.get("title", ""))[:60] for x in merged[:3]], top_score, "no_recent_within_1y", False, []
+        if stats_page_evidence:
+            logger.info("web_evidence freshness_bypass_reason=stats_page_evidence")
+        else:
+            logger.info("web_evidence freshness_sensitive_no_recent=1")
+            return "", len(merged[:5]), [str(x.get("title", ""))[:60] for x in merged[:3]], top_score, "no_recent_within_1y", False, []
     notes = [
         "\u5df2\u67e5\u5230\u7684\u7f51\u9875\u8d44\u6599\uff1a",
         "- \u8fd9\u662f\u4e00\u4e2a\u9700\u8981\u4f9d\u636e\u8d44\u6599\u7684\u95ee\u9898\u3002",
@@ -980,6 +987,37 @@ def _is_freshness_sensitive_prompt(prompt: str) -> bool:
         "price", "news", "version", "recent",
     ]
     return any(m in text for m in markers)
+
+
+def _is_sports_recent_query(prompt: str) -> bool:
+    text = str(prompt or "").lower()
+    if not text:
+        return False
+    markers = [
+        "nba", "cba", "lakers", "warriors", "thunder", "lebron", "james", "curry", "doncic",
+        "詹姆斯", "勒布朗", "湖人", "勇士", "雷霆", "东契奇", "库里", "球员", "球队",
+        "最近", "近况", "表现", "数据", "最近一场", "对阵", "得分", "篮板", "助攻", "命中率", "战绩", "赛程", "赛后",
+    ]
+    return any(m in text for m in markers)
+
+
+def _has_stats_page_evidence(rows: list[dict]) -> bool:
+    stats_markers = [
+        "stats", "stat", "player", "players", "game log", "gamelog", "boxscore",
+        "技术统计", "球员", "数据", "最近一场", "赛后",
+    ]
+    for row in rows or []:
+        blob = " ".join(
+            [
+                str((row or {}).get("title", "") or "").lower(),
+                str((row or {}).get("url", "") or "").lower(),
+                str((row or {}).get("snippet", "") or "").lower(),
+                str((row or {}).get("domain", "") or "").lower(),
+            ]
+        )
+        if any(m in blob for m in stats_markers):
+            return True
+    return False
 
 
 def _extract_recency_days(text: str, today: date) -> tuple[int | None, str]:
