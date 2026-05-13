@@ -950,9 +950,12 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
         )
     if software_version_query:
         logger.info("web_evidence software_version_query=1")
+    official_software_release_page = _has_official_software_release_page(merged, q)
     if freshness_sensitive and not any((x.get("recency_days") is not None and int(x.get("recency_days")) <= 365) for x in merged[:5]):
         if trusted_stats_page_evidence:
             logger.info("web_evidence freshness_bypass_reason=trusted_stats_page_evidence")
+        elif official_software_release_page:
+            logger.info("web_evidence freshness_bypass_reason=official_software_release_page")
         else:
             logger.info("web_evidence freshness_sensitive_no_recent=1")
             return "", len(merged[:5]), [str(x.get("title", ""))[:60] for x in merged[:3]], top_score, "no_recent_within_1y", False, []
@@ -1031,6 +1034,31 @@ def _is_software_version_query(prompt: str) -> bool:
     version_markers = ["最新版", "最新版本", "当前版本", "稳定版", "latest", "version", "release", "stable"]
     software_markers = ["ruby", "node", "nodejs", "node.js", "python", "postgresql", "redis", "docker", "go", "rust"]
     return any(m in text for m in version_markers) and any(s in text for s in software_markers)
+
+
+def _has_official_software_release_page(rows: list[dict], query: str) -> bool:
+    if not _is_software_version_query(query):
+        return False
+    trusted_domains = [
+        "ruby-lang.org", "nodejs.org", "python.org", "postgresql.org", "redis.io",
+        "docker.com", "docs.docker.com", "go.dev", "rust-lang.org",
+    ]
+    release_markers = ["release", "releases", "download", "downloads", "changelog", "version", "stable", "latest", "发布", "版本"]
+    for row in rows or []:
+        host = str((row or {}).get("domain", "") or "").lower()
+        if not host:
+            host = (urlparse(str((row or {}).get("url", "") or "").strip()).netloc or "").lower()
+        blob = " ".join(
+            [
+                host,
+                str((row or {}).get("title", "") or "").lower(),
+                str((row or {}).get("url", "") or "").lower(),
+                str((row or {}).get("snippet", "") or "").lower(),
+            ]
+        )
+        if any(d in host for d in trusted_domains) and any(m in blob for m in release_markers):
+            return True
+    return False
 
 
 def _has_stats_page_evidence(rows: list[dict]) -> bool:
@@ -1462,10 +1490,10 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         tool_notes.append("direct_url_mode=1")
     elif math_result is not None:
         tool_notes.append("math_tool=numeric_compare")
-    elif intent.kind == "current_fact" and not _is_explicit_history_query(prompt):
+    elif (intent.kind == "current_fact" or _is_software_version_query(web_query or prompt)) and not _is_explicit_history_query(prompt):
         official_answer = await resolve_official_web_answer(
             web_query or prompt,
-            intent_kind=intent.kind,
+            intent_kind="current_fact",
             timeout=8.0,
         )
         if official_answer and str(official_answer.get("confidence", "")).lower() == "high":
