@@ -848,90 +848,6 @@ def _has_evaluation_signal_from_results(rows: list[dict]) -> tuple[bool, list[st
     return (len(hits) > 0), hits
 
 
-def _is_trivial_knowledge_query(prompt: str) -> bool:
-    text = str(prompt or "").strip()
-    if not text:
-        return True
-    if re.fullmatch(r"[\W_]+", text, flags=re.UNICODE):
-        return True
-    if re.fullmatch(r"\d+", text):
-        return True
-    core = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", text)
-    if len(core) <= 1:
-        return True
-    t = text.lower()
-    return any(x in t for x in ["你好", "在吗", "怎么了", "帮我看看", "测试", "hello", "hi", "test"])
-
-
-def _parse_knowledge_metadata(row: dict) -> dict:
-    raw = str((row or {}).get("metadata_json", "") or "").strip()
-    if not raw:
-        return {}
-    try:
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _is_exact_knowledge_hit(prompt: str, row: dict) -> bool:
-    q = re.sub(r"[^\w\u4e00-\u9fff]+", "", str(prompt or "").lower())
-    if not q:
-        return False
-    title = re.sub(r"[^\w\u4e00-\u9fff]+", "", str((row or {}).get("title", "") or "").lower())
-    if title and q == title:
-        return True
-    meta = _parse_knowledge_metadata(row)
-    aliases = [str(x) for x in (meta.get("aliases") or []) if str(x).strip()]
-    for a in aliases:
-        ax = re.sub(r"[^\w\u4e00-\u9fff]+", "", a.lower())
-        if ax and ax == q:
-            return True
-    return False
-
-
-def _should_direct_reply_knowledge_hit(prompt: str, row: dict) -> tuple[bool, str]:
-    exact = _is_exact_knowledge_hit(prompt, row)
-    score = float((row or {}).get("score", 0.0) or 0.0)
-    vector_source = str((row or {}).get("vector_source", "") or "").strip().lower()
-    vector_score = float((row or {}).get("vector_score", 0.0) or 0.0)
-    q_core = re.sub(r"[^\w\u4e00-\u9fff]+", "", str(prompt or ""))
-    if _is_trivial_knowledge_query(prompt) and not exact:
-        return False, "trivial_query"
-    if len(q_core) <= 2 and not exact:
-        return False, "short_query"
-    if exact:
-        return True, "exact_title_or_alias"
-    if score >= 0.60:
-        return True, "score_threshold"
-    if vector_source == "embedding_json" and vector_score >= 0.75 and score >= 0.35:
-        return True, "vector_threshold"
-    return False, "below_threshold"
-
-
-def _render_knowledge_direct_reply(row: dict) -> str:
-    title = str((row or {}).get("title", "") or "未命名")
-    section = str((row or {}).get("section", "") or "")
-    pack_key = str((row or {}).get("pack_key", "") or "unknown")
-    content = str((row or {}).get("content", "") or "").strip()
-    if len(content) > 600:
-        content = content[:600] + "..."
-    meta = _parse_knowledge_metadata(row)
-    source_name = str(meta.get("source_name", "") or "未提供")
-    source_license = str(meta.get("source_license", "") or "未提供")
-    assets = meta.get("assets") or []
-    assets_count = len(assets) if isinstance(assets, list) else 0
-    return (
-        f"【知识库｜{pack_key}】\n"
-        f"名称：{title}\n"
-        f"类型：{section or '未提供'}\n"
-        f"内容：\n{content or '（暂无内容）'}\n\n"
-        f"来源：{source_name}\n"
-        f"协议：{source_license}\n"
-        f"图片：已收录 {assets_count} 个资源"
-    ).strip()
-
-
 async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, int, list[str], float, str, bool, list[str]]:
     q = str(query or "").strip()
     if not q:
@@ -1531,34 +1447,6 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             strategy_krows = []
             tool_notes.append(f"knowledge_pack_error={str(e)[:120]}")
         if strategy_krows:
-            s_best = strategy_krows[0]
-            s_allow, s_reason = _should_direct_reply_knowledge_hit(prompt, s_best)
-            tool_notes.append(
-                f"knowledge_route candidate title={str(s_best.get('title',''))[:40]} score={float(s_best.get('score',0.0) or 0.0):.3f} "
-                f"vector_score={float(s_best.get('vector_score',0.0) or 0.0):.3f} vector_source={str(s_best.get('vector_source','') or 'none')} reason={s_reason}"
-            )
-            if s_allow:
-                tool_notes.append("knowledge_route=hit")
-                tool_notes.append("evidence_gate_source=knowledge")
-                return {
-                    "direct_reply": _render_knowledge_direct_reply(s_best),
-                    "should_call_llm": False,
-                    "web_used": False,
-                    "time_context": time_context,
-                    "profile_context": profile_context,
-                    "group_context": group_context,
-                    "retrieval_context": "",
-                    "style_context": "",
-                    "summary_retrieval_context": "",
-                    "history_context": "",
-                    "memory_context": "",
-                    "web_context": "",
-                    "lightweight_mode": "",
-                    "lightweight_prompt": "",
-                    "knowledge_evidence_context": "",
-                    "tool_notes": "\n".join(tool_notes).strip(),
-                }
-            tool_notes.append("knowledge_route=miss")
             lines = ["本地知识库："]
             ktitles = []
             for i, r in enumerate(strategy_krows[:3], 1):
@@ -1693,38 +1581,6 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 krows = []
                 tool_notes.append(f"knowledge_pack_error={str(e)[:120]}")
             if krows:
-                k_best = krows[0]
-                k_allow, k_reason = _should_direct_reply_knowledge_hit(prompt, k_best)
-                tool_notes.append(
-                    f"knowledge_route candidate title={str(k_best.get('title',''))[:40]} score={float(k_best.get('score',0.0) or 0.0):.3f} "
-                    f"vector_score={float(k_best.get('vector_score',0.0) or 0.0):.3f} vector_source={str(k_best.get('vector_source','') or 'none')} reason={k_reason}"
-                )
-                if k_allow:
-                    tool_notes.append("knowledge_route=hit")
-                    tool_notes.append("knowledge_pack=1")
-                    tool_notes.append(f"knowledge_pack_result_count={len(krows)}")
-                    tool_notes.append("evidence_gate_source=knowledge")
-                    return {
-                        "direct_reply": _render_knowledge_direct_reply(k_best),
-                        "should_call_llm": False,
-                        "web_used": False,
-                        "time_context": time_context,
-                        "profile_context": profile_context,
-                        "group_context": group_context,
-                        "retrieval_context": "",
-                        "style_context": "",
-                        "summary_retrieval_context": "",
-                        "history_context": "",
-                        "memory_context": "",
-                        "web_context": "",
-                        "lightweight_mode": "",
-                        "lightweight_prompt": "",
-                        "web_evidence_query": "",
-                        "web_evidence_context": "",
-                        "knowledge_evidence_context": "",
-                        "tool_notes": "\n".join(tool_notes).strip(),
-                    }
-                tool_notes.append("knowledge_route=miss")
                 lines = ["\u672c\u5730\u77e5\u8bc6\u5e93\u8d44\u6599\uff1a"]
                 ktitles = []
                 for i, r in enumerate(krows[:3], 1):
