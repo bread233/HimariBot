@@ -969,6 +969,11 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
         if len(merged) >= 5:
             break
     if not merged:
+        logger.info(
+            "web_evidence direct_unknown reason=no_results "
+            "evidence_count=0 raw_top_score=0.000 final_top_score=0.000 effective_top_score=0.000 "
+            "trusted_stats_page_evidence=0 official_source_boost_count=0 answerable=0"
+        )
         logger.info("web_evidence distilled result_count=0 top_titles=[] chars=0")
         return "", 0, [], top_score, "", False, []
     merged.sort(
@@ -988,6 +993,11 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
     top_score = max((float(x.get("score", 0.0)) for x in merged), default=0.0)
     final_top_score = max((float(x.get("final_score", 0.0)) for x in merged), default=0.0)
     if not merged:
+        logger.info(
+            "web_evidence direct_unknown reason=all_filtered_out "
+            "evidence_count=0 raw_top_score=0.000 final_top_score=0.000 effective_top_score=0.000 "
+            "trusted_stats_page_evidence=0 official_source_boost_count=0 answerable=0"
+        )
         logger.info("web_evidence distilled all_results_filtered_out=1")
         return "", 0, [], top_score, "", False, []
     stats_page_evidence = _has_stats_page_evidence(merged)
@@ -1008,6 +1018,13 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
             logger.info("web_evidence freshness_bypass_reason=official_software_release_page")
         else:
             logger.info("web_evidence freshness_sensitive_no_recent=1")
+            logger.info(
+                f"web_evidence direct_unknown reason=freshness_no_recent evidence_count={len(merged[:5])} "
+                f"raw_top_score={top_score:.3f} final_top_score={final_top_score:.3f} "
+                f"effective_top_score={max(top_score, final_top_score):.3f} "
+                f"trusted_stats_page_evidence={1 if trusted_stats_page_evidence else 0} "
+                f"official_source_boost_count={sum(1 for x in merged[:5] if bool(x.get('official')))} answerable=0"
+            )
             return "", len(merged[:5]), [str(x.get("title", ""))[:60] for x in merged[:3]], top_score, "no_recent_within_1y", False, []
     notes = [
         "\u5df2\u67e5\u5230\u7684\u7f51\u9875\u8d44\u6599\uff1a",
@@ -1771,8 +1788,45 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             tool_notes.append(f"web_evidence_eval_answerable={1 if eval_answerable else 0}")
             tool_notes.append(f"web_evidence_answerability_reason={eval_reason}")
             min_score = 0.35
+            if evidence_count > 0 and web_evidence_answerable and evidence_context:
+                tool_notes.append("web_evidence_reason=answerable_bypass")
+                tool_notes.append("evidence_gate_source=web")
+                tool_notes.append(f"web_evidence finalizer_enabled=1 answerable=1 reason={answerable_reason}")
+                logger.info(
+                    f"web_evidence finalizer_enabled=1 answerable=1 reason={answerable_reason} "
+                    f"final_top_score={final_top_score:.3f} raw_top_score={top_score:.3f}"
+                )
+                composed_web_evidence_context = "\n".join(
+                    x for x in [rag_web_evidence, evidence_context, persona_web_evidence] if x
+                ).strip()
+                return {
+                    "direct_reply": None,
+                    "should_call_llm": True,
+                    "web_used": True,
+                    "time_context": time_context,
+                    "profile_context": profile_context,
+                    "group_context": group_context,
+                    "retrieval_context": "",
+                    "style_context": "",
+                    "summary_retrieval_context": "",
+                    "history_context": "",
+                    "memory_context": "",
+                    "web_context": "",
+                    "lightweight_mode": "web_evidence",
+                    "lightweight_prompt": prompt,
+                    "web_evidence_query": evidence_query,
+                    "web_evidence_context": composed_web_evidence_context,
+                    "tool_notes": "\n".join(tool_notes).strip(),
+                }
             if evidence_context and effective_top_score >= min_score and evidence_sufficient and eval_answerable:
                 tool_notes.append("evidence_gate_source=web")
+                tool_notes.append(
+                    f"web_evidence finalizer_enabled=1 answerable={1 if web_evidence_answerable else 0} reason={answerable_reason}"
+                )
+                logger.info(
+                    f"web_evidence finalizer_enabled=1 answerable={1 if web_evidence_answerable else 0} reason={answerable_reason} "
+                    f"final_top_score={final_top_score:.3f} raw_top_score={top_score:.3f}"
+                )
                 composed_web_evidence_context = "\n".join(
                     x for x in [rag_web_evidence, evidence_context, persona_web_evidence] if x
                 ).strip()
@@ -1799,6 +1853,14 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 tool_notes.append("web_evidence_low_score=1")
             tool_notes.append("evidence_gate_source=none")
             tool_notes.append("evidence_gate_no_answer=1")
+            logger.info(
+                f"web_evidence direct_unknown reason=evidence_insufficient evidence_count={evidence_count} "
+                f"raw_top_score={top_score:.3f} final_top_score={final_top_score:.3f} "
+                f"effective_top_score={effective_top_score:.3f} "
+                f"trusted_stats_page_evidence={1 if trusted_stats_page_evidence else 0} "
+                f"official_source_boost_count={official_source_boost_count} "
+                f"answerable={1 if web_evidence_answerable else 0}"
+            )
             unknown_reply = "暂时没查到可靠资料，我不知道。"
             if is_eval and not eval_answerable:
                 unknown_reply = "暂时没查到足够可靠的评价资料，我不知道。"
@@ -1810,6 +1872,44 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 unknown_reply = route_unknown.strip()
             elif isinstance(default_unknown, str) and default_unknown.strip():
                 unknown_reply = default_unknown.strip()
+            if evidence_count > 0 and web_evidence_answerable and evidence_context:
+                logger.info(
+                    f"web_evidence direct_unknown_bypassed=1 reason=answerable evidence_count={evidence_count} "
+                    f"raw_top_score={top_score:.3f} final_top_score={final_top_score:.3f} "
+                    f"effective_top_score={effective_top_score:.3f} "
+                    f"trusted_stats_page_evidence={1 if trusted_stats_page_evidence else 0} "
+                    f"official_source_boost_count={official_source_boost_count} answerable=1"
+                )
+                composed_web_evidence_context = "\n".join(
+                    x for x in [rag_web_evidence, evidence_context, persona_web_evidence] if x
+                ).strip()
+                return {
+                    "direct_reply": None,
+                    "should_call_llm": True,
+                    "web_used": True,
+                    "time_context": time_context,
+                    "profile_context": profile_context,
+                    "group_context": group_context,
+                    "retrieval_context": "",
+                    "style_context": "",
+                    "summary_retrieval_context": "",
+                    "history_context": "",
+                    "memory_context": "",
+                    "web_context": "",
+                    "lightweight_mode": "web_evidence",
+                    "lightweight_prompt": prompt,
+                    "web_evidence_query": evidence_query,
+                    "web_evidence_context": composed_web_evidence_context,
+                    "tool_notes": "\n".join(tool_notes).strip(),
+                }
+            logger.info(
+                f"web_evidence direct_unknown reason=unknown_fallback evidence_count={evidence_count} "
+                f"raw_top_score={top_score:.3f} final_top_score={final_top_score:.3f} "
+                f"effective_top_score={effective_top_score:.3f} "
+                f"trusted_stats_page_evidence={1 if trusted_stats_page_evidence else 0} "
+                f"official_source_boost_count={official_source_boost_count} "
+                f"answerable={1 if web_evidence_answerable else 0}"
+            )
             return {
                 "direct_reply": unknown_reply,
                 "should_call_llm": False,
