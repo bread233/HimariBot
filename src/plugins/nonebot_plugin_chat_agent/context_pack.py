@@ -1042,6 +1042,9 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
             "  - \u5148\u7ed9\u51fa\u8c28\u614e\u7ed3\u8bba\u3002",
             "  - \u82e5\u8bc1\u636e\u8f83\u5f31\uff0c\u8981\u660e\u786e\u8bf4\u51fa\u4e0d\u786e\u5b9a\u6027\u3002",
             "  - \u4e0d\u8981\u7f16\u9020\u6458\u8981\u91cc\u6ca1\u6709\u7684\u4e8b\u5b9e\u3002",
+            f"- \u8bc1\u636e\u6307\u6807\uff1afinal_top_score={final_top_score:.3f}",
+            f"- \u8bc1\u636e\u6307\u6807\uff1aofficial_source_boost_count={sum(1 for x in merged[:5] if bool(x.get('official')))}",
+            f"- \u8bc1\u636e\u6307\u6807\uff1atrusted_stats_page_evidence={1 if trusted_stats_page_evidence else 0}",
         ]
     )
     out = "\n".join(notes).strip()
@@ -1703,6 +1706,34 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             snippet_lens = [len(x.strip()) for x in re.findall(r"\u6458\u8981\uff1a(.*)", evidence_context)]
             max_snippet_len = max(snippet_lens) if snippet_lens else 0
             has_official = "\u662f\u5426\u5b98\u65b9\uff1a\u662f" in evidence_context
+            final_top_score = 0.0
+            m_final = re.search(r"final_top_score=([0-9]+(?:\\.[0-9]+)?)", evidence_context)
+            if m_final:
+                try:
+                    final_top_score = float(m_final.group(1))
+                except Exception:
+                    final_top_score = 0.0
+            effective_top_score = final_top_score if final_top_score > 0 else top_score
+            m_official = re.search(r"official_source_boost_count=([0-9]+)", evidence_context)
+            official_source_boost_count = int(m_official.group(1)) if m_official else 0
+            trusted_stats_page_evidence = "trusted_stats_page_evidence=1" in evidence_context
+            web_evidence_answerable = (
+                (evidence_count > 0 and effective_top_score >= 0.60)
+                or (official_source_boost_count > 0 and evidence_count > 0)
+                or trusted_stats_page_evidence
+            )
+            answerable_reason = "none"
+            if trusted_stats_page_evidence:
+                answerable_reason = "trusted_stats"
+            elif official_source_boost_count > 0 and evidence_count > 0:
+                answerable_reason = "official"
+            elif evidence_count > 0 and effective_top_score >= 0.60:
+                answerable_reason = "final_top_score"
+            tool_notes.append(f"web_evidence_answerable={1 if web_evidence_answerable else 0}")
+            tool_notes.append(f"web_evidence_answerable_reason={answerable_reason}")
+            tool_notes.append(
+                f"web_evidence answerable={1 if web_evidence_answerable else 0} reason={answerable_reason} final_top_score={final_top_score:.3f} raw_top_score={top_score:.3f}"
+            )
             weak_hits = sum(1 for w in ["\u4e24\u6781\u5206\u5316", "\u503c\u5f97\u5165\u624b"] if w in evidence_context)
             weak_single = evidence_count == 1 and max_snippet_len < 80 and weak_hits > 0
             is_eval = _is_evaluative_question(prompt)
@@ -1711,7 +1742,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             evidence_sufficient = (
                 evidence_count >= 2
                 or (evidence_count == 1 and max_snippet_len >= 80)
-                or (evidence_count == 1 and has_official and top_score >= 0.35)
+                or (evidence_count == 1 and has_official and effective_top_score >= 0.35)
+                or web_evidence_answerable
                 or eval_short_ok
             ) and not weak_single
             tool_notes.append(f"web_evidence_filtered_count={evidence_count}")
@@ -1722,7 +1754,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 tool_notes.append("web_evidence_reason=weak_single_snippet")
             elif evidence_count == 0:
                 tool_notes.append("web_evidence_reason=no_filtered_results")
-            elif evidence_count == 1 and max_snippet_len < 80 and not (has_official and top_score >= 0.35):
+            elif evidence_count == 1 and max_snippet_len < 80 and not (has_official and effective_top_score >= 0.35):
                 tool_notes.append("web_evidence_reason=single_short_snippet")
             else:
                 tool_notes.append("web_evidence_reason=sufficient")
@@ -1732,14 +1764,14 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             if is_eval:
                 cond_multi = evidence_count >= 2 and has_eval_signal
                 cond_single_long = evidence_count == 1 and max_snippet_len >= 80 and has_eval_signal
-                cond_single_official = evidence_count == 1 and has_official and top_score >= 0.35 and has_eval_signal
+                cond_single_official = evidence_count == 1 and has_official and effective_top_score >= 0.35 and has_eval_signal
                 cond_signal_short = evidence_count == 1 and max_snippet_len >= 30 and has_eval_signal
                 eval_answerable = (cond_multi or cond_single_long or cond_single_official or cond_signal_short) and not (eval_weak_words > 0 and not has_eval_signal)
                 eval_reason = "evaluation_signal" if eval_answerable else "weak_evaluation_evidence"
-            tool_notes.append(f"web_evidence_answerable={1 if eval_answerable else 0}")
+            tool_notes.append(f"web_evidence_eval_answerable={1 if eval_answerable else 0}")
             tool_notes.append(f"web_evidence_answerability_reason={eval_reason}")
             min_score = 0.35
-            if evidence_context and top_score >= min_score and evidence_sufficient and eval_answerable:
+            if evidence_context and effective_top_score >= min_score and evidence_sufficient and eval_answerable:
                 tool_notes.append("evidence_gate_source=web")
                 composed_web_evidence_context = "\n".join(
                     x for x in [rag_web_evidence, evidence_context, persona_web_evidence] if x
@@ -1763,7 +1795,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     "web_evidence_context": composed_web_evidence_context,
                     "tool_notes": "\n".join(tool_notes).strip(),
                 }
-            if evidence_context and top_score < min_score:
+            if evidence_context and effective_top_score < min_score:
                 tool_notes.append("web_evidence_low_score=1")
             tool_notes.append("evidence_gate_source=none")
             tool_notes.append("evidence_gate_no_answer=1")
