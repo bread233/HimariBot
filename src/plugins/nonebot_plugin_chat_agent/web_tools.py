@@ -140,26 +140,49 @@ def _sports_source_adjustment(url: str, title: str, snippet: str) -> tuple[float
         "nba.hupu.com", "qiumiwu.com", "slamdunk.sports.sina.com.cn",
         "sports.cctv.com", "sports.qq.com", "sports.sina.com.cn",
     ]
-    stats_signals = ["player", "players", "stats", "stat", "game log", "gamelog", "boxscore", "数据", "技术统计"]
-    if any(d in host for d in quality_domains) and any(s in merged for s in stats_signals):
-        boost += 0.25
+    strong_stats_signals = ["player", "players", "stats", "stat", "game log", "gamelog", "boxscore", "数据", "技术统计"]
+    if any(d in host for d in quality_domains) and any(s in merged for s in strong_stats_signals):
+        boost += 0.35
         boosted = True
     elif any(d in host for d in quality_domains):
-        boost += 0.12
+        boost += 0.18
+        boosted = True
+    if "qiumiwu.com" in host and "/player/" in path and "/stat" in path:
+        boost += 0.22
+        boosted = True
+    if "nba.hupu.com" in host and "/players/" in path:
+        boost += 0.20
+        boosted = True
+    if "slamdunk.sports.sina.com.cn" in host and "/player" in path and "stat" in path:
+        boost += 0.20
+        boosted = True
+    if "basketball-reference.com" in host and "/players/" in path and "gamelog" in path:
+        boost += 0.20
+        boosted = True
+    if "statmuse.com" in host and "/nba" in path:
+        boost += 0.18
+        boosted = True
+    if "nba.com" in host and "stats" in path:
+        boost += 0.18
+        boosted = True
+    if "espn.com" in host and "/nba/player" in path and "gamelog" in path:
+        boost += 0.18
         boosted = True
 
     penalty = 0.0
     penalized = False
     low_quality_signals = [
-        "aiyouxi", "hth", "milan", "leyu", "kaiyun", "jiuyou", "crown", "huatihui",
-        "华体", "皇冠", "米兰体育", "开云", "乐鱼", "半岛", "体育app下载", "sports-news/a",
+        "aiyouxi", "igame", "wanbo", "mangosports", "bsport", "b-sport",
+        "hth", "milan", "leyu", "kaiyun", "jiuyou", "crown", "huatihui", "bandao",
+        "qiutan-sports", "home-qiutan-sports", "sports-livezone", "blog-xmsports", "zh-", "sports-news/a", "news-20",
+        "华体", "华体会", "皇冠", "米兰体育", "开云", "乐鱼", "半岛", "万博", "芒果体育", "爱游戏", "球探壳站", "体育app下载",
     ]
     if any(s in merged for s in low_quality_signals):
-        penalty -= 0.30
+        penalty -= 0.60
         penalized = True
     generic_seo = ["从天赋少年到传奇", "全球偶像", "伟大历程", "巅峰揭秘"]
     if any(s.lower() in merged for s in generic_seo):
-        penalty -= 0.18
+        penalty -= 0.35
         penalized = True
     return boost + penalty, boosted, penalized
 
