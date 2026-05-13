@@ -730,6 +730,45 @@ def _parse_embedding_json_safe(payload: str) -> list[float] | None:
     return out
 
 
+def _load_knowledge_vector_rows_sync(db_path: Path, pack_key: str | None, scan_limit: int) -> list[dict]:
+    if scan_limit <= 0:
+        return []
+    if not db_path.exists():
+        return []
+    conn = sqlite3.connect(db_path)
+    try:
+        sql = """
+            SELECT
+                c.pack_key,c.doc_key,c.chunk_key,c.title,c.section,c.content,c.content_hash,c.source_path,c.source_url,
+                c.chunk_index,c.token_count,c.embedding_json,c.metadata_json,c.enabled,d.enabled,p.enabled,c.updated_at,c.id
+            FROM chat_agent_knowledge_chunks c
+            LEFT JOIN chat_agent_knowledge_documents d ON d.pack_key=c.pack_key AND d.doc_key=c.doc_key
+            LEFT JOIN chat_agent_knowledge_packs p ON p.pack_key=c.pack_key
+            WHERE c.embedding_json IS NOT NULL
+              AND TRIM(c.embedding_json) <> ''
+        """
+        args: list = []
+        if pack_key:
+            sql += " AND c.pack_key = ?"
+            args.append(str(pack_key))
+        sql += " ORDER BY c.updated_at DESC, c.id DESC, c.chunk_key ASC LIMIT ?"
+        args.append(int(scan_limit))
+        rows = conn.execute(sql, tuple(args)).fetchall()
+    finally:
+        conn.close()
+    out: list[dict] = []
+    for r in rows:
+        out.append(
+            {
+                "pack_key": r[0], "doc_key": r[1], "chunk_key": r[2], "title": r[3], "section": r[4], "content": r[5],
+                "content_hash": r[6], "source_path": r[7], "source_url": r[8], "chunk_index": r[9], "token_count": r[10],
+                "embedding_json": r[11], "metadata_json": r[12], "enabled": r[13], "doc_enabled": r[14], "pack_enabled": r[15],
+                "updated_at": r[16], "id": r[17],
+            }
+        )
+    return out
+
+
 def _search_knowledge_chunks_hybrid_sync(
     db_path: Path,
     query: str,
@@ -782,18 +821,23 @@ def _search_knowledge_chunks_hybrid_sync(
         if lexical_score > 0.0:
             lexical_candidates[key] = x
 
-        if has_query_vec and embedding_client is not None:
-            cvec = _parse_embedding_json_safe(str(x.get("embedding_json", "") or ""))
-            if cvec:
-                try:
-                    raw_cos = float(embedding_client.cosine_similarity(qvec, cvec))
-                    vs = _normalize_cosine_to_unit(raw_cos)
-                    vx = dict(x)
-                    vx["vector_score"] = vs
-                    vx["vector_source"] = "embedding_json"
-                    vector_candidates.append(vx)
-                except Exception as e:
-                    vector_error = str(e)[:160]
+    if has_query_vec and embedding_client is not None:
+        vector_rows = _load_knowledge_vector_rows_sync(db_path, pack_key=pack_key, scan_limit=scan_cap)
+        for r in vector_rows:
+            if int(r.get("enabled", 0) or 0) != 1 or int(r.get("doc_enabled", 0) or 0) != 1 or int(r.get("pack_enabled", 0) or 0) != 1:
+                continue
+            cvec = _parse_embedding_json_safe(str(r.get("embedding_json", "") or ""))
+            if not cvec:
+                continue
+            try:
+                raw_cos = float(embedding_client.cosine_similarity(qvec, cvec))
+                vs = _normalize_cosine_to_unit(raw_cos)
+                vx = dict(r)
+                vx["vector_score"] = vs
+                vx["vector_source"] = "embedding_json"
+                vector_candidates.append(vx)
+            except Exception as e:
+                vector_error = str(e)[:160]
 
     if vector_candidates:
         vector_candidates.sort(key=lambda a: float(a.get("vector_score", 0.0) or 0.0), reverse=True)
@@ -804,6 +848,7 @@ def _search_knowledge_chunks_hybrid_sync(
         z = dict(row)
         z["vector_score"] = _pseudo_vector_score(q_norm, zh_tokens, en_tokens, z)
         z["vector_source"] = "pseudo"
+        z["candidate_source"] = "lexical"
         merged[key] = z
 
     for x in vector_candidates:
@@ -812,6 +857,8 @@ def _search_knowledge_chunks_hybrid_sync(
         if not old:
             z = dict(x)
             z.setdefault("lexical_score", 0.0)
+            z["candidate_source"] = "vector"
+            z["vector_rank"] = len(merged) + 1
             merged[key] = z
             continue
         old_vs = float(old.get("vector_score", 0.0) or 0.0)
@@ -819,6 +866,7 @@ def _search_knowledge_chunks_hybrid_sync(
         if new_vs >= old_vs:
             old["vector_score"] = new_vs
             old["vector_source"] = "embedding_json"
+        old["candidate_source"] = "both"
 
     out: list[dict] = []
     for x in merged.values():
