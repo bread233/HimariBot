@@ -855,6 +855,7 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
     today = date.today()
     freshness_sensitive = _is_freshness_sensitive_prompt(q)
     sports_recent_query = _is_sports_recent_query(q)
+    software_version_query = _is_software_version_query(q)
     seen = set()
     for row in results or []:
         title = str((row or {}).get("title", "") or "").strip()
@@ -868,6 +869,8 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
             continue
         seen.add(key)
         provider_score = float(row.get("weighted_score", row.get("score", 0.0)) or 0.0)
+        web_rank_score = float(row.get("web_rank_score", provider_score) or provider_score)
+        generic_adjust = float(row.get("generic_adjust", 0.0) or 0.0)
         fallback_score = _fallback_lexical_relevance(q, title, snippet, url)
         score = max(provider_score, fallback_score)
         authority = float(row.get("authority_score", 0.0) or 0.0)
@@ -883,7 +886,13 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
             else:
                 freshness_weight = -0.10
         official_weight = 0.35 if (official and score >= 0.15) else 0.0
-        final_score = score + official_weight + freshness_weight
+        # 保留 raw lexical/provider 兼容，但最终排序优先吸收 web_tools 的 rank/adjust。
+        final_score = max(score, web_rank_score) + official_weight + freshness_weight
+        low_blob = " ".join([title.lower(), snippet.lower(), url.lower(), domain.lower()])
+        ruby_query = "ruby" in q.lower()
+        if ruby_query and any(x in low_blob for x in ["rubymine", "jetbrains", "破解版", "crack", "下载站", "软件园"]):
+            final_score -= 0.80
+        final_score += generic_adjust
         if score > top_score:
             top_score = score
         if final_score > final_top_score:
@@ -898,6 +907,8 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
                 "snippet": snippet,
                 "score": score,
                 "provider_score": provider_score,
+                "web_rank_score": web_rank_score,
+                "generic_adjust": generic_adjust,
                 "fallback_score": fallback_score,
                 "official": official,
                 "recency_days": recency_days,
@@ -937,6 +948,8 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
             f"trusted_stats_page_evidence={1 if trusted_stats_page_evidence else 0} "
             f"stats_page_evidence_source_count={trusted_stats_page_count}"
         )
+    if software_version_query:
+        logger.info("web_evidence software_version_query=1")
     if freshness_sensitive and not any((x.get("recency_days") is not None and int(x.get("recency_days")) <= 365) for x in merged[:5]):
         if trusted_stats_page_evidence:
             logger.info("web_evidence freshness_bypass_reason=trusted_stats_page_evidence")
@@ -1009,6 +1022,15 @@ def _is_sports_recent_query(prompt: str) -> bool:
         "最近", "近况", "表现", "数据", "最近一场", "对阵", "得分", "篮板", "助攻", "命中率", "战绩", "赛程", "赛后",
     ]
     return any(m in text for m in markers)
+
+
+def _is_software_version_query(prompt: str) -> bool:
+    text = str(prompt or "").lower()
+    if not text:
+        return False
+    version_markers = ["最新版", "最新版本", "当前版本", "稳定版", "latest", "version", "release", "stable"]
+    software_markers = ["ruby", "node", "nodejs", "node.js", "python", "postgresql", "redis", "docker", "go", "rust"]
+    return any(m in text for m in version_markers) and any(s in text for s in software_markers)
 
 
 def _has_stats_page_evidence(rows: list[dict]) -> bool:
