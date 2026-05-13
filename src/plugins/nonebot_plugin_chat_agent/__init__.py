@@ -306,6 +306,8 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     return "generic_or_speculative"
                 if "最近表现" in str(query_text or "") and any(k in t for k in ["淘汰原因", "可能是因为"]):
                     return "wrong_focus"
+                if len(t) < 45 and "没有提取到可确认的近期数据" not in t and "没有提取到可确认的具体数据" not in t:
+                    return "too_short"
                 return ""
             style_extra = ""
             if sports_stats_first:
@@ -433,10 +435,22 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     retry_short = truncate_reply(strip_thinking(retry_short), config.chat_agent_max_reply_length)
                     retry_short = str(retry_short or "").strip()
                     if retry_short:
-                        reply = retry_short
-                        logger.info(
-                            f"web_evidence retry_success=1 kind=short_answer retry_chars={len(reply)}"
-                        )
+                        short_reason = ""
+                        if definition_summary:
+                            short_reason = _definition_quality_reason(retry_short)
+                        elif sports_stats_first:
+                            short_reason = _sports_quality_reason(retry_short, evidence_prompt)
+                        elif len(retry_short) < 45:
+                            short_reason = "too_short"
+                        if short_reason:
+                            logger.info(
+                                f"web_evidence retry_still_bad=1 kind=short_answer reason={short_reason} retry_chars={len(retry_short)}"
+                            )
+                        else:
+                            reply = retry_short
+                            logger.info(
+                                f"web_evidence retry_success=1 kind=short_answer retry_chars={len(reply)}"
+                            )
                 except Exception:
                     pass
             definition_reason = _definition_quality_reason(reply) if answerable and definition_summary else ""
@@ -466,10 +480,22 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     retry_def = truncate_reply(strip_thinking(retry_def), config.chat_agent_max_reply_length)
                     retry_def = str(retry_def or "").strip()
                     if retry_def:
-                        reply = retry_def
-                        logger.info(f"web_evidence retry_success=1 kind=definition_quality retry_chars={len(reply)}")
+                        def_reason_retry = _definition_quality_reason(retry_def)
+                        if def_reason_retry:
+                            logger.info(
+                                f"web_evidence retry_still_bad=1 kind=definition_quality reason={def_reason_retry} retry_chars={len(retry_def)}"
+                            )
+                        else:
+                            reply = retry_def
+                            logger.info(f"web_evidence retry_success=1 kind=definition_quality retry_chars={len(reply)}")
                 except Exception:
                     logger.info("web_evidence retry_still_bad=1 kind=definition_quality")
+            definition_reason_final = _definition_quality_reason(reply) if answerable and definition_summary else ""
+            if definition_reason_final:
+                reply = _fallback_from_evidence_context(evidence_context)
+                if len(reply) < 45:
+                    reply = f"根据当前网页资料：{reply}。简单说，它是一款以精灵收集与养成为核心的冒险游戏；主要特征包括开放世界探索和宠物培养对战。"
+                logger.info(f"web_evidence definition_quality_fallback=1 reason={definition_reason_final}")
             sports_reason = _sports_quality_reason(reply, evidence_prompt) if answerable and sports_stats_first else ""
             if sports_reason:
                 logger.info(f"web_evidence sports_quality_retry=1 reason={sports_reason}")
@@ -498,9 +524,11 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                         logger.info(f"web_evidence retry_success=1 kind=sports_quality retry_chars={len(reply)}")
                     else:
                         reply = "根据当前网页资料：已命中球员数据统计页/球员资料页；但当前资料没有提取到可确认的近期逐场数据，因此只能确认相关数据页存在，不能推测淘汰原因。"
-                        logger.info("web_evidence sports_quality_fallback=1 reason=retry_still_bad")
+                        logger.info("web_evidence retry_still_bad=1 kind=sports_quality reason=bad_generic")
+                        logger.info("web_evidence sports_quality_fallback=1 reason=bad_generic")
                 except Exception:
                     reply = "根据当前网页资料：已命中球员数据统计页/球员资料页；但当前资料没有提取到可确认的近期逐场数据，因此只能确认相关数据页存在，不能推测淘汰原因。"
+                    logger.info("web_evidence retry_still_bad=1 kind=sports_quality reason=retry_exception")
                     logger.info("web_evidence sports_quality_fallback=1 reason=retry_exception")
             if _should_sanitize_task_reply(prompt, context_pack):
                 reply = sanitize_task_reply(reply) or reply
