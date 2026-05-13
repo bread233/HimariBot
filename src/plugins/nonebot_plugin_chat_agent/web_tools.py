@@ -14,6 +14,26 @@ from nonebot import logger
 
 _WEB_QUALITY_RULES_CACHE: dict[str, dict] = {}
 _WEB_QUALITY_RULES_DEFAULT_PATH = "data/nonebot_chat_agent/web_quality_rules.json"
+_WEB_QUALITY_RULES_DEFAULT_TEMPLATE = {
+    "version": 1,
+    "low_quality_keywords_extra": [],
+    "official_domains_extra": [],
+    "sports_trusted_domains_extra": [],
+    "sports_low_quality_keywords_extra": [],
+    "software_mismatch_keywords_extra": [],
+    "entity_rules": {
+        "ruby": {
+            "official_domains": ["ruby-lang.org"],
+            "mismatch_keywords": ["rubymine", "jetbrains", "破解版", "下载站"],
+            "low_quality_keywords": [],
+        },
+        "roco_world": {
+            "official_domains": ["rocom.qq.com", "taptap.cn", "baike.baidu.com", "wikipedia.org"],
+            "mismatch_keywords": [],
+            "low_quality_keywords": ["爱游戏", "igame", "体育"],
+        },
+    },
+}
 
 
 def _get_web_quality_rules_path(config) -> str:
@@ -47,6 +67,31 @@ def _normalize_domain_list(value) -> set[str]:
     return out
 
 
+def _bootstrap_web_quality_rules_file(path: str) -> None:
+    p = Path(path).expanduser()
+    if p.exists():
+        logger.info(f"json_config bootstrap_skip_exists path={str(p)!r}")
+        return
+    payload = json.dumps(_WEB_QUALITY_RULES_DEFAULT_TEMPLATE, ensure_ascii=False, indent=2) + "\n"
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        tmp.write_text(payload, encoding="utf-8")
+        try:
+            os.replace(str(tmp), str(p))
+        except Exception:
+            if not p.exists():
+                p.write_text(payload, encoding="utf-8")
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except Exception:
+                    pass
+        logger.info(f"json_config bootstrap_created path={str(p)!r}")
+    except Exception as e:
+        logger.warning(f"json_config bootstrap_failed path={str(p)!r} message={str(e)[:200]!r}")
+
+
 def _load_web_quality_rules(config) -> dict:
     path = _get_web_quality_rules_path(config)
     try:
@@ -66,6 +111,7 @@ def _load_web_quality_rules(config) -> dict:
     }
     p = Path(path).expanduser()
     if not p.exists():
+        _bootstrap_web_quality_rules_file(path)
         _WEB_QUALITY_RULES_CACHE[resolved] = empty
         return empty
     try:
