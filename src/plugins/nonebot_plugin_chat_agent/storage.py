@@ -701,18 +701,57 @@ def _pseudo_vector_score(query_norm: str, zh_tokens: list[str], en_tokens: list[
     return min(1.0, max(0.0, score))
 
 
+def _normalize_cosine_to_unit(v: float) -> float:
+    # cosine in [-1, 1] -> [0, 1]
+    x = (float(v) + 1.0) / 2.0
+    if x < 0.0:
+        return 0.0
+    if x > 1.0:
+        return 1.0
+    return x
+
+
+def _parse_embedding_json_safe(payload: str) -> list[float] | None:
+    s = str(payload or "").strip()
+    if not s:
+        return None
+    try:
+        arr = json.loads(s)
+    except Exception:
+        return None
+    if not isinstance(arr, list) or not arr:
+        return None
+    out: list[float] = []
+    try:
+        for x in arr:
+            out.append(float(x))
+    except Exception:
+        return None
+    return out
+
+
 def _search_knowledge_chunks_hybrid_sync(
     db_path: Path,
     query: str,
     pack_key: str | None = None,
     limit: int = 5,
     min_score: float = 0.25,
+    query_embedding: list[float] | None = None,
+    max_vector_scan: int = 1000,
 ) -> list[dict]:
-    all_rows = _list_knowledge_chunks_sync(db_path, pack_key=pack_key, limit=1000)
+    all_rows = _list_knowledge_chunks_sync(db_path, pack_key=pack_key, limit=max(100, int(max_vector_scan or 1000)))
     q_norm, zh_tokens, en_tokens, digit_tokens = _tokenize_text_for_knowledge(query)
     if not q_norm and not zh_tokens and not en_tokens and not digit_tokens:
         return []
+    qvec = list(query_embedding or [])
+    has_query_vec = bool(qvec)
+    vector_error = ""
+    vector_scanned = 0
     merged: dict[str, dict] = {}
+    try:
+        from . import embedding_client  # type: ignore
+    except Exception:
+        embedding_client = None  # type: ignore
     for r in all_rows:
         if int(r.get("enabled", 0) or 0) != 1 or int(r.get("doc_enabled", 0) or 0) != 1 or int(r.get("pack_enabled", 0) or 0) != 1:
             continue
@@ -736,7 +775,20 @@ def _search_knowledge_chunks_hybrid_sync(
         if q_norm and (q_norm in title_norm or q_norm in section_norm or q_norm in content_norm):
             lexical_score += 0.15
         x["lexical_score"] = lexical_score
-        x["vector_score"] = _pseudo_vector_score(q_norm, zh_tokens, en_tokens, x)
+        vector_score = _pseudo_vector_score(q_norm, zh_tokens, en_tokens, x)
+        vector_source = "pseudo"
+        if has_query_vec and vector_scanned < max(1, int(max_vector_scan or 1000)) and embedding_client is not None:
+            cvec = _parse_embedding_json_safe(str(x.get("embedding_json", "") or ""))
+            if cvec:
+                vector_scanned += 1
+                try:
+                    raw_cos = float(embedding_client.cosine_similarity(qvec, cvec))
+                    vector_score = _normalize_cosine_to_unit(raw_cos)
+                    vector_source = "embedding_json"
+                except Exception as e:
+                    vector_error = str(e)[:160]
+        x["vector_score"] = vector_score
+        x["vector_source"] = vector_source
         merged[key] = x
     out: list[dict] = []
     for x in merged.values():
@@ -753,8 +805,11 @@ def _search_knowledge_chunks_hybrid_sync(
             blob = f"{title_norm}{content_norm}"
             if not all(d in blob for d in digit_tokens):
                 x["vector_score"] = min(float(x.get("vector_score", 0.0) or 0.0), 0.25)
-        final = float(x.get("lexical_score", 0.0) or 0.0) * 0.65 + float(x.get("vector_score", 0.0) or 0.0) * 0.35 + title_bonus + category_bonus
+        final = float(x.get("lexical_score", 0.0) or 0.0) * 0.55 + float(x.get("vector_score", 0.0) or 0.0) * 0.35 + title_bonus + category_bonus
         x["score"] = round(final, 4)
+        x["hybrid_score"] = x["score"]
+        if vector_error:
+            x["vector_error"] = vector_error
         if final >= float(min_score):
             out.append(x)
     out.sort(key=lambda a: (float(a.get("score", 0.0)), float(a.get("lexical_score", 0.0)), float(a.get("vector_score", 0.0))), reverse=True)
@@ -762,7 +817,28 @@ def _search_knowledge_chunks_hybrid_sync(
 
 
 async def search_knowledge_chunks_hybrid(config, query: str, pack_key: str | None = None, limit: int = 5, min_score: float = 0.25) -> list[dict]:
-    return await asyncio.to_thread(_search_knowledge_chunks_hybrid_sync, config.chat_agent_db_path, query, pack_key, limit, min_score)
+    query_vec: list[float] | None = None
+    try:
+        from . import embedding_client  # type: ignore
+        q_items = [{"source": "knowledge_query", "content": str(query or "")}]
+        q_res = await embedding_client.embed_texts_with_cache(config, q_items)
+        if q_res and isinstance(q_res[0], list) and q_res[0]:
+            query_vec = [float(x) for x in q_res[0]]
+    except Exception:
+        query_vec = None
+    max_vector_scan = int(getattr(config, "chat_agent_knowledge_max_vector_scan", 1000) or 1000)
+    if max_vector_scan <= 0:
+        max_vector_scan = 1000
+    return await asyncio.to_thread(
+        _search_knowledge_chunks_hybrid_sync,
+        config.chat_agent_db_path,
+        query,
+        pack_key,
+        limit,
+        min_score,
+        query_vec,
+        max_vector_scan,
+    )
 
 
 async def delete_knowledge_pack(config, pack_key: str) -> int:
