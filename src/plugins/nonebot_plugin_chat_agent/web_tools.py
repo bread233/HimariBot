@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
+from nonebot import logger
 
 def _clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "")).strip()
