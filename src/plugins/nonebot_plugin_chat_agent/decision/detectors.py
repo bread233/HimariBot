@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from ..evidence.url_tools import extract_urls
+from ..tools.math_tools import detect_numeric_compare
+
 def _is_context_question(prompt: str) -> bool:
     text = (prompt or "").strip()
     return any(
