@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from .embedding_client import cosine_similarity, embed_texts_with_cache
+from ..clients.embedding_client import cosine_similarity, embed_texts_with_cache
 
 _STOPWORDS = {
     "用户",

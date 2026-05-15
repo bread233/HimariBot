@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 try:
-    from .storage import get_log_import_file, insert_log_message, upsert_log_import_file
+    from ..stores.storage import get_log_import_file, insert_log_message, upsert_log_import_file
 except ImportError:
     from storage import get_log_import_file, insert_log_message, upsert_log_import_file
 

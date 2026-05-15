@@ -242,7 +242,7 @@ async def _rank_web_chunks(config, query: str, chunks: list[dict]) -> list[dict]
     query_text = f"为这个问题检索最相关的网页资料：{query}"
     docs = [f"网页资料：标题：{c.get('title','')}\nURL：{c.get('url','')}\n内容：{c.get('content','')}" for c in chunks]
     try:
-        from .embedding_client import cosine_similarity, embed_texts
+        from ..clients.embedding_client import cosine_similarity, embed_texts
 
         vectors = await embed_texts(config, [query_text] + docs)
         query_vector = vectors[0]

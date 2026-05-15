@@ -30,7 +30,7 @@ if __package__ in (None, ""):
         upsert_chat_agent_skill,
     )
 else:
-    from .storage import (
+    from ..stores.storage import (
         get_chat_agent_skill,
         init_storage,
         list_chat_agent_skills,

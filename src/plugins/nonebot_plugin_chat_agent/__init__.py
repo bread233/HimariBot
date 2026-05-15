@@ -6,15 +6,15 @@ from nonebot.rule import Rule
 from nonebot.typing import T_State
 
 from .config import get_chat_agent_config
-from .context_pack import build_context_pack
-from .llm_client import chat_completions
-from .memory import detect_feedback
-from .profile_store import init_profile_storage, upsert_user_seen
-from .prompt import build_system_prompt
-from .retrieval_store import init_retrieval_storage
-from .runtime_state import get_chat_agent_lock
-from .storage import build_session_info, init_storage, save_memory, save_message
-from .utils import extract_group_prompt, extract_private_prompt, get_bot_nicknames, get_original_plain_text, sanitize_task_reply, strip_thinking, truncate_reply
+from .runtime.context_pack import build_context_pack
+from .clients.llm_client import chat_completions
+from .memory.memory import detect_feedback
+from .stores.profile_store import init_profile_storage, upsert_user_seen
+from .answer.prompt import build_system_prompt
+from .stores.retrieval_store import init_retrieval_storage
+from .runtime.runtime_state import get_chat_agent_lock
+from .stores.storage import build_session_info, init_storage, save_memory, save_message
+from .tools.utils import extract_group_prompt, extract_private_prompt, get_bot_nicknames, get_original_plain_text, sanitize_task_reply, strip_thinking, truncate_reply
 from .answer import (
     build_definition_quality_fallback,
     build_sports_quality_fallback,

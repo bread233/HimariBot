@@ -4,7 +4,7 @@ import math
 
 import httpx
 
-from .retrieval_store import get_cached_embedding, set_cached_embedding
+from ..stores.retrieval_store import get_cached_embedding, set_cached_embedding
 
 async def embed_texts(config, texts: list[str]) -> list[list[float]]:
     base_url = str(getattr(config, "chat_agent_embedding_base_url", "http://192.168.0.112:11434")).rstrip("/")

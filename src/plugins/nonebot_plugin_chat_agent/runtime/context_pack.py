@@ -1,27 +1,27 @@
 from __future__ import annotations
 
-from .fact_guard import detect_fact_sensitive_question
-from .group_tools import get_group_info_context, get_group_member_seen_context
-from .memory import build_memory_reminder_for_user, format_memories_for_prompt
-from .math_tools import detect_numeric_compare
-from .profile_store import load_user_profile_context
-from .retrieval import build_embedding_retrieval_context, build_retrieval_context, score_text_overlap
-from .storage import get_user_style_profile, load_memories, load_recent_messages
-from .tool_router import should_use_web_tool
-from .tool_intent import classify_tool_intent
-from .question_intent import detect_question_like
-from .url_tools import build_direct_url_context, extract_urls
-from .evidence.web import build_web_context, build_web_results, render_web_results_context
-from .evidence.official import resolve_official_web_answer
+from ..decision.fact_guard import detect_fact_sensitive_question
+from ..tools.group_tools import get_group_info_context, get_group_member_seen_context
+from ..memory.memory import build_memory_reminder_for_user, format_memories_for_prompt
+from ..tools.math_tools import detect_numeric_compare
+from ..stores.profile_store import load_user_profile_context
+from ..memory.retrieval import build_embedding_retrieval_context, build_retrieval_context, score_text_overlap
+from ..stores.storage import get_user_style_profile, load_memories, load_recent_messages
+from ..decision.tool_router import should_use_web_tool
+from ..decision.tool_intent import classify_tool_intent
+from ..decision.question_intent import detect_question_like
+from ..evidence.url_tools import build_direct_url_context, extract_urls
+from ..evidence.web import build_web_context, build_web_results, render_web_results_context
+from ..evidence.official import resolve_official_web_answer
 from .runtime_config import get_persona_profile, get_rag_policy
-from .skill_store import render_skill_context, select_relevant_skills, skills_to_evidence_items
-from .evidence_pack import render_evidence_context
+from ..stores.skill_store import render_skill_context, select_relevant_skills, skills_to_evidence_items
+from ..evidence.evidence_pack import render_evidence_context
 from nonebot import logger
 from datetime import datetime
 import re
 from urllib.parse import urlparse
 from datetime import date
-from .decision.detectors import (
+from ..decision.detectors import (
     _is_context_question,
     _is_self_identity_question,
     _is_creative_or_chat_prompt,
@@ -36,7 +36,7 @@ from .decision.detectors import (
 )
 
 try:
-    from .summary_retrieval import retrieve_daily_summaries
+    from ..memory.summary_retrieval import retrieve_daily_summaries
 except ImportError:
     retrieve_daily_summaries = None
 
