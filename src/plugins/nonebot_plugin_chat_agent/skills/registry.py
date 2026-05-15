@@ -60,6 +60,8 @@ class SkillRegistry:
         text = str(prompt or "").strip()
         if not text:
             return []
+        min_score = 320
+        top_score_ratio = 0.4
         normalized_prompt = _normalize_text(text)
         query_tokens = _extract_query_tokens(text)
         scored: list[tuple[int, int, str, SkillDefinition]] = []
@@ -96,10 +98,16 @@ class SkillRegistry:
                 if pn and pn in normalized_prompt:
                     score += 120
 
-            if score <= 0:
+            if score < min_score:
                 continue
             scored.append((score, int(skill.priority), skill.name, skill))
         scored.sort(key=lambda x: (-x[0], -x[1], x[2]))
+        if not scored:
+            return []
+        top_score = scored[0][0]
+        cutoff = int(top_score * top_score_ratio)
+        if cutoff > 0:
+            scored = [row for row in scored if row[0] >= cutoff]
         limit = max(0, int(max_active))
         if limit <= 0:
             return []
