@@ -30,14 +30,45 @@ class WebEvidenceFinalizerResult:
     tool_notes: list[str] = field(default_factory=list)
 
 
-def build_web_evidence_messages(payload: WebEvidenceFinalizerInput) -> list[dict[str, str]]:
-    user_content = (
-        f"Question: {payload.prompt}\n"
-        f"Query: {payload.user_prompt or payload.prompt}\n\n"
-        f"Evidence:\n{payload.evidence_context}"
-    )
+def build_web_evidence_messages(
+    payload: WebEvidenceFinalizerInput | None = None,
+    *,
+    prompt: str = "",
+    query: str = "",
+    evidence_context: str = "",
+    style_extra: str = "",
+) -> list[dict[str, str]]:
+    if payload is not None:
+        sys_prompt = str(payload.system_prompt or "").strip()
+        q = str(payload.user_prompt or payload.prompt or "").strip()
+        p = str(payload.prompt or "").strip()
+        ev = str(payload.evidence_context or "").strip()
+    else:
+        p = str(prompt or "").strip()
+        q = str(query or p).strip()
+        ev = str(evidence_context or "").strip()
+        sys_prompt = (
+            "你需要基于已提供的网页摘要回答问题。\n"
+            "回答必须全中文，不要输出英文标题词。\n"
+            "不要输出这些英文词：snippet, snippets, cautious, conclusion, reasons, evidence, source。\n"
+            "需要表达 summary/snippet 时用“摘要”；需要表达 cautious 时用“谨慎”或“保守”。\n"
+            "建议使用格式：\n"
+            "结论：...\n"
+            "理由：\n"
+            "1. ...\n"
+            "2. ...\n"
+            "3. ...\n"
+            "只能基于已提供资料作答，不要编造事实。\n"
+            "若证据不足，直接说不确定或暂时没查到可靠资料。\n"
+            "不要把“值得入手”、“两极分化”、“推荐”这类搜索标题直接当成结论。\n"
+            "如果资料没有具体优缺点、评分、玩家评价、实机或评测内容，只能说资料不足。\n"
+            "不要基于标题扩写评价。\n"
+            "如果资料未明确给出，不要编造概率、比分、积分、排名、日期、版本号或其他数字。"
+            f"{style_extra}"
+        )
+    user_content = f"Question: {p}\nQuery: {q}\n\nEvidence:\n{ev}"
     return [
-        {"role": "system", "content": str(payload.system_prompt or "").strip()},
+        {"role": "system", "content": sys_prompt},
         {"role": "user", "content": user_content},
     ]
 

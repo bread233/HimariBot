@@ -23,6 +23,7 @@ from .answer import (
     should_retry_short_answer,
     sports_quality_reason,
 )
+from .answer.finalizer import build_web_evidence_messages, evaluate_web_evidence_reply
 
 
 async def chat_agent_rule(bot: Bot, event: MessageEvent, state: T_State) -> bool:
@@ -267,34 +268,12 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     "\n【定义回答要求】先给一句定义，再给1-2点特征。"
                     "避免宣传化措辞，回答不要过短。"
                 )
-            evidence_messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "\u4f60\u9700\u8981\u57fa\u4e8e\u5df2\u63d0\u4f9b\u7684\u7f51\u9875\u6458\u8981\u56de\u7b54\u95ee\u9898\u3002\n"
-                        "\u56de\u7b54\u5fc5\u987b\u5168\u4e2d\u6587\uff0c\u4e0d\u8981\u8f93\u51fa\u82f1\u6587\u6807\u9898\u8bcd\u3002\n"
-                        "\u4e0d\u8981\u8f93\u51fa\u8fd9\u4e9b\u82f1\u6587\u8bcd\uff1asnippet, snippets, cautious, conclusion, reasons, evidence, source\u3002\n"
-                        "\u9700\u8981\u8868\u8fbe summary/snippet \u65f6\u7528\u201c\u6458\u8981\u201d\uff1b\u9700\u8981\u8868\u8fbe cautious \u65f6\u7528\u201c\u8c28\u614e\u201d\u6216\u201c\u4fdd\u5b88\u201d\u3002\n"
-                        "\u5efa\u8bae\u4f7f\u7528\u683c\u5f0f\uff1a\n"
-                        "\u7ed3\u8bba\uff1a...\n"
-                        "\u7406\u7531\uff1a\n"
-                        "1. ...\n"
-                        "2. ...\n"
-                        "3. ...\n"
-                        "\u53ea\u80fd\u57fa\u4e8e\u5df2\u63d0\u4f9b\u8d44\u6599\u4f5c\u7b54\uff0c\u4e0d\u8981\u7f16\u9020\u4e8b\u5b9e\u3002\n"
-                        "\u82e5\u8bc1\u636e\u4e0d\u8db3\uff0c\u76f4\u63a5\u8bf4\u4e0d\u786e\u5b9a\u6216\u6682\u65f6\u6ca1\u67e5\u5230\u53ef\u9760\u8d44\u6599\u3002\n"
-                        "\u4e0d\u8981\u628a\u201c\u503c\u5f97\u5165\u624b\u201d\u3001\u201c\u4e24\u6781\u5206\u5316\u201d\u3001\u201c\u63a8\u8350\u201d\u8fd9\u7c7b\u641c\u7d22\u6807\u9898\u76f4\u63a5\u5f53\u6210\u7ed3\u8bba\u3002\n"
-                        "\u5982\u679c\u8d44\u6599\u6ca1\u6709\u5177\u4f53\u4f18\u7f3a\u70b9\u3001\u8bc4\u5206\u3001\u73a9\u5bb6\u8bc4\u4ef7\u3001\u5b9e\u673a\u6216\u8bc4\u6d4b\u5185\u5bb9\uff0c\u53ea\u80fd\u8bf4\u8d44\u6599\u4e0d\u8db3\u3002\n"
-                        "\u4e0d\u8981\u57fa\u4e8e\u6807\u9898\u6269\u5199\u8bc4\u4ef7\u3002\n"
-                        "\u5982\u679c\u8d44\u6599\u672a\u660e\u786e\u7ed9\u51fa\uff0c\u4e0d\u8981\u7f16\u9020\u6982\u7387\u3001\u6bd4\u5206\u3001\u79ef\u5206\u3001\u6392\u540d\u3001\u65e5\u671f\u3001\u7248\u672c\u53f7\u6216\u5176\u4ed6\u6570\u5b57\u3002"
-                        f"{style_extra}"
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"Question: {evidence_prompt}\nQuery: {evidence_query}\n\nEvidence:\n{evidence_context}",
-                },
-            ]
+            evidence_messages = build_web_evidence_messages(
+                prompt=evidence_prompt,
+                query=evidence_query,
+                evidence_context=evidence_context,
+                style_extra=style_extra,
+            )
             reply = ""
             should_save_assistant = False
             try:
@@ -329,7 +308,12 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     f"context_chars={len(evidence_context)} prompt={evidence_prompt[:80]!r} message={str(e)[:200]!r}"
                 )
                 reply = "\u6682\u65f6\u6ca1\u67e5\u5230\u53ef\u9760\u8d44\u6599\uff0c\u53ef\u4ee5\u6362\u4e2a\u66f4\u5177\u4f53\u7684\u95ee\u9898\u3002"
-            if answerable and is_unknown_like_reply(reply):
+            if evaluate_web_evidence_reply(
+                reply,
+                answerable=answerable,
+                answer_style="",
+                unknown_reply="资料不足以确认",
+            ) == "unknown_like":
                 logger.warning("web_evidence over_refusal=1 reply_matches_unknown=1 answerable=1")
                 retry_messages = list(evidence_messages)
                 retry_messages.insert(
@@ -357,7 +341,13 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                         reply = build_definition_quality_fallback(evidence_context, evidence_prompt)
                 except Exception:
                     reply = build_definition_quality_fallback(evidence_context, evidence_prompt)
-            if answerable and len(str(reply or "").strip()) < 25:
+            if evaluate_web_evidence_reply(
+                reply,
+                answerable=answerable,
+                answer_style="",
+                unknown_reply=None,
+                min_chars=25,
+            ) == "short_answer":
                 logger.info(f"web_evidence short_answer_retry=1 reply_chars={len(str(reply or '').strip())}")
                 retry_short_messages = list(evidence_messages)
                 retry_short_messages.insert(
@@ -398,7 +388,23 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                             )
                 except Exception:
                     pass
-            definition_reason = (definition_quality_reason(reply) or "") if answerable and definition_summary else ""
+            definition_reason = (
+                evaluate_web_evidence_reply(
+                    reply,
+                    answerable=answerable,
+                    answer_style="definition_summary",
+                    unknown_reply=None,
+                    min_chars=45,
+                )
+                if answerable and definition_summary
+                else ""
+            )
+            if definition_reason == "definition_quality":
+                definition_reason = "definition_quality"
+            elif definition_reason == "short_answer":
+                definition_reason = "too_short"
+            elif definition_reason == "ok":
+                definition_reason = ""
             if definition_reason:
                 logger.info(
                     f"web_evidence definition_quality_retry=1 reason={definition_reason} "
@@ -441,7 +447,23 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 if len(reply) < 45:
                     reply = f"根据当前网页资料：{reply}。简单说，它是一款以精灵收集与养成为核心的冒险游戏；主要特征包括开放世界探索和宠物培养对战。"
                 logger.info(f"web_evidence definition_quality_fallback=1 reason={definition_reason_final}")
-            sports_reason = (sports_quality_reason(reply) or "") if answerable and sports_stats_first else ""
+            sports_reason = (
+                evaluate_web_evidence_reply(
+                    reply,
+                    answerable=answerable,
+                    answer_style="sports_stats_first",
+                    unknown_reply=None,
+                    min_chars=45,
+                )
+                if answerable and sports_stats_first
+                else ""
+            )
+            if sports_reason == "sports_quality":
+                sports_reason = "bad_generic"
+            elif sports_reason == "short_answer":
+                sports_reason = "too_short"
+            elif sports_reason == "ok":
+                sports_reason = ""
             if sports_reason:
                 logger.info(f"web_evidence sports_quality_retry=1 reason={sports_reason}")
                 retry_sports_messages = list(evidence_messages)
