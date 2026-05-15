@@ -22,6 +22,25 @@ class ChatAgentConfig(BaseModel):
     chat_agent_model: str = Field(default="qwen3:1.7b")
     chat_agent_think: bool = Field(default=False)
     chat_agent_timeout: int = Field(default=120)
+    chat_agent_llm_provider: str = Field(default="openai_compatible")
+    chat_agent_llm_base_url: str = Field(default="")
+    chat_agent_llm_api_key: str = Field(default="")
+    chat_agent_llm_model: str = Field(default="")
+    chat_agent_llm_timeout: int = Field(default=0)
+    chat_agent_llm_max_tokens: int = Field(default=0)
+    chat_agent_llm_extra_body: str = Field(default="")
+    chat_agent_finalizer_llm_base_url: str = Field(default="")
+    chat_agent_finalizer_llm_api_key: str = Field(default="")
+    chat_agent_finalizer_llm_model: str = Field(default="")
+    chat_agent_finalizer_llm_timeout: int = Field(default=0)
+    chat_agent_finalizer_llm_max_tokens: int = Field(default=0)
+    chat_agent_finalizer_llm_extra_body: str = Field(default="")
+    chat_agent_decision_llm_base_url: str = Field(default="")
+    chat_agent_decision_llm_api_key: str = Field(default="")
+    chat_agent_decision_llm_model: str = Field(default="")
+    chat_agent_decision_llm_timeout: int = Field(default=0)
+    chat_agent_decision_llm_max_tokens: int = Field(default=0)
+    chat_agent_decision_llm_extra_body: str = Field(default="")
     chat_agent_lightweight_definition_model: str = Field(default="llama32-finalizer-fast")
     chat_agent_lightweight_definition_timeout: float = Field(default=20.0)
     chat_agent_web_strategy_timeout: float = Field(default=60.0)
@@ -81,6 +100,16 @@ def get_chat_agent_config() -> ChatAgentConfig:
         return _cached_config
     driver = get_driver()
     config = driver.config
+    def _cfg(name: str, env: str, default):
+        value = getattr(config, name, None)
+        if value is not None and str(value).strip() != "":
+            return value
+        import os
+        env_value = os.getenv(env)
+        if env_value is not None and str(env_value).strip() != "":
+            return env_value
+        return default
+
     data_dir = getattr(config, "chat_agent_data_dir", "data/nonebot_chat_agent")
     _cached_config = ChatAgentConfig(
         chat_agent_enable=_as_bool(getattr(config, "chat_agent_enable", True), True),
@@ -98,6 +127,25 @@ def get_chat_agent_config() -> ChatAgentConfig:
         chat_agent_model=str(getattr(config, "chat_agent_model", "qwen3:1.7b")),
         chat_agent_think=_as_bool(getattr(config, "chat_agent_think", False), False),
         chat_agent_timeout=int(getattr(config, "chat_agent_timeout", 120)),
+        chat_agent_llm_provider=str(_cfg("chat_agent_llm_provider", "CHAT_AGENT_LLM_PROVIDER", "openai_compatible")),
+        chat_agent_llm_base_url=str(_cfg("chat_agent_llm_base_url", "CHAT_AGENT_LLM_BASE_URL", "")),
+        chat_agent_llm_api_key=str(_cfg("chat_agent_llm_api_key", "CHAT_AGENT_LLM_API_KEY", "")),
+        chat_agent_llm_model=str(_cfg("chat_agent_llm_model", "CHAT_AGENT_LLM_MODEL", "")),
+        chat_agent_llm_timeout=int(_cfg("chat_agent_llm_timeout", "CHAT_AGENT_LLM_TIMEOUT", 0)),
+        chat_agent_llm_max_tokens=int(_cfg("chat_agent_llm_max_tokens", "CHAT_AGENT_LLM_MAX_TOKENS", 0)),
+        chat_agent_llm_extra_body=str(_cfg("chat_agent_llm_extra_body", "CHAT_AGENT_LLM_EXTRA_BODY", "")),
+        chat_agent_finalizer_llm_base_url=str(_cfg("chat_agent_finalizer_llm_base_url", "CHAT_AGENT_FINALIZER_LLM_BASE_URL", "")),
+        chat_agent_finalizer_llm_api_key=str(_cfg("chat_agent_finalizer_llm_api_key", "CHAT_AGENT_FINALIZER_LLM_API_KEY", "")),
+        chat_agent_finalizer_llm_model=str(_cfg("chat_agent_finalizer_llm_model", "CHAT_AGENT_FINALIZER_LLM_MODEL", "")),
+        chat_agent_finalizer_llm_timeout=int(_cfg("chat_agent_finalizer_llm_timeout", "CHAT_AGENT_FINALIZER_LLM_TIMEOUT", 0)),
+        chat_agent_finalizer_llm_max_tokens=int(_cfg("chat_agent_finalizer_llm_max_tokens", "CHAT_AGENT_FINALIZER_LLM_MAX_TOKENS", 0)),
+        chat_agent_finalizer_llm_extra_body=str(_cfg("chat_agent_finalizer_llm_extra_body", "CHAT_AGENT_FINALIZER_LLM_EXTRA_BODY", "")),
+        chat_agent_decision_llm_base_url=str(_cfg("chat_agent_decision_llm_base_url", "CHAT_AGENT_DECISION_LLM_BASE_URL", "")),
+        chat_agent_decision_llm_api_key=str(_cfg("chat_agent_decision_llm_api_key", "CHAT_AGENT_DECISION_LLM_API_KEY", "")),
+        chat_agent_decision_llm_model=str(_cfg("chat_agent_decision_llm_model", "CHAT_AGENT_DECISION_LLM_MODEL", "")),
+        chat_agent_decision_llm_timeout=int(_cfg("chat_agent_decision_llm_timeout", "CHAT_AGENT_DECISION_LLM_TIMEOUT", 0)),
+        chat_agent_decision_llm_max_tokens=int(_cfg("chat_agent_decision_llm_max_tokens", "CHAT_AGENT_DECISION_LLM_MAX_TOKENS", 0)),
+        chat_agent_decision_llm_extra_body=str(_cfg("chat_agent_decision_llm_extra_body", "CHAT_AGENT_DECISION_LLM_EXTRA_BODY", "")),
         chat_agent_lightweight_definition_model=str(
             getattr(config, "chat_agent_lightweight_definition_model", "llama32-finalizer-fast")
         ),
