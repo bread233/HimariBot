@@ -24,6 +24,7 @@ from .answer import (
     sports_quality_reason,
 )
 from .answer.finalizer import build_web_evidence_messages, evaluate_web_evidence_reply
+from .answer.finalizer import handle_unknown_like_retry
 
 
 async def chat_agent_rule(bot: Bot, event: MessageEvent, state: T_State) -> bool:
@@ -312,20 +313,15 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 reply,
                 answerable=answerable,
                 answer_style="",
-                unknown_reply="资料不足以确认",
+                unknown_reply="璧勬枡涓嶈冻浠ョ‘璁?",
             ) == "unknown_like":
                 logger.warning("web_evidence over_refusal=1 reply_matches_unknown=1 answerable=1")
-                retry_messages = list(evidence_messages)
-                retry_messages.insert(
-                    1,
-                    {
-                        "role": "system",
-                        "content": "当前参考资料已经足以支持基本结论。禁止回复资料不足。请基于参考资料给出一句结论和一到两点依据。",
-                    },
-                )
-                try:
-                    retry_reply = await chat_completions(
-                        retry_messages,
+                retry_fallback = build_definition_quality_fallback(evidence_context, evidence_prompt)
+                retry_system_prompt = "褰撳墠鍙傝€冭祫鏂欏凡缁忚冻浠ユ敮鎸佸熀鏈粨璁恒€傜姝㈠洖澶嶈祫鏂欎笉瓒炽€傝鍩轰簬鍙傝€冭祫鏂欑粰鍑轰竴鍙ョ粨璁哄拰涓€鍒颁袱鐐逛緷鎹€?"
+
+                async def _unknown_retry_call(messages: list[dict]) -> str:
+                    return await chat_completions(
+                        messages,
                         config,
                         timeout=evidence_timeout,
                         model=evidence_model,
@@ -333,14 +329,21 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                         top_p=0.7,
                         max_tokens=evidence_max_tokens,
                     )
-                    retry_reply = truncate_reply(strip_thinking(retry_reply), config.chat_agent_max_reply_length)
-                    retry_reply = str(retry_reply or "").strip()
-                    if retry_reply and not is_unknown_like_reply(retry_reply):
-                        reply = retry_reply
-                    else:
-                        reply = build_definition_quality_fallback(evidence_context, evidence_prompt)
-                except Exception:
-                    reply = build_definition_quality_fallback(evidence_context, evidence_prompt)
+
+                def _clean_unknown_retry(text: str) -> str:
+                    cleaned = truncate_reply(strip_thinking(text), config.chat_agent_max_reply_length)
+                    return str(cleaned or "").strip()
+
+                reply, _ = await handle_unknown_like_retry(
+                    reply,
+                    answerable=answerable,
+                    evidence_messages=evidence_messages,
+                    llm_call=_unknown_retry_call,
+                    clean_reply=_clean_unknown_retry,
+                    fallback_reply=retry_fallback,
+                    unknown_reply="璧勬枡涓嶈冻浠ョ‘璁?",
+                    retry_system_prompt=retry_system_prompt,
+                )
             if evaluate_web_evidence_reply(
                 reply,
                 answerable=answerable,

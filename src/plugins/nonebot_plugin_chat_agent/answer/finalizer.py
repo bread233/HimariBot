@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Awaitable, Callable
 
 from .quality_guard import (
     definition_quality_reason,
@@ -97,3 +98,54 @@ def evaluate_web_evidence_reply(
     if answerable and style == "sports_stats_first" and sports_quality_reason(text, min_chars=min_chars):
         return "sports_quality"
     return "ok"
+
+
+async def handle_unknown_like_retry(
+    reply: str,
+    *,
+    answerable: bool,
+    evidence_messages: list[dict[str, str]],
+    llm_call: Callable[[list[dict[str, str]]], Awaitable[str]],
+    clean_reply: Callable[[str], str],
+    fallback_reply: str,
+    unknown_reply: str | None = None,
+    retry_system_prompt: str = "",
+) -> tuple[str, bool]:
+    def _looks_unknown_after_retry(text: str) -> bool:
+        t = str(text or "").strip()
+        if not t:
+            return True
+        marker = str(unknown_reply or "").strip()
+        if marker and marker in t:
+            return True
+        return evaluate_web_evidence_reply(
+            t,
+            answerable=True,
+            answer_style="",
+            unknown_reply=unknown_reply,
+        ) == "unknown_like"
+
+    reason = evaluate_web_evidence_reply(
+        reply,
+        answerable=answerable,
+        answer_style="",
+        unknown_reply=unknown_reply,
+    )
+    if reason != "unknown_like":
+        return str(reply or "").strip(), False
+    retry_messages = list(evidence_messages)
+    retry_messages.insert(
+        1,
+        {
+            "role": "system",
+            "content": str(retry_system_prompt or "").strip(),
+        },
+    )
+    try:
+        retry_reply = await llm_call(retry_messages)
+        retry_reply = clean_reply(retry_reply)
+        if retry_reply and not _looks_unknown_after_retry(retry_reply):
+            return retry_reply, True
+        return str(fallback_reply or "").strip(), True
+    except Exception:
+        return str(fallback_reply or "").strip(), True
