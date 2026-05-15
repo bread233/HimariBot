@@ -70,6 +70,10 @@ class ChatAgentConfig(BaseModel):
     chat_agent_embedding_min_margin: float = Field(default=0.05)
     chat_agent_db_path: Path = Field(default=Path("data/nonebot_chat_agent/agent.sqlite3"))
     chat_agent_data_dir: Path = Field(default=Path("data/nonebot_chat_agent"))
+    chat_agent_enable_skills: bool = Field(default=True)
+    chat_agent_skills_dir: Path = Field(default=Path("data/nonebot_chat_agent/skills"))
+    chat_agent_skills_max_active: int = Field(default=3)
+    chat_agent_skills_max_body_chars: int = Field(default=4000)
 
     def ensure_data_dir(self) -> Path:
         self.chat_agent_data_dir.mkdir(parents=True, exist_ok=True)
@@ -183,6 +187,19 @@ def get_chat_agent_config() -> ChatAgentConfig:
         chat_agent_embedding_min_margin=float(getattr(config, "chat_agent_embedding_min_margin", 0.05)),
         chat_agent_db_path=Path(getattr(config, "chat_agent_db_path", "data/nonebot_chat_agent/agent.sqlite3")),
         chat_agent_data_dir=Path(data_dir),
+        chat_agent_enable_skills=_as_bool(
+            _cfg("chat_agent_enable_skills", "CHAT_AGENT_ENABLE_SKILLS", True),
+            True,
+        ),
+        chat_agent_skills_dir=Path(
+            str(_cfg("chat_agent_skills_dir", "CHAT_AGENT_SKILLS_DIR", "data/nonebot_chat_agent/skills"))
+        ),
+        chat_agent_skills_max_active=int(
+            _cfg("chat_agent_skills_max_active", "CHAT_AGENT_SKILLS_MAX_ACTIVE", 3)
+        ),
+        chat_agent_skills_max_body_chars=int(
+            _cfg("chat_agent_skills_max_body_chars", "CHAT_AGENT_SKILLS_MAX_BODY_CHARS", 4000)
+        ),
     )
     _cached_config.ensure_data_dir()
     return _cached_config
