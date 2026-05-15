@@ -15,6 +15,7 @@ from ..evidence.web import build_web_context, build_web_results, render_web_resu
 from ..evidence.official import resolve_official_web_answer
 from .runtime_config import get_persona_profile, get_rag_policy
 from ..stores.skill_store import render_skill_context, select_relevant_skills, skills_to_evidence_items
+from ..skills.registry import load_skill_registry
 from ..evidence.evidence_pack import render_evidence_context
 from nonebot import logger
 from datetime import datetime
@@ -1065,6 +1066,37 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     skill_context = render_skill_context(selected_skills)
     skill_evidence_items = skills_to_evidence_items(selected_skills)
     skill_evidence_context = render_evidence_context(skill_evidence_items, budget_chars=1200, limit=3)
+    external_skill_context = ""
+    if bool(getattr(config, "chat_agent_enable_skills", True)):
+        skills_dir = getattr(config, "chat_agent_skills_dir", "data/nonebot_chat_agent/skills")
+        max_active = int(getattr(config, "chat_agent_skills_max_active", 3) or 3)
+        max_body_chars = int(getattr(config, "chat_agent_skills_max_body_chars", 4000) or 4000)
+        registry = load_skill_registry(skills_dir)
+        loaded_count = len(registry.skills)
+        logger.info(f"skill_registry enabled=1 dir={skills_dir} loaded={loaded_count}")
+        matched = registry.match(prompt, max_active=max_active)
+        selected_external = matched[:1]
+        if selected_external:
+            skill = selected_external[0]
+            activation = skill.to_activation_text(max_body_chars=max_body_chars).strip()
+            external_skill_context = (
+                "[ChatAgent Skill Activated]\n"
+                f"Name: {skill.name}\n"
+                f"Description: {skill.description}\n"
+                "Instructions:\n"
+                f"{activation}\n\n"
+                "You must follow this skill guidance when answering. "
+                "Do not claim tools/commands were executed if they were not actually executed. "
+                "If the skill expects tools that are unavailable in the current route, "
+                "state the limitation and answer based on available evidence."
+            ).strip()
+            logger.info(f"skill_match selected={skill.name} loaded={loaded_count}")
+        else:
+            logger.info(f"skill_match selected=none loaded={loaded_count}")
+    else:
+        logger.info("skill_registry enabled=0")
+    if external_skill_context:
+        skill_context = "\n\n".join(x for x in [skill_context, external_skill_context] if x).strip()
     if intent.needs_time:
         now = datetime.now()
         time_context = (
@@ -1138,6 +1170,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "history_context": "",
                 "memory_context": "",
                 "web_context": "",
+                "skill_context": skill_context,
                 "tool_notes": "",
             }
 
@@ -1246,6 +1279,17 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     persona_casual = _build_persona_style_hint(persona_profile, "casual_chat")
     if selected_skills:
         tool_notes.append("selected_skills=" + ",".join(skill.key for skill in selected_skills))
+    if bool(getattr(config, "chat_agent_enable_skills", True)):
+        skills_dir = getattr(config, "chat_agent_skills_dir", "data/nonebot_chat_agent/skills")
+        tool_notes.append(f"skill_registry enabled=1 dir={skills_dir}")
+    else:
+        tool_notes.append("skill_registry enabled=0")
+    if external_skill_context:
+        body_chars = len(external_skill_context)
+        skill_name = external_skill_context.splitlines()[1].replace("Name:", "").strip() if len(external_skill_context.splitlines()) > 1 else ""
+        tool_notes.append(f"skill_context injected=1 name={skill_name} body_chars={body_chars}")
+    else:
+        tool_notes.append("skill_match selected=none")
     tool_notes.append(f"skill_evidence_items={len(skill_evidence_items)}")
     tool_notes.append(f"skill_evidence_chars={len(skill_evidence_context)}")
     tool_notes.append(f"intent={intent.kind}")
@@ -1377,6 +1421,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "history_context": history_context,
                 "memory_context": memory_context,
                 "web_context": "",
+                "skill_context": skill_context,
                 "tool_notes": "\n".join(tool_notes).strip(),
             }
     if _is_explicit_history_query(prompt):
@@ -1398,6 +1443,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "history_context": history_context,
                 "memory_context": memory_context,
                 "web_context": "",
+                "skill_context": skill_context,
                 "tool_notes": "\n".join(tool_notes).strip(),
             }
         except Exception:
@@ -1415,6 +1461,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "history_context": "",
                 "memory_context": "",
                 "web_context": "",
+                "skill_context": skill_context,
                 "tool_notes": "\n".join(tool_notes).strip(),
             }
     if _is_community_strategy_question(prompt, intent.kind):
@@ -1445,6 +1492,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "history_context": "",
                 "memory_context": "",
                 "web_context": "",
+                "skill_context": skill_context,
                 "tool_notes": "\n".join(tool_notes).strip(),
             }
         return {
@@ -1466,6 +1514,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             "web_strategy_context": "\n".join(
                 x for x in [rag_web_strategy, distilled_context, persona_web_strategy] if x
             ).strip(),
+            "skill_context": skill_context,
             "tool_notes": "\n".join(tool_notes).strip(),
         }
     if (
@@ -1602,6 +1651,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     "lightweight_prompt": prompt,
                     "web_evidence_query": evidence_query,
                     "web_evidence_context": composed_web_evidence_context,
+                    "skill_context": skill_context,
                     "tool_notes": "\n".join(tool_notes).strip(),
                 }
             if evidence_context and effective_top_score >= min_score and evidence_sufficient and eval_answerable:
@@ -1633,6 +1683,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     "lightweight_prompt": prompt,
                     "web_evidence_query": evidence_query,
                     "web_evidence_context": composed_web_evidence_context,
+                    "skill_context": skill_context,
                     "tool_notes": "\n".join(tool_notes).strip(),
                 }
             if evidence_context and effective_top_score < min_score:
@@ -1686,6 +1737,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     "lightweight_prompt": prompt,
                     "web_evidence_query": evidence_query,
                     "web_evidence_context": composed_web_evidence_context,
+                    "skill_context": skill_context,
                     "tool_notes": "\n".join(tool_notes).strip(),
                 }
             logger.info(
@@ -1709,6 +1761,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "history_context": "",
                 "memory_context": "",
                 "web_context": "",
+                "skill_context": skill_context,
                 "tool_notes": "\n".join(tool_notes).strip(),
             }
         tool_notes.append("evidence_gate_source=local")
@@ -1729,6 +1782,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             "history_context": "",
             "memory_context": "",
             "web_context": "",
+            "skill_context": skill_context,
             "tool_notes": "\n".join(tool_notes).strip(),
         }
     if _is_simple_definition_question(prompt, intent.kind):
