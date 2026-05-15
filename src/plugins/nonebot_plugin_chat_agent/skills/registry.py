@@ -94,9 +94,13 @@ def _parse_bool(value: str, default: bool = True) -> bool:
 def _parse_frontmatter(frontmatter_text: str) -> dict:
     data: dict[str, object] = {}
     current_list_key: str | None = None
-    for raw in frontmatter_text.splitlines():
+    lines = frontmatter_text.splitlines()
+    i = 0
+    while i < len(lines):
+        raw = lines[i]
         line = raw.rstrip()
         if not line.strip() or line.lstrip().startswith("#"):
+            i += 1
             continue
         stripped = line.strip()
         if stripped.startswith("- ") and current_list_key:
@@ -104,18 +108,45 @@ def _parse_frontmatter(frontmatter_text: str) -> dict:
             lst = data[current_list_key]
             if isinstance(lst, list):
                 lst.append(stripped[2:].strip())
+            i += 1
             continue
         current_list_key = None
         if ":" not in line:
+            i += 1
             continue
+        base_indent = len(line) - len(line.lstrip(" "))
         key, value = line.split(":", 1)
         k = key.strip()
         v = value.strip()
+        if v in {">", "|"}:
+            block_lines: list[str] = []
+            j = i + 1
+            while j < len(lines):
+                nxt = lines[j].rstrip("\r\n")
+                nxt_strip = nxt.strip()
+                nxt_indent = len(nxt) - len(nxt.lstrip(" "))
+                if nxt_strip and nxt_indent <= base_indent:
+                    break
+                if not nxt_strip:
+                    block_lines.append("")
+                else:
+                    block_lines.append(nxt.lstrip(" "))
+                j += 1
+            if v == ">":
+                folded = " ".join(part.strip() for part in block_lines if part.strip())
+                data[k] = folded.strip()
+            else:
+                literal = "\n".join(block_lines).strip("\n")
+                data[k] = literal
+            i = j
+            continue
         if v == "":
             data[k] = []
             current_list_key = k
+            i += 1
             continue
         data[k] = v
+        i += 1
     return data
 
 
@@ -217,4 +248,3 @@ def load_skill_registry(skills_dir: str | Path) -> SkillRegistry:
                 f"skill_registry duplicate_name keep_first name={skill.name} old_priority={old.priority} new_priority={skill.priority}"
             )
     return registry
-
