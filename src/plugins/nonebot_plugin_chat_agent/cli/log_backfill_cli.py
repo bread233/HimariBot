@@ -12,8 +12,8 @@ if __package__ in (None, ""):
     from log_ingestor import backfill_logs, iter_info_log_files, should_import_log_file
     from storage import init_storage
 else:
-    from .log_ingestor import backfill_logs, iter_info_log_files, should_import_log_file
-    from .storage import init_storage
+    from ..memory.log_ingestor import backfill_logs, iter_info_log_files, should_import_log_file
+    from ..stores.storage import init_storage
 
 
 def _build_parser() -> argparse.ArgumentParser:

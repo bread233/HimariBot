@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from .evidence_pack import EvidenceItem
+from ..evidence.evidence_pack import EvidenceItem
 from .storage import list_enabled_chat_agent_skills
 
 

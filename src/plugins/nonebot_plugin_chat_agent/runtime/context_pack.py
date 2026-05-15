@@ -1,149 +1,44 @@
 from __future__ import annotations
 
-from .fact_guard import detect_fact_sensitive_question
-from .group_tools import get_group_info_context, get_group_member_seen_context
-from .memory import build_memory_reminder_for_user, format_memories_for_prompt
-from .math_tools import detect_numeric_compare
-from .profile_store import load_user_profile_context
-from .retrieval import build_embedding_retrieval_context, build_retrieval_context, score_text_overlap
-from .storage import get_user_style_profile, load_memories, load_recent_messages
-from .tool_router import should_use_web_tool
-from .tool_intent import classify_tool_intent
-from .question_intent import detect_question_like
-from .url_tools import build_direct_url_context, extract_urls
-from .web_tools import build_web_context, build_web_results, render_web_results_context, resolve_official_web_answer
+from ..decision.fact_guard import detect_fact_sensitive_question
+from ..tools.group_tools import get_group_info_context, get_group_member_seen_context
+from ..memory.memory import build_memory_reminder_for_user, format_memories_for_prompt
+from ..tools.math_tools import detect_numeric_compare
+from ..stores.profile_store import load_user_profile_context
+from ..memory.retrieval import build_embedding_retrieval_context, build_retrieval_context, score_text_overlap
+from ..stores.storage import get_user_style_profile, load_memories, load_recent_messages
+from ..decision.tool_router import should_use_web_tool
+from ..decision.tool_intent import classify_tool_intent
+from ..decision.question_intent import detect_question_like
+from ..evidence.url_tools import build_direct_url_context, extract_urls
+from ..evidence.web import build_web_context, build_web_results, render_web_results_context
+from ..evidence.official import resolve_official_web_answer
 from .runtime_config import get_persona_profile, get_rag_policy
-from .skill_store import render_skill_context, select_relevant_skills, skills_to_evidence_items
-from .evidence_pack import render_evidence_context
+from ..stores.skill_store import render_skill_context, select_relevant_skills, skills_to_evidence_items
+from ..evidence.evidence_pack import render_evidence_context
 from nonebot import logger
 from datetime import datetime
 import re
 from urllib.parse import urlparse
 from datetime import date
+from ..decision.detectors import (
+    _is_context_question,
+    _is_self_identity_question,
+    _is_creative_or_chat_prompt,
+    _needs_reliable_context,
+    _is_explicit_history_query,
+    _is_simple_definition_question,
+    _is_community_strategy_question,
+    _is_freshness_sensitive_prompt,
+    _is_sports_recent_query,
+    _is_software_version_query,
+    _is_definition_query,
+)
 
 try:
-    from .summary_retrieval import retrieve_daily_summaries
+    from ..memory.summary_retrieval import retrieve_daily_summaries
 except ImportError:
     retrieve_daily_summaries = None
-
-
-def _is_context_question(prompt: str) -> bool:
-    text = (prompt or "").strip()
-    return any(
-        token in text
-        for token in [
-            "我刚才说了什么",
-            "我刚刚说了什么",
-            "我之前说了什么",
-            "我刚才在测什么",
-            "我刚刷了啥",
-            "在测什么",
-        ]
-    )
-
-
-def _is_self_identity_question(prompt: str) -> bool:
-    text = (prompt or "").strip()
-    patterns = [
-        "我是谁",
-        "我是谁啊",
-        "你知道我是谁吗",
-        "你知道我叫什么吗",
-        "我叫什么",
-        "我在群里叫什么",
-    ]
-    return any(pattern in text for pattern in patterns)
-
-
-def _is_creative_or_chat_prompt(prompt: str) -> bool:
-    text = (prompt or "").strip()
-    return any(
-        token in text
-        for token in [
-            "写个",
-            "讲个",
-            "来个",
-            "编个",
-            "冷笑话",
-            "笑话",
-            "故事",
-            "段子",
-            "安慰我",
-            "陪我聊",
-            "聊聊",
-            "夸夸我",
-            "鼓励我",
-            "吐槽一下",
-            "自我介绍",
-        ]
-    )
-
-
-def _needs_reliable_context(prompt: str) -> bool:
-    text = (prompt or "").strip()
-    if _is_creative_or_chat_prompt(text):
-        return False
-    return any(
-        token in text
-        for token in [
-            "我是谁",
-            "我叫什么",
-            "我在群里叫什么",
-            "刚才",
-            "刚刚",
-            "之前",
-            "说了什么",
-            "在测什么",
-            "什么",
-            "多少",
-            "多少钱",
-            "价格",
-            "参数",
-            "配置",
-            "规格",
-            "显存",
-            "内存",
-            "发布",
-            "发售",
-            "最新",
-            "现在",
-            "当前",
-            "属于",
-            "系列",
-            "支持",
-            "区别",
-            "对比",
-            "是真的吗",
-            "有吗",
-            "存在",
-            "查",
-            "搜索",
-            "资料",
-        ]
-    )
-
-
-def _is_explicit_history_query(prompt: str) -> bool:
-    text = (prompt or "").strip()
-    return any(
-        token in text
-        for token in [
-            "之前",
-            "以前",
-            "历史",
-            "说过",
-            "聊过",
-            "提过",
-            "记得",
-            "谁说",
-            "谁提",
-            "有没有人说",
-            "上次",
-            "前面",
-            "过去",
-        ]
-    )
-
 
 def _extract_last_user_message(history: list[dict], current_prompt: str) -> str | None:
     current = (current_prompt or "").strip()
@@ -157,7 +52,6 @@ def _extract_last_user_message(history: list[dict], current_prompt: str) -> str 
         if plain:
             return plain
     return None
-
 
 def _should_web_mode(config, prompt: str) -> tuple[bool, str, bool]:
     web_mode = str(getattr(config, "chat_agent_web_mode", "auto")).lower()
@@ -175,14 +69,12 @@ def _should_web_mode(config, prompt: str) -> tuple[bool, str, bool]:
         return web_enabled, (route or {}).get("query") or (guard.get("search_query") if guard else None) or prompt, True
     return False, prompt, False
 
-
 def _extract_domain(url: str) -> str:
     try:
         host = (urlparse(str(url or "").strip()).netloc or "").lower()
     except Exception:
         return ""
     return host[4:] if host.startswith("www.") else host
-
 
 def _extract_result_blocks(raw_context: str) -> list[dict]:
     lines = (raw_context or "").splitlines()
@@ -224,7 +116,6 @@ def _extract_result_blocks(raw_context: str) -> list[dict]:
         )
     return parsed
 
-
 def _build_source_keywords(intent, prompt: str, web_query: str) -> set[str]:
     merged = " ".join(
         [
@@ -235,7 +126,6 @@ def _build_source_keywords(intent, prompt: str, web_query: str) -> set[str]:
         ]
     ).lower()
     return {tok for tok in re.findall(r"[\w.-]{2,}", merged, flags=re.UNICODE) if len(tok) > 1}
-
 
 def _score_web_source(block: dict, keywords: set[str], current_year: int) -> float:
     domain = str(block.get("domain", "") or "").lower()
@@ -274,7 +164,6 @@ def _score_web_source(block: dict, keywords: set[str], current_year: int) -> flo
 
     return max(0.0, min(1.0, score))
 
-
 def _rank_web_context_lines(raw_context: str, intent, prompt: str, web_query: str) -> tuple[str, list[str], float, str]:
     lines = (raw_context or "").splitlines()
     if not lines:
@@ -304,14 +193,12 @@ def _rank_web_context_lines(raw_context: str, intent, prompt: str, web_query: st
         out.append("")
     return "\n".join(out).strip(), top_domains, top_source_score, source_rank
 
-
 def _apply_web_source_ranking(raw_context: str, intent, prompt: str, web_query: str, tool_notes: list[str]) -> tuple[str, float]:
     ranked_context, top_domains, top_source_score, source_rank = _rank_web_context_lines(raw_context, intent, prompt, web_query)
     tool_notes.append(f"web_source_rank={source_rank}")
     tool_notes.append(f"web_source_domains={','.join(top_domains)}")
     tool_notes.append(f"web_top_source_score={top_source_score:.2f}")
     return ranked_context, top_source_score
-
 
 async def _build_ranked_web_context(config, query: str, intent, prompt: str, tool_notes: list[str]) -> tuple[str, dict]:
     try:
@@ -378,7 +265,6 @@ async def _build_ranked_web_context(config, query: str, intent, prompt: str, too
     tool_notes.append("web_freshness_gate=unknown")
     return "", {"gate": "unknown", "gate_adjust": 0.0}
 
-
 def _render_summary_retrieval_context(result: dict, max_items: int = 3) -> str:
     if not result or not result.get("reliable"):
         return ""
@@ -424,7 +310,6 @@ def _render_summary_retrieval_context(result: dict, max_items: int = 3) -> str:
         return out[:2500] + "\n...(truncated)"
     return out
 
-
 def _render_style_profile_context(profile: dict) -> str:
     if not profile:
         return ""
@@ -451,63 +336,6 @@ def _render_style_profile_context(profile: dict) -> str:
         return out[:500]
     return out
 
-
-def _is_simple_definition_question(prompt: str, intent_kind: str | None) -> bool:
-    text = str(prompt or "").strip().lower()
-    if not text:
-        return False
-    if len(text) < 2 or len(text) > 40:
-        return False
-    if str(intent_kind or "").strip() in {"local_context", "time"}:
-        return False
-
-    block_terms = [
-        "最新", "版本", "latest", "version", "现在", "今天", "价格", "新闻", "谁说过", "之前", "历史", "聊过",
-        "发布", "发售", "更新", "多少钱", "参数", "规格", "显存",
-    ]
-    if any(t in text for t in block_terms):
-        return False
-
-    def_markers = ["是什么", "是啥", "什么是", "什么意思", "是什么东西", "是做什么的"]
-    if not any(t in text for t in def_markers):
-        return False
-    return True
-
-
-def _is_community_strategy_question(prompt: str, intent_kind: str | None) -> bool:
-    text = str(prompt or "").strip().lower()
-    if not text:
-        return False
-    if len(text) < 4 or len(text) > 80:
-        return False
-    if str(intent_kind or "").strip() in {"local_context", "time"}:
-        return False
-    if _is_explicit_history_query(prompt) or _is_simple_definition_question(prompt, intent_kind):
-        return False
-    if extract_urls(prompt):
-        return False
-    if detect_numeric_compare(prompt) is not None:
-        return False
-
-    exclude_markers = [
-        "\u6700\u65b0", "\u7248\u672c", "latest", "version", "\u4ef7\u683c", "\u65b0\u95fb",
-        "\u4eca\u5929", "\u73b0\u5728", "\u5f53\u524d", "\u591a\u5c11", "\u53c2\u6570", "\u89c4\u683c",
-    ]
-    if any(t in text for t in exclude_markers):
-        return False
-
-    strategy_markers = [
-        "\u4ecb\u7ecd", "\u63a8\u8350", "\u73a9\u6cd5", "\u600e\u4e48\u73a9", "\u653b\u7565",
-        "\u65b0\u624b", "\u5f00\u5c40", "\u65b9\u6848", "\u8def\u7ebf", "\u5e2e\u6211\u9009",
-        "\u9009\u54ea\u4e2a", "\u914d\u7f6e", "\u600e\u4e48\u914d", "\u804c\u4e1a", "\u56fd\u5bb6",
-        "\u89d2\u8272", "\u600e\u4e48\u9009", "\u9009\u4ec0\u4e48", "\u600e\u4e48\u9009\u62e9",
-        "\u6b66\u5668", "\u88c5\u5907", "\u6d41\u6d3e", "\u52a0\u70b9", "\u6280\u80fd",
-        "\u9635\u5bb9", "\u914d\u961f", "\u51fa\u88c5", "\u79d1\u6280\u7ebf", "\u5766\u514b\u7ebf",
-        "\u804c\u4e1a\u9009\u62e9",
-    ]
-    return any(t in text for t in strategy_markers)
-
-
 def _build_rag_strict_instruction(rag_policy: dict, route_key: str) -> str:
     default_cfg = (rag_policy or {}).get("default") if isinstance(rag_policy, dict) else {}
     route_cfg = ((rag_policy or {}).get("routes") or {}).get(route_key) if isinstance(rag_policy, dict) else {}
@@ -532,7 +360,6 @@ def _build_rag_strict_instruction(rag_policy: dict, route_key: str) -> str:
     _ = unknown_reply
     return "\n".join(lines).strip()
 
-
 def _build_persona_style_hint(persona: dict, route_key: str) -> str:
     if not isinstance(persona, dict) or not bool(persona.get("enabled", True)):
         return ""
@@ -555,7 +382,6 @@ def _build_persona_style_hint(persona: dict, route_key: str) -> str:
     if not bits:
         return ""
     return f"{prefix}" + "；".join(bits)
-
 
 async def _build_web_strategy_distilled_context(config, query: str) -> tuple[str, int]:
     try:
@@ -607,7 +433,6 @@ async def _build_web_strategy_distilled_context(config, query: str) -> tuple[str
         out = out[:1500]
     return out, len(top)
 
-
 def _build_web_strategy_queries(prompt: str) -> list[str]:
     raw = str(prompt or "").strip()
     text = raw.lower()
@@ -636,7 +461,6 @@ def _build_web_strategy_queries(prompt: str) -> list[str]:
 
     _push(raw)
     return queries
-
 
 def _is_bad_web_strategy_result(row: dict, query_blob: str) -> bool:
     title = str((row or {}).get("title", "") or "").strip()
@@ -692,7 +516,6 @@ def _is_bad_web_strategy_result(row: dict, query_blob: str) -> bool:
         return True
 
     return False
-
 
 async def _build_web_strategy_distilled_context_multi(config, queries: list[str]) -> tuple[str, int, list[str], list[str], str]:
     logger.info(f"web_strategy search start queries={queries[:3]!r}")
@@ -792,7 +615,6 @@ async def _build_web_strategy_distilled_context_multi(config, queries: list[str]
     )
     return out, len(top), used_queries, top_titles[:3], (errors[0] if errors else "")
 
-
 def _has_local_evidence_for_question(
     *,
     direct_reply: str | None,
@@ -808,7 +630,6 @@ def _has_local_evidence_for_question(
     if simple_definition_hit or explicit_history_hit:
         return True
     return False
-
 
 def _fallback_lexical_relevance(query: str, title: str, snippet: str, url: str) -> float:
     q = str(query or "").lower()
@@ -851,7 +672,6 @@ def _fallback_lexical_relevance(query: str, title: str, snippet: str, url: str) 
             score = min(score, 0.25)
     return min(0.55, max(0.0, score))
 
-
 def _is_evaluative_question(prompt: str) -> bool:
     text = str(prompt or "")
     if not text:
@@ -862,7 +682,6 @@ def _is_evaluative_question(prompt: str) -> bool:
         "\u6700\u8fd1\u8868\u73b0", "\u600e\u4e48\u6837", "\u503c\u4e0d\u503c\u5f97",
     ]
     return any(x in text for x in markers)
-
 
 def _has_evaluation_signal_from_results(rows: list[dict]) -> tuple[bool, list[str]]:
     strong_markers = [
@@ -885,7 +704,6 @@ def _has_evaluation_signal_from_results(rows: list[dict]) -> tuple[bool, list[st
             if marker in text and marker not in hits:
                 hits.append(marker)
     return (len(hits) > 0), hits
-
 
 async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, int, list[str], float, str, bool, list[str]]:
     q = str(query or "").strip()
@@ -1074,61 +892,6 @@ async def _build_generic_web_evidence_context(config, query: str) -> tuple[str, 
     eval_hit, eval_hits = _has_evaluation_signal_from_results(merged[:5])
     return out, len(merged[:5]), [t for t in top_titles[:3] if t], top_score, "", eval_hit, eval_hits[:8]
 
-
-def _is_freshness_sensitive_prompt(prompt: str) -> bool:
-    text = str(prompt or "").lower()
-    markers = [
-        "\u6700\u65b0", "\u6700\u8fd1", "\u8fd1\u671f", "\u8fd1\u51b5", "\u8fd1\u6765", "\u5f53\u524d", "\u8fd9\u8d5b\u5b63", "\u672c\u8d5b\u5b63", "\u4eca\u5e74", "\u4eca\u5929", "\u73b0\u5728",
-        "\u7248\u672c", "\u4ef7\u683c", "\u591a\u5c11\u94b1", "\u8868\u73b0", "\u65b0\u95fb", "latest", "current", "this season",
-        "price", "news", "version", "recent",
-    ]
-    return any(m in text for m in markers)
-
-
-def _is_sports_recent_query(prompt: str) -> bool:
-    text = str(prompt or "").lower()
-    if not text:
-        return False
-    markers = [
-        "nba", "cba", "lakers", "warriors", "thunder", "lebron", "james", "curry", "doncic",
-        "詹姆斯", "勒布朗", "湖人", "勇士", "雷霆", "东契奇", "库里", "球员", "球队",
-        "最近", "近况", "表现", "数据", "最近一场", "对阵", "得分", "篮板", "助攻", "命中率", "战绩", "赛程", "赛后",
-    ]
-    return any(m in text for m in markers)
-
-
-def _is_software_version_query(prompt: str) -> bool:
-    text = str(prompt or "").lower()
-    if not text:
-        return False
-    version_markers = ["最新版", "最新版本", "当前版本", "稳定版", "latest", "version", "release", "stable"]
-    software_markers = ["ruby", "node", "nodejs", "node.js", "python", "postgresql", "redis", "docker", "go", "rust"]
-    return any(m in text for m in version_markers) and any(s in text for s in software_markers)
-
-
-def _is_definition_query(prompt: str) -> bool:
-    q = str(prompt or "").strip().lower()
-    if not q:
-        return False
-    if _is_software_version_query(q):
-        return False
-    return any(
-        term in q
-        for term in (
-            "是什么",
-            "是什麼",
-            "是啥",
-            "什么游戏",
-            "什麼遊戲",
-            "介绍",
-            "简介",
-            "百科",
-            "what is",
-            "who is",
-        )
-    )
-
-
 def _has_official_software_release_page(rows: list[dict], query: str) -> bool:
     if not _is_software_version_query(query):
         return False
@@ -1153,7 +916,6 @@ def _has_official_software_release_page(rows: list[dict], query: str) -> bool:
             return True
     return False
 
-
 def _has_stats_page_evidence(rows: list[dict]) -> bool:
     stats_markers = [
         "stats", "stat", "player", "players", "game log", "gamelog", "boxscore",
@@ -1171,7 +933,6 @@ def _has_stats_page_evidence(rows: list[dict]) -> bool:
         if any(m in blob for m in stats_markers):
             return True
     return False
-
 
 def _has_trusted_stats_page_evidence(rows: list[dict]) -> tuple[bool, int]:
     trusted_domains = [
@@ -1204,7 +965,6 @@ def _has_trusted_stats_page_evidence(rows: list[dict]) -> tuple[bool, int]:
         if any(d in host for d in trusted_domains) and any(m in blob for m in stats_markers):
             count += 1
     return count > 0, count
-
 
 def _extract_recency_days(text: str, today: date) -> tuple[int | None, str]:
     s = str(text or "")
@@ -1242,7 +1002,6 @@ def _extract_recency_days(text: str, today: date) -> tuple[int | None, str]:
         return int(m.group(1)) * 365, "x_years_ago"
     return None, ""
 
-
 def _build_simple_definition_reply(prompt: str) -> str:
     text = str(prompt or "").strip().lower()
     if "nodejs" in text or "node.js" in text or re.search(r"\bnode\b", text):
@@ -1254,7 +1013,6 @@ def _build_simple_definition_reply(prompt: str) -> str:
     if re.search(r"\bnpm\b", text):
         return "npm 是 Node.js 的包管理工具，用于安装和管理 JavaScript 依赖。"
     return "这是一个概念解释类问题，我暂时没法稳定生成回答，可以稍后再试。"
-
 
 def _build_explicit_history_direct_reply(prompt: str, summary_context: str, history_context: str) -> str:
     summary_text = str(summary_context or "").strip()
@@ -1285,7 +1043,6 @@ def _build_explicit_history_direct_reply(prompt: str, summary_context: str, hist
     if len(trimmed) > 20:
         trimmed = trimmed[:20] + "..."
     return f"\u6682\u65f6\u6ca1\u67e5\u5230\u4e0e\u201c{trimmed}\u201d\u76f8\u5173\u7684\u5386\u53f2\u8bb0\u5f55\u3002"
-
 
 async def build_context_pack(config, session_info: dict, prompt: str, bot=None, event=None) -> dict:
     intent = classify_tool_intent(prompt)
