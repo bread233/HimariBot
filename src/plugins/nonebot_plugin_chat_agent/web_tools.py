@@ -12,41 +12,13 @@ import httpx
 from bs4 import BeautifulSoup
 from nonebot import logger
 from .evidence.official import (
-    OFFICIAL_WEB_RESOLVERS as OFFICIAL_WEB_RESOLVERS,
-    _resolver_pattern_hit as _resolver_pattern_hit,
     get_nodejs_latest_version as get_nodejs_latest_version,
     get_ruby_latest_version as get_ruby_latest_version,
     resolve_official_web_answer as resolve_official_web_answer,
 )
-from .evidence.source_quality import (
-    _authority_score as _authority_score,
-    _bootstrap_web_quality_rules_file as _bootstrap_web_quality_rules_file,
-    _extract_domain as _extract_domain,
-    _extract_query_tokens as _extract_query_tokens,
-    _extract_years as _extract_years,
-    _freshness_score as _freshness_score,
-    _generic_source_quality_adjustment as _generic_source_quality_adjustment,
-    _get_web_quality_rules_path as _get_web_quality_rules_path,
-    _is_current_sensitive_query as _is_current_sensitive_query,
-    _load_web_quality_rules as _load_web_quality_rules,
-    _normalize_domain_list as _normalize_domain_list,
-    _normalize_rule_list as _normalize_rule_list,
-    _rank_result as _rank_result,
-    _source_flags as _source_flags,
-    _source_preference_score as _source_preference_score,
-    _sports_source_adjustment as _sports_source_adjustment,
-)
 from .evidence.web import (
-    _clean_html_text as _clean_html_text,
-    _clean_text as _clean_text,
-    _normalize_duckduckgo_url as _normalize_duckduckgo_url,
-    read_url as read_url,
     search_web as search_web,
-)
-
-from .evidence.web import (
-    _split_text_chunks as _split_text_chunks,
-    _rank_web_chunks as _rank_web_chunks,
+    read_url as read_url,
     build_web_results as build_web_results,
     render_web_results_context as render_web_results_context,
     build_web_context as build_web_context,
