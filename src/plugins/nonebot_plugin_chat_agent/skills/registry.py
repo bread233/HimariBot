@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
 
 from nonebot import logger
 
@@ -56,22 +57,45 @@ class SkillRegistry:
         return [skill for skill in self.skills.values() if skill.enabled]
 
     def match(self, prompt: str, max_active: int = 3) -> list[SkillDefinition]:
-        text = str(prompt or "").strip().lower()
+        text = str(prompt or "").strip()
         if not text:
             return []
+        normalized_prompt = _normalize_text(text)
+        query_tokens = _extract_query_tokens(text)
         scored: list[tuple[int, int, str, SkillDefinition]] = []
         for skill in self.enabled_skills():
-            trigger_hit = any(t and t.lower() in text for t in skill.triggers)
-            name_hit = bool(skill.name and skill.name.lower() in text)
-            desc_hit = bool(skill.description and skill.description.lower() in text)
+            score = 0
+            trigger_hit = any(
+                _normalize_text(t) and _normalize_text(t) in normalized_prompt
+                for t in skill.triggers
+            )
             if trigger_hit:
-                score = 3000
-            elif name_hit:
-                score = 2000
-            elif desc_hit:
-                score = 1000
-            else:
-                score = 0
+                score += 3000
+
+            name_norm = _normalize_text(skill.name)
+            if name_norm and name_norm in normalized_prompt:
+                score += 2000
+
+            description_norm = _normalize_text(skill.description)
+            body_norm = _normalize_text(skill.body)
+            if query_tokens:
+                for token in query_tokens:
+                    if len(token) < 2:
+                        continue
+                    if description_norm and token in description_norm:
+                        score += 220
+                    if body_norm and token in body_norm:
+                        score += 100
+
+            for phrase in _extract_quoted_phrases(skill.description):
+                pn = _normalize_text(phrase)
+                if pn and pn in normalized_prompt:
+                    score += 260
+            for phrase in _extract_quoted_phrases(skill.body):
+                pn = _normalize_text(phrase)
+                if pn and pn in normalized_prompt:
+                    score += 120
+
             if score <= 0:
                 continue
             scored.append((score, int(skill.priority), skill.name, skill))
@@ -89,6 +113,44 @@ def _parse_bool(value: str, default: bool = True) -> bool:
     if text in {"0", "false", "no", "n", "off"}:
         return False
     return default
+
+
+_PUNCT_PATTERN = re.compile(r"[，。！？；：、“”\"'‘’（）()\[\]{}<>《》【】,!.?:;/_\-+=|`~@#$%^&*]+")
+_SPACE_PATTERN = re.compile(r"\s+")
+_CJK_PATTERN = re.compile(r"[\u4e00-\u9fff]{2,}")
+_WORD_PATTERN = re.compile(r"[a-z0-9]{2,}")
+_QUOTED_PATTERN = re.compile(r"[“\"'‘](.+?)[”\"'’]")
+
+
+def _normalize_text(value: str) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    text = _PUNCT_PATTERN.sub(" ", text)
+    text = _SPACE_PATTERN.sub(" ", text).strip()
+    return text
+
+
+def _extract_query_tokens(value: str) -> list[str]:
+    text = _normalize_text(value)
+    if not text:
+        return []
+    tokens: list[str] = []
+    tokens.extend(_CJK_PATTERN.findall(text))
+    tokens.extend(_WORD_PATTERN.findall(text))
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in tokens:
+        if t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+    return out
+
+
+def _extract_quoted_phrases(value: str) -> list[str]:
+    text = str(value or "")
+    return [m.strip() for m in _QUOTED_PATTERN.findall(text) if str(m).strip()]
 
 
 def _parse_frontmatter(frontmatter_text: str) -> dict:
