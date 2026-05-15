@@ -51,3 +51,10 @@ For every coding task:
 7. Make the smallest safe change.
 8. Show `git diff`.
 9. Stop and wait for user review.
+
+Smoke/temp file rules:
+- 不允许在仓库根目录创建临时文件或临时目录。
+- Python smoke 如需临时文件，必须使用 tempfile.TemporaryDirectory(dir=os.getenv("TEMP") or "/tmp")。
+- 临时脚本必须写入系统临时目录，用完删除。
+- 每轮 smoke 后必须执行 git status --short --branch。
+- 如果出现根目录随机 untracked 文件，立即停止并报告，不要继续。
