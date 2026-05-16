@@ -17,6 +17,7 @@ from .runtime_config import get_persona_profile, get_rag_policy
 from ..stores.skill_store import render_skill_context, select_relevant_skills, skills_to_evidence_items
 from ..skills.registry import load_skill_registry
 from ..skills.evidence_bridge import build_skill_evidence_context
+from ..skills.internal_actions import is_registered_internal_action
 from ..evidence.evidence_pack import render_evidence_context
 from nonebot import logger
 from datetime import datetime
@@ -1091,6 +1092,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     external_skill_route_reason = ""
     internal_skill_action: str | None = None
     internal_skill_route: str | None = None
+    unregistered_internal_skill_action: str | None = None
     if bool(getattr(config, "chat_agent_enable_skills", True)):
         skills_dir = getattr(config, "chat_agent_skills_dir", "data/nonebot_chat_agent/skills")
         max_active = int(getattr(config, "chat_agent_skills_max_active", 3) or 3)
@@ -1134,12 +1136,20 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 f"skill_route_policy name={selected_external_skill_name} "
                 f"web_allowed={1 if external_skill_web_allowed else 0} reason={external_skill_route_reason}"
             )
-            if internal_skill_action == "internal_60s_news" and internal_skill_route == "direct_message":
-                logger.info(
-                    "internal_skill_action name=internal_60s_news route=direct_message selected=1"
-                )
+            if internal_skill_action and internal_skill_route == "direct_message":
+                if is_registered_internal_action(internal_skill_action):
+                    logger.info(
+                        f"internal_skill_action name={internal_skill_action} route=direct_message selected=1"
+                    )
+                else:
+                    logger.info(
+                        f"internal_skill_action name={internal_skill_action} route=direct_message selected=0 reason=unregistered"
+                    )
+                    unregistered_internal_skill_action = internal_skill_action
+                    internal_skill_action = None
+                    internal_skill_route = None
             if bool(getattr(config, "chat_agent_skill_evidence_enable", True)) and skill_name_norm in {"news", "weather"}:
-                if internal_skill_action == "internal_60s_news" and internal_skill_route == "direct_message":
+                if internal_skill_action and internal_skill_route == "direct_message":
                     pass
                 else:
                     external_skill_evidence_context, external_skill_evidence_notes = await build_skill_evidence_context(
@@ -1177,10 +1187,10 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         logger.info("skill_registry enabled=0")
     if external_skill_context:
         skill_context = "\n\n".join(x for x in [skill_context, external_skill_context] if x).strip()
-    if internal_skill_action == "internal_60s_news" and internal_skill_route == "direct_message":
+    if internal_skill_action and internal_skill_route == "direct_message":
         decision = build_runtime_decision(
             RuntimeDecisionSignals(
-                internal_skill_action="internal_60s_news",
+                internal_skill_action=internal_skill_action,
                 internal_skill_route="direct_message",
                 selected_skill_name=selected_external_skill_name,
                 skill_web_allowed=False,
@@ -1204,9 +1214,9 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             "skill_context": skill_context,
             "tool_notes": (
                 f"internal_skill_action selected=1 name={selected_external_skill_name or ''} "
-                "action=internal_60s_news route=direct_message"
+                f"action={internal_skill_action} route=direct_message"
             ),
-            "internal_skill_action": "internal_60s_news",
+            "internal_skill_action": internal_skill_action,
             "internal_skill_route": "direct_message",
             "internal_skill_name": selected_external_skill_name or "",
         }, decision)
@@ -1420,6 +1430,11 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         )
         if selected_external_skill_name and not external_skill_web_allowed:
             tool_notes.append("skill_web_block_applied=1")
+        if unregistered_internal_skill_action:
+            tool_notes.append(
+                f"internal_skill_action selected=0 name={selected_external_skill_name or skill_name} "
+                f"action={unregistered_internal_skill_action} reason=unregistered"
+            )
     else:
         tool_notes.append("skill_match selected=none")
     for note in external_skill_evidence_notes:
@@ -1427,10 +1442,10 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     pre_route = "plain_chat"
     pre_reason = "default"
     pre_action = ""
-    if internal_skill_action == "internal_60s_news" and internal_skill_route == "direct_message":
+    if internal_skill_action and internal_skill_route == "direct_message":
         pre_route = "direct_action"
         pre_reason = "internal_skill_action"
-        pre_action = "internal_60s_news"
+        pre_action = internal_skill_action
     elif selected_external_skill_name and not external_skill_web_allowed:
         pre_route = "skill_context"
         pre_reason = "skill_policy_block"
