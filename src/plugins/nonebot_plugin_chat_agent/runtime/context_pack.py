@@ -39,6 +39,7 @@ from ..decision.detectors import (
 )
 from ..decision.result import DecisionResult as RuntimeDecisionResult, DecisionRoute
 from ..decision.router import RuntimeDecisionSignals, build_runtime_decision
+from ..decision.policy import load_decision_policy
 
 try:
     from ..memory.summary_retrieval import retrieve_daily_summaries
@@ -1092,13 +1093,17 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     external_skill_route_reason = ""
     internal_skill_action: str | None = None
     internal_skill_route: str | None = None
+    internal_skill_registered = False
     unregistered_internal_skill_action: str | None = None
+    decision_policy = load_decision_policy(getattr(config, "chat_agent_decision_policy_path", None))
+    policy_block_names = set(decision_policy.web_block_skill_names)
+    policy_evidence_names = set(decision_policy.skill_evidence_names)
     if bool(getattr(config, "chat_agent_enable_skills", True)):
         skills_dir = getattr(config, "chat_agent_skills_dir", "data/nonebot_chat_agent/skills")
         max_active = int(getattr(config, "chat_agent_skills_max_active", 3) or 3)
         max_body_chars = int(getattr(config, "chat_agent_skills_max_body_chars", 4000) or 4000)
         allow_names = _parse_name_set(getattr(config, "chat_agent_skill_web_allow_names", "news,weather"))
-        block_names = _parse_name_set(getattr(config, "chat_agent_skill_web_block_names", "pptx,docx,pdf,xlsx"))
+        block_names = _parse_name_set(getattr(config, "chat_agent_skill_web_block_names", "pptx,docx,pdf,xlsx")) | policy_block_names
         registry = load_skill_registry(skills_dir)
         loaded_count = len(registry.skills)
         logger.info(f"skill_registry enabled=1 dir={skills_dir} loaded={loaded_count}")
@@ -1109,6 +1114,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             selected_external_skill_name = str(skill.name or "").strip()
             skill_name_norm = selected_external_skill_name.lower()
             internal_skill_action = str(getattr(skill, "chat_agent_action", "") or "").strip() or None
+            internal_skill_action = decision_policy.canonical_action(internal_skill_action)
             internal_skill_route = str(getattr(skill, "chat_agent_route", "") or "").strip() or None
             if skill_name_norm in block_names:
                 external_skill_web_allowed = False
@@ -1138,6 +1144,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             )
             if internal_skill_action and internal_skill_route == "direct_message":
                 if is_registered_internal_action(internal_skill_action):
+                    internal_skill_registered = True
                     logger.info(
                         f"internal_skill_action name={internal_skill_action} route=direct_message selected=1"
                     )
@@ -1148,7 +1155,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     unregistered_internal_skill_action = internal_skill_action
                     internal_skill_action = None
                     internal_skill_route = None
-            if bool(getattr(config, "chat_agent_skill_evidence_enable", True)) and skill_name_norm in {"news", "weather"}:
+            if bool(getattr(config, "chat_agent_skill_evidence_enable", True)) and skill_name_norm in policy_evidence_names:
                 if internal_skill_action and internal_skill_route == "direct_message":
                     pass
                 else:
@@ -1192,10 +1199,12 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             RuntimeDecisionSignals(
                 internal_skill_action=internal_skill_action,
                 internal_skill_route="direct_message",
+                selected_skill_registered=internal_skill_registered,
                 selected_skill_name=selected_external_skill_name,
                 skill_web_allowed=False,
                 reason_hint="internal_skill_action",
                 confidence=1.0,
+                policy=decision_policy,
             )
         )
         return _with_decision({

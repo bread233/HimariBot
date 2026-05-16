@@ -80,6 +80,7 @@ class ChatAgentConfig(BaseModel):
     chat_agent_news_skill_max_sources: int = Field(default=1)
     chat_agent_news_skill_read_max_chars: int = Field(default=6000)
     chat_agent_weather_skill_read_max_chars: int = Field(default=1200)
+    chat_agent_decision_policy_path: Path = Field(default=Path("data/nonebot_chat_agent/decision_policy.json"))
 
     def ensure_data_dir(self) -> Path:
         self.chat_agent_data_dir.mkdir(parents=True, exist_ok=True)
@@ -224,6 +225,9 @@ def get_chat_agent_config() -> ChatAgentConfig:
         ),
         chat_agent_weather_skill_read_max_chars=int(
             _cfg("chat_agent_weather_skill_read_max_chars", "CHAT_AGENT_WEATHER_SKILL_READ_MAX_CHARS", 1200)
+        ),
+        chat_agent_decision_policy_path=Path(
+            str(_cfg("chat_agent_decision_policy_path", "CHAT_AGENT_DECISION_POLICY_PATH", "data/nonebot_chat_agent/decision_policy.json"))
         ),
     )
     _cached_config.ensure_data_dir()
