@@ -1083,6 +1083,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     selected_external_skill_name: str | None = None
     external_skill_web_allowed = True
     external_skill_route_reason = ""
+    internal_skill_action: str | None = None
+    internal_skill_route: str | None = None
     if bool(getattr(config, "chat_agent_enable_skills", True)):
         skills_dir = getattr(config, "chat_agent_skills_dir", "data/nonebot_chat_agent/skills")
         max_active = int(getattr(config, "chat_agent_skills_max_active", 3) or 3)
@@ -1098,6 +1100,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             skill = selected_external[0]
             selected_external_skill_name = str(skill.name or "").strip()
             skill_name_norm = selected_external_skill_name.lower()
+            internal_skill_action = str(getattr(skill, "chat_agent_action", "") or "").strip() or None
+            internal_skill_route = str(getattr(skill, "chat_agent_route", "") or "").strip() or None
             if skill_name_norm in block_names:
                 external_skill_web_allowed = False
                 external_skill_route_reason = "blocked_by_skill_policy"
@@ -1124,13 +1128,20 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 f"skill_route_policy name={selected_external_skill_name} "
                 f"web_allowed={1 if external_skill_web_allowed else 0} reason={external_skill_route_reason}"
             )
-            if bool(getattr(config, "chat_agent_skill_evidence_enable", True)) and skill_name_norm in {"news", "weather"}:
-                external_skill_evidence_context, external_skill_evidence_notes = await build_skill_evidence_context(
-                    skill,
-                    prompt,
-                    config,
-                    read_url,
+            if internal_skill_action == "internal_60s_news" and internal_skill_route == "direct_message":
+                logger.info(
+                    "internal_skill_action name=internal_60s_news route=direct_message selected=1"
                 )
+            if bool(getattr(config, "chat_agent_skill_evidence_enable", True)) and skill_name_norm in {"news", "weather"}:
+                if internal_skill_action == "internal_60s_news" and internal_skill_route == "direct_message":
+                    pass
+                else:
+                    external_skill_evidence_context, external_skill_evidence_notes = await build_skill_evidence_context(
+                        skill,
+                        prompt,
+                        config,
+                        read_url,
+                    )
                 source_count = 0
                 need_location = 0
                 used = 0
@@ -1160,6 +1171,29 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         logger.info("skill_registry enabled=0")
     if external_skill_context:
         skill_context = "\n\n".join(x for x in [skill_context, external_skill_context] if x).strip()
+    if internal_skill_action == "internal_60s_news" and internal_skill_route == "direct_message":
+        return {
+            "direct_reply": None,
+            "should_call_llm": False,
+            "web_used": False,
+            "time_context": "",
+            "profile_context": "",
+            "group_context": "",
+            "retrieval_context": "",
+            "style_context": "",
+            "summary_retrieval_context": "",
+            "history_context": "",
+            "memory_context": "",
+            "web_context": "",
+            "skill_context": skill_context,
+            "tool_notes": (
+                f"internal_skill_action selected=1 name={selected_external_skill_name or ''} "
+                "action=internal_60s_news route=direct_message"
+            ),
+            "internal_skill_action": "internal_60s_news",
+            "internal_skill_route": "direct_message",
+            "internal_skill_name": selected_external_skill_name or "",
+        }
     if intent.needs_time:
         now = datetime.now()
         time_context = (
