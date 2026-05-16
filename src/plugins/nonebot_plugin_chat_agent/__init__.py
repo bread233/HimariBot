@@ -140,16 +140,28 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
 
         context_pack = await build_context_pack(config, session_info, prompt, bot=bot, event=event)
         if bool(context_pack.get("decision_classifier_observe_enabled", False)):
+            current_route = str(context_pack.get("decision_route", "") or "")
             try:
                 catalog_text = str(context_pack.get("decision_classifier_catalog", "") or "").strip()
-                if catalog_text:
-                    messages = build_decision_classifier_messages(
-                        str(context_pack.get("decision_classifier_prompt", prompt) or prompt),
-                        catalog_text,
-                    )
-                    model_name = str(getattr(config, "chat_agent_decision_classifier_model", "") or "").strip() or None
-                    timeout_s = max(3, int(getattr(config, "chat_agent_decision_classifier_timeout", 10) or 10))
-                    max_tokens = max(64, int(getattr(config, "chat_agent_decision_classifier_max_tokens", 160) or 160))
+                if not catalog_text:
+                    raise ValueError("empty_catalog")
+                messages = build_decision_classifier_messages(
+                    str(context_pack.get("decision_classifier_prompt", prompt) or prompt),
+                    catalog_text,
+                )
+                model_name = str(getattr(config, "chat_agent_decision_classifier_model", "") or "").strip() or None
+                timeout_s = max(3, int(getattr(config, "chat_agent_decision_classifier_timeout", 10) or 10))
+                max_tokens = max(64, int(getattr(config, "chat_agent_decision_classifier_max_tokens", 160) or 160))
+            except Exception as e:
+                logger.info(
+                    "decision_classifier_observe accepted=0 "
+                    f"reason=prepare_error current_route={current_route} "
+                    f"error={type(e).__name__} detail={str(e)[:160]}"
+                )
+                messages = None
+            if messages:
+                raw = ""
+                try:
                     raw = await chat_completions(
                         messages,
                         config,
@@ -157,35 +169,60 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                         timeout=float(timeout_s),
                         max_tokens=max_tokens,
                     )
-                    candidate = parse_decision_classifier_reply(raw)
+                except Exception as e:
+                    logger.info(
+                        "decision_classifier_observe accepted=0 "
+                        f"reason=llm_error current_route={current_route} "
+                        f"error={type(e).__name__} detail={str(e)[:160]}"
+                    )
+                    raw = ""
+                if raw:
+                    try:
+                        candidate = parse_decision_classifier_reply(raw)
+                    except Exception as e:
+                        logger.info(
+                            "decision_classifier_observe accepted=0 "
+                            f"reason=parse_error current_route={current_route} "
+                            f"error={type(e).__name__} detail={str(e)[:160]} "
+                            f"raw_preview={str(raw)[:160]!r}"
+                        )
+                        candidate = None
                     if candidate is None:
                         logger.info(
-                            f"decision_classifier_observe accepted=0 reason=parse_failed current_route={context_pack.get('decision_route','')}"
+                            "decision_classifier_observe accepted=0 "
+                            f"reason=parse_failed current_route={current_route} raw_preview={str(raw)[:160]!r}"
                         )
                     else:
-                        policy = load_decision_policy(getattr(config, "chat_agent_decision_policy_path", None))
-                        entries = context_pack.get("decision_classifier_entries", []) or []
-                        validated = validate_decision_candidate(
-                            candidate,
-                            entries,
-                            policy,
-                            get_registered_internal_actions(),
-                        )
+                        try:
+                            policy = load_decision_policy(getattr(config, "chat_agent_decision_policy_path", None))
+                            entries = context_pack.get("decision_classifier_entries", []) or []
+                            validated = validate_decision_candidate(
+                                candidate,
+                                entries,
+                                policy,
+                                get_registered_internal_actions(),
+                            )
+                        except Exception as e:
+                            logger.info(
+                                "decision_classifier_observe accepted=0 "
+                                f"reason=validation_error current_route={current_route} "
+                                f"error={type(e).__name__} detail={str(e)[:160]}"
+                            )
+                            validated = None
                         if validated is None:
                             logger.info(
-                                f"decision_classifier_observe accepted=0 reason=validation_failed current_route={context_pack.get('decision_route','')}"
+                                "decision_classifier_observe accepted=0 "
+                                f"reason=validation_failed current_route={current_route} "
+                                f"route={candidate.route} skill={candidate.skill_name or ''} "
+                                f"action={candidate.action_name or ''} confidence={candidate.confidence:.2f}"
                             )
                         else:
                             logger.info(
                                 "decision_classifier_observe accepted=1 "
                                 f"route={validated.route} skill={validated.skill_name or ''} "
                                 f"action={validated.action_name or ''} confidence={candidate.confidence:.2f} "
-                                f"current_route={context_pack.get('decision_route','')} reason={candidate.reason[:80]}"
+                                f"current_route={current_route} reason={candidate.reason[:80]}"
                             )
-            except Exception as e:
-                logger.info(
-                    f"decision_classifier_observe accepted=0 reason=llm_error current_route={context_pack.get('decision_route','')} error={type(e).__name__}"
-                )
         action_name = str(context_pack.get("internal_skill_action", "")).strip()
         action_route = str(context_pack.get("internal_skill_route", "")).strip()
         if action_name and action_route == "direct_message":
