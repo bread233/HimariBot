@@ -11,11 +11,12 @@ from ..decision.tool_router import should_use_web_tool
 from ..decision.tool_intent import classify_tool_intent
 from ..decision.question_intent import detect_question_like
 from ..evidence.url_tools import build_direct_url_context, extract_urls
-from ..evidence.web import build_web_context, build_web_results, render_web_results_context
+from ..evidence.web import build_web_context, build_web_results, render_web_results_context, read_url
 from ..evidence.official import resolve_official_web_answer
 from .runtime_config import get_persona_profile, get_rag_policy
 from ..stores.skill_store import render_skill_context, select_relevant_skills, skills_to_evidence_items
 from ..skills.registry import load_skill_registry
+from ..skills.evidence_bridge import build_skill_evidence_context
 from ..evidence.evidence_pack import render_evidence_context
 from nonebot import logger
 from datetime import datetime
@@ -1077,6 +1078,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     skill_evidence_items = skills_to_evidence_items(selected_skills)
     skill_evidence_context = render_evidence_context(skill_evidence_items, budget_chars=1200, limit=3)
     external_skill_context = ""
+    external_skill_evidence_context = ""
+    external_skill_evidence_notes: list[str] = []
     selected_external_skill_name: str | None = None
     external_skill_web_allowed = True
     external_skill_route_reason = ""
@@ -1121,6 +1124,36 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 f"skill_route_policy name={selected_external_skill_name} "
                 f"web_allowed={1 if external_skill_web_allowed else 0} reason={external_skill_route_reason}"
             )
+            if bool(getattr(config, "chat_agent_skill_evidence_enable", True)) and skill_name_norm in {"news", "weather"}:
+                external_skill_evidence_context, external_skill_evidence_notes = await build_skill_evidence_context(
+                    skill,
+                    prompt,
+                    config,
+                    read_url,
+                )
+                source_count = 0
+                need_location = 0
+                used = 0
+                err = ""
+                for note in external_skill_evidence_notes:
+                    if f"name={skill_name_norm}" not in note:
+                        continue
+                    if "used=1" in note:
+                        used = 1
+                    m_sc = re.search(r"source_count=(\d+)", note)
+                    if m_sc:
+                        source_count = int(m_sc.group(1))
+                    if "need_location=1" in note:
+                        need_location = 1
+                    if "read_error=1" in note:
+                        err = "read_error"
+                logger.info(
+                    f"skill_evidence_bridge name={skill_name_norm} used={used} "
+                    f"source_count={source_count} need_location={need_location} "
+                    f"evidence_chars={len(external_skill_evidence_context)}"
+                )
+                if err:
+                    logger.info(f"skill_evidence_bridge name={skill_name_norm} used=0 error={err}")
         else:
             logger.info(f"skill_match selected=none loaded={loaded_count}")
     else:
@@ -1289,11 +1322,20 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         )
         retrieval_context = retrieval["content"] if retrieval["source"] == "db" else ""
         retrieval_score = float(retrieval.get("score", 0.0) or 0.0)
+    if external_skill_evidence_context:
+        retrieval_context = "\n".join(
+            x for x in [retrieval_context, external_skill_evidence_context] if x
+        ).strip()
 
     web_relevance_threshold = float(getattr(config, "chat_agent_web_relevance_min_score", 0.35))
     web_final_threshold = float(getattr(config, "chat_agent_web_final_min_score", 0.30))
     should_web, web_query, route_like = _should_web_mode(config, prompt)
     if selected_external_skill_name and not external_skill_web_allowed:
+        should_web = False
+        route_like = False
+    if selected_external_skill_name and selected_external_skill_name.lower() in {"news", "weather"} and bool(
+        getattr(config, "chat_agent_skill_evidence_enable", True)
+    ):
         should_web = False
         route_like = False
     needs_reliable_context = _needs_reliable_context(prompt)
@@ -1330,6 +1372,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             tool_notes.append("skill_web_block_applied=1")
     else:
         tool_notes.append("skill_match selected=none")
+    for note in external_skill_evidence_notes:
+        tool_notes.append(note)
     tool_notes.append(f"skill_evidence_items={len(skill_evidence_items)}")
     tool_notes.append(f"skill_evidence_chars={len(skill_evidence_context)}")
     tool_notes.append(f"intent={intent.kind}")
@@ -1566,6 +1610,40 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         and intent.kind != "local_context"
     ):
         tool_notes.append("evidence_gate=1")
+        if (
+            selected_external_skill_name
+            and selected_external_skill_name.lower() in {"news", "weather"}
+            and bool(getattr(config, "chat_agent_skill_evidence_enable", True))
+            and external_skill_evidence_context
+        ):
+            tool_notes.append("evidence_gate_source=skill_bridge")
+            tool_notes.append("web_evidence_skipped_by_skill_bridge=1")
+            logger.info(
+                f"web_evidence_skipped_by_skill_bridge=1 name={selected_external_skill_name or 'unknown'}"
+            )
+            composed_web_evidence_context = "\n".join(
+                x for x in [rag_web_evidence, external_skill_evidence_context, persona_web_evidence] if x
+            ).strip()
+            return {
+                "direct_reply": None,
+                "should_call_llm": True,
+                "web_used": False,
+                "time_context": time_context,
+                "profile_context": profile_context,
+                "group_context": group_context,
+                "retrieval_context": "",
+                "style_context": "",
+                "summary_retrieval_context": "",
+                "history_context": "",
+                "memory_context": "",
+                "web_context": "",
+                "lightweight_mode": "web_evidence",
+                "lightweight_prompt": prompt,
+                "web_evidence_query": prompt,
+                "web_evidence_context": composed_web_evidence_context,
+                "skill_context": skill_context,
+                "tool_notes": "\n".join(tool_notes).strip(),
+            }
         local_ok = _has_local_evidence_for_question(
             direct_reply=None,
             retrieval_context=retrieval_context,
