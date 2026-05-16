@@ -74,6 +74,8 @@ class ChatAgentConfig(BaseModel):
     chat_agent_skills_dir: Path = Field(default=Path("data/nonebot_chat_agent/skills"))
     chat_agent_skills_max_active: int = Field(default=3)
     chat_agent_skills_max_body_chars: int = Field(default=4000)
+    chat_agent_skill_web_allow_names: str = Field(default="news,weather")
+    chat_agent_skill_web_block_names: str = Field(default="pptx,docx,pdf,xlsx")
 
     def ensure_data_dir(self) -> Path:
         self.chat_agent_data_dir.mkdir(parents=True, exist_ok=True)
@@ -199,6 +201,12 @@ def get_chat_agent_config() -> ChatAgentConfig:
         ),
         chat_agent_skills_max_body_chars=int(
             _cfg("chat_agent_skills_max_body_chars", "CHAT_AGENT_SKILLS_MAX_BODY_CHARS", 4000)
+        ),
+        chat_agent_skill_web_allow_names=str(
+            _cfg("chat_agent_skill_web_allow_names", "CHAT_AGENT_SKILL_WEB_ALLOW_NAMES", "news,weather")
+        ),
+        chat_agent_skill_web_block_names=str(
+            _cfg("chat_agent_skill_web_block_names", "CHAT_AGENT_SKILL_WEB_BLOCK_NAMES", "pptx,docx,pdf,xlsx")
         ),
     )
     _cached_config.ensure_data_dir()

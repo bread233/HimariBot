@@ -77,6 +77,16 @@ def _extract_domain(url: str) -> str:
         return ""
     return host[4:] if host.startswith("www.") else host
 
+
+def _parse_name_set(value: str) -> set[str]:
+    text = str(value or "")
+    out: set[str] = set()
+    for item in text.split(","):
+        name = str(item or "").strip().lower()
+        if name:
+            out.add(name)
+    return out
+
 def _extract_result_blocks(raw_context: str) -> list[dict]:
     lines = (raw_context or "").splitlines()
     if not lines:
@@ -1067,10 +1077,15 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     skill_evidence_items = skills_to_evidence_items(selected_skills)
     skill_evidence_context = render_evidence_context(skill_evidence_items, budget_chars=1200, limit=3)
     external_skill_context = ""
+    selected_external_skill_name: str | None = None
+    external_skill_web_allowed = True
+    external_skill_route_reason = ""
     if bool(getattr(config, "chat_agent_enable_skills", True)):
         skills_dir = getattr(config, "chat_agent_skills_dir", "data/nonebot_chat_agent/skills")
         max_active = int(getattr(config, "chat_agent_skills_max_active", 3) or 3)
         max_body_chars = int(getattr(config, "chat_agent_skills_max_body_chars", 4000) or 4000)
+        allow_names = _parse_name_set(getattr(config, "chat_agent_skill_web_allow_names", "news,weather"))
+        block_names = _parse_name_set(getattr(config, "chat_agent_skill_web_block_names", "pptx,docx,pdf,xlsx"))
         registry = load_skill_registry(skills_dir)
         loaded_count = len(registry.skills)
         logger.info(f"skill_registry enabled=1 dir={skills_dir} loaded={loaded_count}")
@@ -1078,6 +1093,17 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         selected_external = matched[:1]
         if selected_external:
             skill = selected_external[0]
+            selected_external_skill_name = str(skill.name or "").strip()
+            skill_name_norm = selected_external_skill_name.lower()
+            if skill_name_norm in block_names:
+                external_skill_web_allowed = False
+                external_skill_route_reason = "blocked_by_skill_policy"
+            elif skill_name_norm in allow_names:
+                external_skill_web_allowed = True
+                external_skill_route_reason = "allowed_by_skill_policy"
+            else:
+                external_skill_web_allowed = True
+                external_skill_route_reason = "default_allow_unknown_skill"
             activation = skill.to_activation_text(max_body_chars=max_body_chars).strip()
             external_skill_context = (
                 "[ChatAgent Skill Activated]\n"
@@ -1091,6 +1117,10 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "state the limitation and answer based on available evidence."
             ).strip()
             logger.info(f"skill_match selected={skill.name} loaded={loaded_count}")
+            logger.info(
+                f"skill_route_policy name={selected_external_skill_name} "
+                f"web_allowed={1 if external_skill_web_allowed else 0} reason={external_skill_route_reason}"
+            )
         else:
             logger.info(f"skill_match selected=none loaded={loaded_count}")
     else:
@@ -1263,6 +1293,9 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     web_relevance_threshold = float(getattr(config, "chat_agent_web_relevance_min_score", 0.35))
     web_final_threshold = float(getattr(config, "chat_agent_web_final_min_score", 0.30))
     should_web, web_query, route_like = _should_web_mode(config, prompt)
+    if selected_external_skill_name and not external_skill_web_allowed:
+        should_web = False
+        route_like = False
     needs_reliable_context = _needs_reliable_context(prompt)
 
     web_context = ""
@@ -1288,6 +1321,13 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         body_chars = len(external_skill_context)
         skill_name = external_skill_context.splitlines()[1].replace("Name:", "").strip() if len(external_skill_context.splitlines()) > 1 else ""
         tool_notes.append(f"skill_context injected=1 name={skill_name} body_chars={body_chars}")
+        tool_notes.append(
+            f"skill_route_policy name={selected_external_skill_name or skill_name} "
+            f"web_allowed={1 if external_skill_web_allowed else 0} "
+            f"reason={external_skill_route_reason or 'unknown'}"
+        )
+        if selected_external_skill_name and not external_skill_web_allowed:
+            tool_notes.append("skill_web_block_applied=1")
     else:
         tool_notes.append("skill_match selected=none")
     tool_notes.append(f"skill_evidence_items={len(skill_evidence_items)}")
@@ -1535,7 +1575,10 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             simple_definition_hit=False,
             explicit_history_hit=False,
         )
-        if not local_ok:
+        if selected_external_skill_name and not external_skill_web_allowed:
+            tool_notes.append("evidence_gate_source=skill_policy_block")
+            tool_notes.append("web_evidence_skipped_by_skill_policy=1")
+        elif not local_ok:
             evidence_query = str(web_query or prompt or "").strip()
             evidence_context, evidence_count, evidence_titles, top_score, evidence_error, evaluation_signal_hit, evaluation_signal_terms = await _build_generic_web_evidence_context(
                 config, evidence_query
