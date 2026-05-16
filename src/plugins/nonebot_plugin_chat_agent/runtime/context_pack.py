@@ -37,6 +37,7 @@ from ..decision.detectors import (
     _is_definition_query,
 )
 from ..decision.result import DecisionResult as RuntimeDecisionResult, DecisionRoute
+from ..decision.router import RuntimeDecisionSignals, build_runtime_decision
 
 try:
     from ..memory.summary_retrieval import retrieve_daily_summaries
@@ -1177,14 +1178,15 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     if external_skill_context:
         skill_context = "\n\n".join(x for x in [skill_context, external_skill_context] if x).strip()
     if internal_skill_action == "internal_60s_news" and internal_skill_route == "direct_message":
-        decision = RuntimeDecisionResult(
-            route=DecisionRoute.DIRECT_ACTION,
-            skill_name=selected_external_skill_name,
-            action_name="internal_60s_news",
-            action_route="direct_message",
-            web_allowed=False,
-            reason="internal_skill_action",
-            confidence=1.0,
+        decision = build_runtime_decision(
+            RuntimeDecisionSignals(
+                internal_skill_action="internal_60s_news",
+                internal_skill_route="direct_message",
+                selected_skill_name=selected_external_skill_name,
+                skill_web_allowed=False,
+                reason_hint="internal_skill_action",
+                confidence=1.0,
+            )
         )
         return _with_decision({
             "direct_reply": None,
@@ -1557,10 +1559,12 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 f"current_fact_direct_source={official_answer.get('source', '')}"
             )
             return {
-                **RuntimeDecisionResult(
-                    route=DecisionRoute.OFFICIAL_RESOLVER,
-                    reason="official_direct_answer",
-                    confidence=1.0,
+                **build_runtime_decision(
+                    RuntimeDecisionSignals(
+                        official_direct_reply=True,
+                        reason_hint="official_direct_answer",
+                        confidence=1.0,
+                    )
                 ).to_context_fields(),
                 "direct_reply": str(official_answer.get("answer", "")).strip(),
                 "should_call_llm": False,
@@ -1584,10 +1588,12 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             )
             tool_notes.append("explicit_history_direct_reply=1")
             return {
-                **RuntimeDecisionResult(
-                    route=DecisionRoute.MEMORY_HISTORY,
-                    reason="explicit_history_direct_reply",
-                    confidence=0.9,
+                **build_runtime_decision(
+                    RuntimeDecisionSignals(
+                        history_direct_reply=True,
+                        reason_hint="explicit_history_direct_reply",
+                        confidence=0.9,
+                    )
                 ).to_context_fields(),
                 "direct_reply": direct_history_reply,
                 "should_call_llm": False,
@@ -1638,10 +1644,12 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             tool_notes.append(f"web_strategy_error={strategy_error}")
         if not distilled_context:
             return {
-                **RuntimeDecisionResult(
-                    route=DecisionRoute.WEB_EVIDENCE,
-                    reason="web_strategy_no_context",
-                    confidence=0.4,
+                **build_runtime_decision(
+                    RuntimeDecisionSignals(
+                        lightweight_mode="web_evidence",
+                        reason_hint="web_strategy_no_context",
+                        confidence=0.4,
+                    )
                 ).to_context_fields(),
                 "direct_reply": "\u6682\u65f6\u6ca1\u67e5\u5230\u7a33\u5b9a\u7684\u653b\u7565\u8d44\u6599\uff0c\u53ef\u4ee5\u6362\u4e2a\u66f4\u5177\u4f53\u7684\u95ee\u9898\u3002",
                 "should_call_llm": False,
@@ -1659,11 +1667,13 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "tool_notes": "\n".join(tool_notes).strip(),
             }
         return {
-            **RuntimeDecisionResult(
-                route=DecisionRoute.WEB_EVIDENCE,
-                evidence_source="web_strategy",
-                reason="web_strategy",
-                confidence=0.8,
+            **build_runtime_decision(
+                RuntimeDecisionSignals(
+                    lightweight_mode="web_evidence",
+                    skill_evidence_source="web_strategy",
+                    reason_hint="web_strategy",
+                    confidence=0.8,
+                )
             ).to_context_fields(),
             "direct_reply": None,
             "should_call_llm": True,
@@ -1710,13 +1720,15 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 x for x in [rag_web_evidence, external_skill_evidence_context, persona_web_evidence] if x
             ).strip()
             return {
-                **RuntimeDecisionResult(
-                    route=DecisionRoute.SKILL_EVIDENCE,
-                    skill_name=selected_external_skill_name,
-                    evidence_source="skill_bridge",
-                    reason="skill_bridge",
-                    confidence=0.85,
-                    web_allowed=False,
+                **build_runtime_decision(
+                    RuntimeDecisionSignals(
+                        selected_skill_name=selected_external_skill_name,
+                        skill_web_allowed=False,
+                        skill_evidence_used=True,
+                        skill_evidence_source="skill_bridge",
+                        reason_hint="skill_bridge",
+                        confidence=0.85,
+                    )
                 ).to_context_fields(),
                 "direct_reply": None,
                 "should_call_llm": True,
@@ -1849,12 +1861,16 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     x for x in [rag_web_evidence, evidence_context, persona_web_evidence] if x
                 ).strip()
                 return {
-                    **RuntimeDecisionResult(
-                        route=DecisionRoute.WEB_EVIDENCE,
-                        evidence_source="web",
-                        reason="web_evidence_answerable",
-                        confidence=0.85,
-                        answerable=True,
+                    **build_runtime_decision(
+                        RuntimeDecisionSignals(
+                            selected_skill_name=selected_external_skill_name,
+                            skill_web_allowed=external_skill_web_allowed,
+                            lightweight_mode="web_evidence",
+                            skill_evidence_source="web",
+                            reason_hint="web_evidence_answerable",
+                            confidence=0.85,
+                            answerable=True,
+                        )
                     ).to_context_fields(),
                     "direct_reply": None,
                     "should_call_llm": True,
@@ -1888,12 +1904,16 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     x for x in [rag_web_evidence, evidence_context, persona_web_evidence] if x
                 ).strip()
                 return {
-                    **RuntimeDecisionResult(
-                        route=DecisionRoute.WEB_EVIDENCE,
-                        evidence_source="web",
-                        reason="web_evidence_sufficient",
-                        confidence=0.75,
-                        answerable=bool(web_evidence_answerable),
+                    **build_runtime_decision(
+                        RuntimeDecisionSignals(
+                            selected_skill_name=selected_external_skill_name,
+                            skill_web_allowed=external_skill_web_allowed,
+                            lightweight_mode="web_evidence",
+                            skill_evidence_source="web",
+                            reason_hint="web_evidence_sufficient",
+                            confidence=0.75,
+                            answerable=bool(web_evidence_answerable),
+                        )
                     ).to_context_fields(),
                     "direct_reply": None,
                     "should_call_llm": True,
@@ -1977,12 +1997,16 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 f"answerable={1 if web_evidence_answerable else 0}"
             )
             return {
-                **RuntimeDecisionResult(
-                    route=DecisionRoute.WEB_EVIDENCE,
-                    evidence_source="web",
-                    reason="web_evidence_unknown_fallback",
-                    confidence=0.3,
-                    answerable=False,
+                **build_runtime_decision(
+                    RuntimeDecisionSignals(
+                        selected_skill_name=selected_external_skill_name,
+                        skill_web_allowed=external_skill_web_allowed,
+                        lightweight_mode="web_evidence",
+                        skill_evidence_source="web",
+                        reason_hint="web_evidence_unknown_fallback",
+                        confidence=0.3,
+                        answerable=False,
+                    )
                 ).to_context_fields(),
                 "direct_reply": unknown_reply,
                 "should_call_llm": False,
@@ -2005,10 +2029,12 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         tool_notes.append("evidence_gate_source=local")
         tool_notes.append("evidence_gate_no_answer=1")
         return {
-            **RuntimeDecisionResult(
-                route=DecisionRoute.LOCAL_KNOWLEDGE,
-                reason="local_no_answer",
-                confidence=0.3,
+            **build_runtime_decision(
+                RuntimeDecisionSignals(
+                    local_knowledge_unknown=True,
+                    reason_hint="local_no_answer",
+                    confidence=0.3,
+                )
             ).to_context_fields(),
             "direct_reply": "\u672c\u5730\u8bb0\u5f55\u91cc\u6682\u65f6\u6ca1\u67e5\u5230\u53ef\u9760\u4fe1\u606f\uff0c\u6211\u4e0d\u77e5\u9053\u3002",
             "should_call_llm": False,
@@ -2105,20 +2131,18 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         final_style_context = "\n".join(x for x in [style_context, persona_casual] if x).strip()
 
     return {
-        **RuntimeDecisionResult(
-            route=(
-                DecisionRoute.SKILL_CONTEXT
-                if (selected_external_skill_name and not external_skill_web_allowed)
-                else DecisionRoute.PLAIN_CHAT
-            ),
-            skill_name=selected_external_skill_name,
-            web_allowed=bool(should_web and web_enabled),
-            reason=(
-                "skill_context_web_blocked"
-                if (selected_external_skill_name and not external_skill_web_allowed)
-                else "default_plain_chat"
-            ),
-            confidence=0.5,
+        **build_runtime_decision(
+            RuntimeDecisionSignals(
+                selected_skill_name=selected_external_skill_name,
+                skill_web_allowed=bool(should_web and web_enabled),
+                default_route=DecisionRoute.PLAIN_CHAT,
+                reason_hint=(
+                    "skill_context_web_blocked"
+                    if (selected_external_skill_name and not external_skill_web_allowed)
+                    else "default_plain_chat"
+                ),
+                confidence=0.5,
+            )
         ).to_context_fields(),
         "direct_reply": None,
         "should_call_llm": True,
