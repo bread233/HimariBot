@@ -11,11 +11,12 @@ from ..decision.tool_router import should_use_web_tool
 from ..decision.tool_intent import classify_tool_intent
 from ..decision.question_intent import detect_question_like
 from ..evidence.url_tools import build_direct_url_context, extract_urls
-from ..evidence.web import build_web_context, build_web_results, render_web_results_context
+from ..evidence.web import build_web_context, build_web_results, render_web_results_context, read_url
 from ..evidence.official import resolve_official_web_answer
 from .runtime_config import get_persona_profile, get_rag_policy
 from ..stores.skill_store import render_skill_context, select_relevant_skills, skills_to_evidence_items
 from ..skills.registry import load_skill_registry
+from ..skills.evidence_bridge import build_skill_evidence_context
 from ..evidence.evidence_pack import render_evidence_context
 from nonebot import logger
 from datetime import datetime
@@ -76,6 +77,16 @@ def _extract_domain(url: str) -> str:
     except Exception:
         return ""
     return host[4:] if host.startswith("www.") else host
+
+
+def _parse_name_set(value: str) -> set[str]:
+    text = str(value or "")
+    out: set[str] = set()
+    for item in text.split(","):
+        name = str(item or "").strip().lower()
+        if name:
+            out.add(name)
+    return out
 
 def _extract_result_blocks(raw_context: str) -> list[dict]:
     lines = (raw_context or "").splitlines()
@@ -1067,10 +1078,17 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     skill_evidence_items = skills_to_evidence_items(selected_skills)
     skill_evidence_context = render_evidence_context(skill_evidence_items, budget_chars=1200, limit=3)
     external_skill_context = ""
+    external_skill_evidence_context = ""
+    external_skill_evidence_notes: list[str] = []
+    selected_external_skill_name: str | None = None
+    external_skill_web_allowed = True
+    external_skill_route_reason = ""
     if bool(getattr(config, "chat_agent_enable_skills", True)):
         skills_dir = getattr(config, "chat_agent_skills_dir", "data/nonebot_chat_agent/skills")
         max_active = int(getattr(config, "chat_agent_skills_max_active", 3) or 3)
         max_body_chars = int(getattr(config, "chat_agent_skills_max_body_chars", 4000) or 4000)
+        allow_names = _parse_name_set(getattr(config, "chat_agent_skill_web_allow_names", "news,weather"))
+        block_names = _parse_name_set(getattr(config, "chat_agent_skill_web_block_names", "pptx,docx,pdf,xlsx"))
         registry = load_skill_registry(skills_dir)
         loaded_count = len(registry.skills)
         logger.info(f"skill_registry enabled=1 dir={skills_dir} loaded={loaded_count}")
@@ -1078,6 +1096,17 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         selected_external = matched[:1]
         if selected_external:
             skill = selected_external[0]
+            selected_external_skill_name = str(skill.name or "").strip()
+            skill_name_norm = selected_external_skill_name.lower()
+            if skill_name_norm in block_names:
+                external_skill_web_allowed = False
+                external_skill_route_reason = "blocked_by_skill_policy"
+            elif skill_name_norm in allow_names:
+                external_skill_web_allowed = True
+                external_skill_route_reason = "allowed_by_skill_policy"
+            else:
+                external_skill_web_allowed = True
+                external_skill_route_reason = "default_allow_unknown_skill"
             activation = skill.to_activation_text(max_body_chars=max_body_chars).strip()
             external_skill_context = (
                 "[ChatAgent Skill Activated]\n"
@@ -1091,6 +1120,40 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "state the limitation and answer based on available evidence."
             ).strip()
             logger.info(f"skill_match selected={skill.name} loaded={loaded_count}")
+            logger.info(
+                f"skill_route_policy name={selected_external_skill_name} "
+                f"web_allowed={1 if external_skill_web_allowed else 0} reason={external_skill_route_reason}"
+            )
+            if bool(getattr(config, "chat_agent_skill_evidence_enable", True)) and skill_name_norm in {"news", "weather"}:
+                external_skill_evidence_context, external_skill_evidence_notes = await build_skill_evidence_context(
+                    skill,
+                    prompt,
+                    config,
+                    read_url,
+                )
+                source_count = 0
+                need_location = 0
+                used = 0
+                err = ""
+                for note in external_skill_evidence_notes:
+                    if f"name={skill_name_norm}" not in note:
+                        continue
+                    if "used=1" in note:
+                        used = 1
+                    m_sc = re.search(r"source_count=(\d+)", note)
+                    if m_sc:
+                        source_count = int(m_sc.group(1))
+                    if "need_location=1" in note:
+                        need_location = 1
+                    if "read_error=1" in note:
+                        err = "read_error"
+                logger.info(
+                    f"skill_evidence_bridge name={skill_name_norm} used={used} "
+                    f"source_count={source_count} need_location={need_location} "
+                    f"evidence_chars={len(external_skill_evidence_context)}"
+                )
+                if err:
+                    logger.info(f"skill_evidence_bridge name={skill_name_norm} used=0 error={err}")
         else:
             logger.info(f"skill_match selected=none loaded={loaded_count}")
     else:
@@ -1259,10 +1322,22 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         )
         retrieval_context = retrieval["content"] if retrieval["source"] == "db" else ""
         retrieval_score = float(retrieval.get("score", 0.0) or 0.0)
+    if external_skill_evidence_context:
+        retrieval_context = "\n".join(
+            x for x in [retrieval_context, external_skill_evidence_context] if x
+        ).strip()
 
     web_relevance_threshold = float(getattr(config, "chat_agent_web_relevance_min_score", 0.35))
     web_final_threshold = float(getattr(config, "chat_agent_web_final_min_score", 0.30))
     should_web, web_query, route_like = _should_web_mode(config, prompt)
+    if selected_external_skill_name and not external_skill_web_allowed:
+        should_web = False
+        route_like = False
+    if selected_external_skill_name and selected_external_skill_name.lower() in {"news", "weather"} and bool(
+        getattr(config, "chat_agent_skill_evidence_enable", True)
+    ):
+        should_web = False
+        route_like = False
     needs_reliable_context = _needs_reliable_context(prompt)
 
     web_context = ""
@@ -1288,8 +1363,17 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         body_chars = len(external_skill_context)
         skill_name = external_skill_context.splitlines()[1].replace("Name:", "").strip() if len(external_skill_context.splitlines()) > 1 else ""
         tool_notes.append(f"skill_context injected=1 name={skill_name} body_chars={body_chars}")
+        tool_notes.append(
+            f"skill_route_policy name={selected_external_skill_name or skill_name} "
+            f"web_allowed={1 if external_skill_web_allowed else 0} "
+            f"reason={external_skill_route_reason or 'unknown'}"
+        )
+        if selected_external_skill_name and not external_skill_web_allowed:
+            tool_notes.append("skill_web_block_applied=1")
     else:
         tool_notes.append("skill_match selected=none")
+    for note in external_skill_evidence_notes:
+        tool_notes.append(note)
     tool_notes.append(f"skill_evidence_items={len(skill_evidence_items)}")
     tool_notes.append(f"skill_evidence_chars={len(skill_evidence_context)}")
     tool_notes.append(f"intent={intent.kind}")
@@ -1526,6 +1610,40 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         and intent.kind != "local_context"
     ):
         tool_notes.append("evidence_gate=1")
+        if (
+            selected_external_skill_name
+            and selected_external_skill_name.lower() in {"news", "weather"}
+            and bool(getattr(config, "chat_agent_skill_evidence_enable", True))
+            and external_skill_evidence_context
+        ):
+            tool_notes.append("evidence_gate_source=skill_bridge")
+            tool_notes.append("web_evidence_skipped_by_skill_bridge=1")
+            logger.info(
+                f"web_evidence_skipped_by_skill_bridge=1 name={selected_external_skill_name or 'unknown'}"
+            )
+            composed_web_evidence_context = "\n".join(
+                x for x in [rag_web_evidence, external_skill_evidence_context, persona_web_evidence] if x
+            ).strip()
+            return {
+                "direct_reply": None,
+                "should_call_llm": True,
+                "web_used": False,
+                "time_context": time_context,
+                "profile_context": profile_context,
+                "group_context": group_context,
+                "retrieval_context": "",
+                "style_context": "",
+                "summary_retrieval_context": "",
+                "history_context": "",
+                "memory_context": "",
+                "web_context": "",
+                "lightweight_mode": "web_evidence",
+                "lightweight_prompt": prompt,
+                "web_evidence_query": prompt,
+                "web_evidence_context": composed_web_evidence_context,
+                "skill_context": skill_context,
+                "tool_notes": "\n".join(tool_notes).strip(),
+            }
         local_ok = _has_local_evidence_for_question(
             direct_reply=None,
             retrieval_context=retrieval_context,
@@ -1535,7 +1653,10 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             simple_definition_hit=False,
             explicit_history_hit=False,
         )
-        if not local_ok:
+        if selected_external_skill_name and not external_skill_web_allowed:
+            tool_notes.append("evidence_gate_source=skill_policy_block")
+            tool_notes.append("web_evidence_skipped_by_skill_policy=1")
+        elif not local_ok:
             evidence_query = str(web_query or prompt or "").strip()
             evidence_context, evidence_count, evidence_titles, top_score, evidence_error, evaluation_signal_hit, evaluation_signal_terms = await _build_generic_web_evidence_context(
                 config, evidence_query

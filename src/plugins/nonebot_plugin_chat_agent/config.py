@@ -74,6 +74,12 @@ class ChatAgentConfig(BaseModel):
     chat_agent_skills_dir: Path = Field(default=Path("data/nonebot_chat_agent/skills"))
     chat_agent_skills_max_active: int = Field(default=3)
     chat_agent_skills_max_body_chars: int = Field(default=4000)
+    chat_agent_skill_web_allow_names: str = Field(default="news,weather")
+    chat_agent_skill_web_block_names: str = Field(default="pptx,docx,pdf,xlsx")
+    chat_agent_skill_evidence_enable: bool = Field(default=True)
+    chat_agent_news_skill_max_sources: int = Field(default=1)
+    chat_agent_news_skill_read_max_chars: int = Field(default=6000)
+    chat_agent_weather_skill_read_max_chars: int = Field(default=1200)
 
     def ensure_data_dir(self) -> Path:
         self.chat_agent_data_dir.mkdir(parents=True, exist_ok=True)
@@ -199,6 +205,25 @@ def get_chat_agent_config() -> ChatAgentConfig:
         ),
         chat_agent_skills_max_body_chars=int(
             _cfg("chat_agent_skills_max_body_chars", "CHAT_AGENT_SKILLS_MAX_BODY_CHARS", 4000)
+        ),
+        chat_agent_skill_web_allow_names=str(
+            _cfg("chat_agent_skill_web_allow_names", "CHAT_AGENT_SKILL_WEB_ALLOW_NAMES", "news,weather")
+        ),
+        chat_agent_skill_web_block_names=str(
+            _cfg("chat_agent_skill_web_block_names", "CHAT_AGENT_SKILL_WEB_BLOCK_NAMES", "pptx,docx,pdf,xlsx")
+        ),
+        chat_agent_skill_evidence_enable=_as_bool(
+            _cfg("chat_agent_skill_evidence_enable", "CHAT_AGENT_SKILL_EVIDENCE_ENABLE", True),
+            True,
+        ),
+        chat_agent_news_skill_max_sources=int(
+            _cfg("chat_agent_news_skill_max_sources", "CHAT_AGENT_NEWS_SKILL_MAX_SOURCES", 1)
+        ),
+        chat_agent_news_skill_read_max_chars=int(
+            _cfg("chat_agent_news_skill_read_max_chars", "CHAT_AGENT_NEWS_SKILL_READ_MAX_CHARS", 6000)
+        ),
+        chat_agent_weather_skill_read_max_chars=int(
+            _cfg("chat_agent_weather_skill_read_max_chars", "CHAT_AGENT_WEATHER_SKILL_READ_MAX_CHARS", 1200)
         ),
     )
     _cached_config.ensure_data_dir()
