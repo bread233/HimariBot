@@ -40,6 +40,7 @@ from ..decision.detectors import (
 from ..decision.result import DecisionResult as RuntimeDecisionResult, DecisionRoute
 from ..decision.router import RuntimeDecisionSignals, build_runtime_decision
 from ..decision.policy import load_decision_policy
+from ..decision.classifier import build_skill_catalog_entries, render_decision_catalog
 
 try:
     from ..memory.summary_retrieval import retrieve_daily_summaries
@@ -1096,6 +1097,12 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     internal_skill_registered = False
     unregistered_internal_skill_action: str | None = None
     decision_policy = load_decision_policy(getattr(config, "chat_agent_decision_policy_path", None))
+    decision_classifier_observe_enabled = bool(
+        getattr(config, "chat_agent_decision_classifier_enable", False)
+        and getattr(config, "chat_agent_decision_classifier_observe", False)
+    )
+    decision_classifier_catalog = ""
+    decision_classifier_entries = []
     policy_block_names = set(decision_policy.web_block_skill_names)
     policy_evidence_names = set(decision_policy.skill_evidence_names)
     if bool(getattr(config, "chat_agent_enable_skills", True)):
@@ -1106,6 +1113,17 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         block_names = _parse_name_set(getattr(config, "chat_agent_skill_web_block_names", "pptx,docx,pdf,xlsx")) | policy_block_names
         registry = load_skill_registry(skills_dir)
         loaded_count = len(registry.skills)
+        if decision_classifier_observe_enabled:
+            catalog_entries = build_skill_catalog_entries(
+                registry.skills,
+                max_items=int(getattr(config, "chat_agent_decision_classifier_max_skills", 30) or 30),
+            )
+            decision_classifier_entries = catalog_entries
+            decision_classifier_catalog = render_decision_catalog(
+                catalog_entries,
+                decision_policy,
+                max_chars=int(getattr(config, "chat_agent_decision_classifier_max_catalog_chars", 6000) or 6000),
+            )
         logger.info(f"skill_registry enabled=1 dir={skills_dir} loaded={loaded_count}")
         matched = registry.match(prompt, max_active=max_active)
         selected_external = matched[:1]
@@ -1228,6 +1246,10 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             "internal_skill_action": internal_skill_action,
             "internal_skill_route": "direct_message",
             "internal_skill_name": selected_external_skill_name or "",
+            "decision_classifier_observe_enabled": decision_classifier_observe_enabled,
+            "decision_classifier_catalog": decision_classifier_catalog,
+            "decision_classifier_entries": decision_classifier_entries,
+            "decision_classifier_prompt": prompt,
         }, decision)
     if intent.needs_time:
         now = datetime.now()

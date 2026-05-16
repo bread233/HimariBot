@@ -9,6 +9,7 @@ from .config import get_chat_agent_config
 from .runtime.context_pack import build_context_pack
 from .clients.llm_client import chat_completions
 from .skills.internal_actions import run_internal_skill_action
+from .skills.internal_actions import get_registered_internal_actions
 from .memory.memory import detect_feedback
 from .stores.profile_store import init_profile_storage, upsert_user_seen
 from .answer.prompt import build_system_prompt
@@ -26,6 +27,12 @@ from .answer import (
 )
 from .answer.finalizer import build_web_evidence_messages, evaluate_web_evidence_reply
 from .answer.finalizer import handle_unknown_like_retry
+from .decision.classifier import (
+    build_decision_classifier_messages,
+    parse_decision_classifier_reply,
+    validate_decision_candidate,
+)
+from .decision.policy import load_decision_policy
 
 
 async def chat_agent_rule(bot: Bot, event: MessageEvent, state: T_State) -> bool:
@@ -132,6 +139,53 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 pass
 
         context_pack = await build_context_pack(config, session_info, prompt, bot=bot, event=event)
+        if bool(context_pack.get("decision_classifier_observe_enabled", False)):
+            try:
+                catalog_text = str(context_pack.get("decision_classifier_catalog", "") or "").strip()
+                if catalog_text:
+                    messages = build_decision_classifier_messages(
+                        str(context_pack.get("decision_classifier_prompt", prompt) or prompt),
+                        catalog_text,
+                    )
+                    model_name = str(getattr(config, "chat_agent_decision_classifier_model", "") or "").strip() or None
+                    timeout_s = max(3, int(getattr(config, "chat_agent_decision_classifier_timeout", 10) or 10))
+                    max_tokens = max(64, int(getattr(config, "chat_agent_decision_classifier_max_tokens", 160) or 160))
+                    raw = await chat_completions(
+                        messages,
+                        config,
+                        model=model_name,
+                        timeout=float(timeout_s),
+                        max_tokens=max_tokens,
+                    )
+                    candidate = parse_decision_classifier_reply(raw)
+                    if candidate is None:
+                        logger.info(
+                            f"decision_classifier_observe accepted=0 reason=parse_failed current_route={context_pack.get('decision_route','')}"
+                        )
+                    else:
+                        policy = load_decision_policy(getattr(config, "chat_agent_decision_policy_path", None))
+                        entries = context_pack.get("decision_classifier_entries", []) or []
+                        validated = validate_decision_candidate(
+                            candidate,
+                            entries,
+                            policy,
+                            get_registered_internal_actions(),
+                        )
+                        if validated is None:
+                            logger.info(
+                                f"decision_classifier_observe accepted=0 reason=validation_failed current_route={context_pack.get('decision_route','')}"
+                            )
+                        else:
+                            logger.info(
+                                "decision_classifier_observe accepted=1 "
+                                f"route={validated.route} skill={validated.skill_name or ''} "
+                                f"action={validated.action_name or ''} confidence={candidate.confidence:.2f} "
+                                f"current_route={context_pack.get('decision_route','')} reason={candidate.reason[:80]}"
+                            )
+            except Exception as e:
+                logger.info(
+                    f"decision_classifier_observe accepted=0 reason=llm_error current_route={context_pack.get('decision_route','')} error={type(e).__name__}"
+                )
         action_name = str(context_pack.get("internal_skill_action", "")).strip()
         action_route = str(context_pack.get("internal_skill_route", "")).strip()
         if action_name and action_route == "direct_message":
