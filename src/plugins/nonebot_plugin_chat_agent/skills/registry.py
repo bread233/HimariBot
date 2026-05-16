@@ -22,6 +22,8 @@ class SkillDefinition:
     body: str = ""
     file_path: str = ""
     resources: list[SkillResource] = field(default_factory=list)
+    chat_agent_action: str | None = None
+    chat_agent_route: str | None = None
 
     def to_catalog_entry(self) -> dict:
         return {
@@ -276,6 +278,8 @@ def load_skill_file(path: Path) -> SkillDefinition | None:
     except Exception:
         priority = 0
     enabled = _parse_bool(str(data.get("enabled", "true")), default=True)
+    chat_agent_action = str(data.get("chat_agent_action", "") or "").strip() or None
+    chat_agent_route = str(data.get("chat_agent_route", "") or "").strip() or None
 
     return SkillDefinition(
         name=name,
@@ -286,6 +290,8 @@ def load_skill_file(path: Path) -> SkillDefinition | None:
         body=body,
         file_path=str(skill_path),
         resources=_collect_resources(skill_path),
+        chat_agent_action=chat_agent_action,
+        chat_agent_route=chat_agent_route,
     )
 
 

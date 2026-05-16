@@ -8,6 +8,7 @@ from nonebot.typing import T_State
 from .config import get_chat_agent_config
 from .runtime.context_pack import build_context_pack
 from .clients.llm_client import chat_completions
+from .skills.internal_actions import run_internal_skill_action
 from .memory.memory import detect_feedback
 from .stores.profile_store import init_profile_storage, upsert_user_seen
 from .answer.prompt import build_system_prompt
@@ -131,6 +132,23 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 pass
 
         context_pack = await build_context_pack(config, session_info, prompt, bot=bot, event=event)
+        if (
+            str(context_pack.get("internal_skill_action", "")).strip() == "internal_60s_news"
+            and str(context_pack.get("internal_skill_route", "")).strip() == "direct_message"
+        ):
+            logger.info("internal_skill_action name=internal_60s_news route=direct_message selected=1")
+            result = await run_internal_skill_action("internal_60s_news")
+            if result and result.image_url:
+                logger.info("internal_skill_action name=internal_60s_news success=1 type=image")
+                await chat_agent.finish(MessageSegment.image(result.image_url))
+                return
+            if result and result.text:
+                logger.info("internal_skill_action name=internal_60s_news success=0 error=no_image")
+                await chat_agent.finish(_with_group_at(event, is_group, result.text))
+                return
+            logger.info("internal_skill_action name=internal_60s_news success=0 error=empty_result")
+            await chat_agent.finish(_with_group_at(event, is_group, "今日 60s 新闻暂时获取失败。"))
+            return
         if context_pack.get("direct_reply"):
             reply = context_pack["direct_reply"]
             if _should_sanitize_task_reply(prompt, context_pack):
