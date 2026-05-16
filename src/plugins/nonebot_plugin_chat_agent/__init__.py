@@ -139,7 +139,19 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 pass
 
         context_pack = await build_context_pack(config, session_info, prompt, bot=bot, event=event)
-        if bool(context_pack.get("decision_classifier_observe_enabled", False)):
+        observe_skip_direct = (
+            str(context_pack.get("decision_route", "")).strip() == "direct_action"
+            or bool(str(context_pack.get("internal_skill_action", "")).strip())
+            or str(context_pack.get("internal_skill_route", "")).strip() == "direct_message"
+        )
+        if bool(context_pack.get("decision_classifier_observe_enabled", False)) and observe_skip_direct:
+            logger.info(
+                "decision_classifier_observe skipped=1 reason=direct_action "
+                f"current_route={context_pack.get('decision_route','')} "
+                f"skill={context_pack.get('decision_skill_name','') or context_pack.get('internal_skill_name','')} "
+                f"action={context_pack.get('internal_skill_action','')}"
+            )
+        elif bool(context_pack.get("decision_classifier_observe_enabled", False)):
             current_route = str(context_pack.get("decision_route", "") or "")
             try:
                 catalog_text = str(context_pack.get("decision_classifier_catalog", "") or "").strip()
