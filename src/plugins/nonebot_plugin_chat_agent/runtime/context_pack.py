@@ -17,6 +17,7 @@ from .runtime_config import get_persona_profile, get_rag_policy
 from ..stores.skill_store import render_skill_context, select_relevant_skills, skills_to_evidence_items
 from ..skills.registry import load_skill_registry
 from ..skills.evidence_bridge import build_skill_evidence_context
+from ..skills.internal_actions import is_registered_internal_action
 from ..evidence.evidence_pack import render_evidence_context
 from nonebot import logger
 from datetime import datetime
@@ -36,6 +37,8 @@ from ..decision.detectors import (
     _is_software_version_query,
     _is_definition_query,
 )
+from ..decision.result import DecisionResult as RuntimeDecisionResult, DecisionRoute
+from ..decision.router import RuntimeDecisionSignals, build_runtime_decision
 
 try:
     from ..memory.summary_retrieval import retrieve_daily_summaries
@@ -1057,6 +1060,10 @@ def _build_explicit_history_direct_reply(prompt: str, summary_context: str, hist
     return f"\u6682\u65f6\u6ca1\u67e5\u5230\u4e0e\u201c{trimmed}\u201d\u76f8\u5173\u7684\u5386\u53f2\u8bb0\u5f55\u3002"
 
 async def build_context_pack(config, session_info: dict, prompt: str, bot=None, event=None) -> dict:
+    def _with_decision(payload: dict, decision: RuntimeDecisionResult) -> dict:
+        out = dict(payload)
+        out.update(decision.to_context_fields())
+        return out
     intent = classify_tool_intent(prompt)
     question_intent = detect_question_like(prompt)
     skill_prompt = prompt
@@ -1085,6 +1092,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     external_skill_route_reason = ""
     internal_skill_action: str | None = None
     internal_skill_route: str | None = None
+    unregistered_internal_skill_action: str | None = None
     if bool(getattr(config, "chat_agent_enable_skills", True)):
         skills_dir = getattr(config, "chat_agent_skills_dir", "data/nonebot_chat_agent/skills")
         max_active = int(getattr(config, "chat_agent_skills_max_active", 3) or 3)
@@ -1128,12 +1136,20 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 f"skill_route_policy name={selected_external_skill_name} "
                 f"web_allowed={1 if external_skill_web_allowed else 0} reason={external_skill_route_reason}"
             )
-            if internal_skill_action == "internal_60s_news" and internal_skill_route == "direct_message":
-                logger.info(
-                    "internal_skill_action name=internal_60s_news route=direct_message selected=1"
-                )
+            if internal_skill_action and internal_skill_route == "direct_message":
+                if is_registered_internal_action(internal_skill_action):
+                    logger.info(
+                        f"internal_skill_action name={internal_skill_action} route=direct_message selected=1"
+                    )
+                else:
+                    logger.info(
+                        f"internal_skill_action name={internal_skill_action} route=direct_message selected=0 reason=unregistered"
+                    )
+                    unregistered_internal_skill_action = internal_skill_action
+                    internal_skill_action = None
+                    internal_skill_route = None
             if bool(getattr(config, "chat_agent_skill_evidence_enable", True)) and skill_name_norm in {"news", "weather"}:
-                if internal_skill_action == "internal_60s_news" and internal_skill_route == "direct_message":
+                if internal_skill_action and internal_skill_route == "direct_message":
                     pass
                 else:
                     external_skill_evidence_context, external_skill_evidence_notes = await build_skill_evidence_context(
@@ -1171,8 +1187,18 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         logger.info("skill_registry enabled=0")
     if external_skill_context:
         skill_context = "\n\n".join(x for x in [skill_context, external_skill_context] if x).strip()
-    if internal_skill_action == "internal_60s_news" and internal_skill_route == "direct_message":
-        return {
+    if internal_skill_action and internal_skill_route == "direct_message":
+        decision = build_runtime_decision(
+            RuntimeDecisionSignals(
+                internal_skill_action=internal_skill_action,
+                internal_skill_route="direct_message",
+                selected_skill_name=selected_external_skill_name,
+                skill_web_allowed=False,
+                reason_hint="internal_skill_action",
+                confidence=1.0,
+            )
+        )
+        return _with_decision({
             "direct_reply": None,
             "should_call_llm": False,
             "web_used": False,
@@ -1188,12 +1214,12 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             "skill_context": skill_context,
             "tool_notes": (
                 f"internal_skill_action selected=1 name={selected_external_skill_name or ''} "
-                "action=internal_60s_news route=direct_message"
+                f"action={internal_skill_action} route=direct_message"
             ),
-            "internal_skill_action": "internal_60s_news",
+            "internal_skill_action": internal_skill_action,
             "internal_skill_route": "direct_message",
             "internal_skill_name": selected_external_skill_name or "",
-        }
+        }, decision)
     if intent.needs_time:
         now = datetime.now()
         time_context = (
@@ -1404,10 +1430,31 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         )
         if selected_external_skill_name and not external_skill_web_allowed:
             tool_notes.append("skill_web_block_applied=1")
+        if unregistered_internal_skill_action:
+            tool_notes.append(
+                f"internal_skill_action selected=0 name={selected_external_skill_name or skill_name} "
+                f"action={unregistered_internal_skill_action} reason=unregistered"
+            )
     else:
         tool_notes.append("skill_match selected=none")
     for note in external_skill_evidence_notes:
         tool_notes.append(note)
+    pre_route = "plain_chat"
+    pre_reason = "default"
+    pre_action = ""
+    if internal_skill_action and internal_skill_route == "direct_message":
+        pre_route = "direct_action"
+        pre_reason = "internal_skill_action"
+        pre_action = internal_skill_action
+    elif selected_external_skill_name and not external_skill_web_allowed:
+        pre_route = "skill_context"
+        pre_reason = "skill_policy_block"
+    elif external_skill_evidence_context:
+        pre_route = "skill_evidence"
+        pre_reason = "skill_evidence_bridge"
+    tool_notes.append(
+        f"decision route={pre_route} skill={selected_external_skill_name or ''} action={pre_action} reason={pre_reason}"
+    )
     tool_notes.append(f"skill_evidence_items={len(skill_evidence_items)}")
     tool_notes.append(f"skill_evidence_chars={len(skill_evidence_context)}")
     tool_notes.append(f"intent={intent.kind}")
@@ -1527,6 +1574,13 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 f"current_fact_direct_source={official_answer.get('source', '')}"
             )
             return {
+                **build_runtime_decision(
+                    RuntimeDecisionSignals(
+                        official_direct_reply=True,
+                        reason_hint="official_direct_answer",
+                        confidence=1.0,
+                    )
+                ).to_context_fields(),
                 "direct_reply": str(official_answer.get("answer", "")).strip(),
                 "should_call_llm": False,
                 "web_used": False,
@@ -1549,6 +1603,13 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             )
             tool_notes.append("explicit_history_direct_reply=1")
             return {
+                **build_runtime_decision(
+                    RuntimeDecisionSignals(
+                        history_direct_reply=True,
+                        reason_hint="explicit_history_direct_reply",
+                        confidence=0.9,
+                    )
+                ).to_context_fields(),
                 "direct_reply": direct_history_reply,
                 "should_call_llm": False,
                 "web_used": False,
@@ -1598,6 +1659,13 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             tool_notes.append(f"web_strategy_error={strategy_error}")
         if not distilled_context:
             return {
+                **build_runtime_decision(
+                    RuntimeDecisionSignals(
+                        lightweight_mode="web_evidence",
+                        reason_hint="web_strategy_no_context",
+                        confidence=0.4,
+                    )
+                ).to_context_fields(),
                 "direct_reply": "\u6682\u65f6\u6ca1\u67e5\u5230\u7a33\u5b9a\u7684\u653b\u7565\u8d44\u6599\uff0c\u53ef\u4ee5\u6362\u4e2a\u66f4\u5177\u4f53\u7684\u95ee\u9898\u3002",
                 "should_call_llm": False,
                 "web_used": True,
@@ -1614,6 +1682,14 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "tool_notes": "\n".join(tool_notes).strip(),
             }
         return {
+            **build_runtime_decision(
+                RuntimeDecisionSignals(
+                    lightweight_mode="web_evidence",
+                    skill_evidence_source="web_strategy",
+                    reason_hint="web_strategy",
+                    confidence=0.8,
+                )
+            ).to_context_fields(),
             "direct_reply": None,
             "should_call_llm": True,
             "web_used": True,
@@ -1659,6 +1735,16 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 x for x in [rag_web_evidence, external_skill_evidence_context, persona_web_evidence] if x
             ).strip()
             return {
+                **build_runtime_decision(
+                    RuntimeDecisionSignals(
+                        selected_skill_name=selected_external_skill_name,
+                        skill_web_allowed=False,
+                        skill_evidence_used=True,
+                        skill_evidence_source="skill_bridge",
+                        reason_hint="skill_bridge",
+                        confidence=0.85,
+                    )
+                ).to_context_fields(),
                 "direct_reply": None,
                 "should_call_llm": True,
                 "web_used": False,
@@ -1790,6 +1876,17 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     x for x in [rag_web_evidence, evidence_context, persona_web_evidence] if x
                 ).strip()
                 return {
+                    **build_runtime_decision(
+                        RuntimeDecisionSignals(
+                            selected_skill_name=selected_external_skill_name,
+                            skill_web_allowed=external_skill_web_allowed,
+                            lightweight_mode="web_evidence",
+                            skill_evidence_source="web",
+                            reason_hint="web_evidence_answerable",
+                            confidence=0.85,
+                            answerable=True,
+                        )
+                    ).to_context_fields(),
                     "direct_reply": None,
                     "should_call_llm": True,
                     "web_used": True,
@@ -1822,6 +1919,17 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     x for x in [rag_web_evidence, evidence_context, persona_web_evidence] if x
                 ).strip()
                 return {
+                    **build_runtime_decision(
+                        RuntimeDecisionSignals(
+                            selected_skill_name=selected_external_skill_name,
+                            skill_web_allowed=external_skill_web_allowed,
+                            lightweight_mode="web_evidence",
+                            skill_evidence_source="web",
+                            reason_hint="web_evidence_sufficient",
+                            confidence=0.75,
+                            answerable=bool(web_evidence_answerable),
+                        )
+                    ).to_context_fields(),
                     "direct_reply": None,
                     "should_call_llm": True,
                     "web_used": True,
@@ -1904,6 +2012,17 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 f"answerable={1 if web_evidence_answerable else 0}"
             )
             return {
+                **build_runtime_decision(
+                    RuntimeDecisionSignals(
+                        selected_skill_name=selected_external_skill_name,
+                        skill_web_allowed=external_skill_web_allowed,
+                        lightweight_mode="web_evidence",
+                        skill_evidence_source="web",
+                        reason_hint="web_evidence_unknown_fallback",
+                        confidence=0.3,
+                        answerable=False,
+                    )
+                ).to_context_fields(),
                 "direct_reply": unknown_reply,
                 "should_call_llm": False,
                 "web_used": True,
@@ -1925,6 +2044,13 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         tool_notes.append("evidence_gate_source=local")
         tool_notes.append("evidence_gate_no_answer=1")
         return {
+            **build_runtime_decision(
+                RuntimeDecisionSignals(
+                    local_knowledge_unknown=True,
+                    reason_hint="local_no_answer",
+                    confidence=0.3,
+                )
+            ).to_context_fields(),
             "direct_reply": "\u672c\u5730\u8bb0\u5f55\u91cc\u6682\u65f6\u6ca1\u67e5\u5230\u53ef\u9760\u4fe1\u606f\uff0c\u6211\u4e0d\u77e5\u9053\u3002",
             "should_call_llm": False,
             "web_used": False,
@@ -2020,6 +2146,19 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         final_style_context = "\n".join(x for x in [style_context, persona_casual] if x).strip()
 
     return {
+        **build_runtime_decision(
+            RuntimeDecisionSignals(
+                selected_skill_name=selected_external_skill_name,
+                skill_web_allowed=bool(should_web and web_enabled),
+                default_route=DecisionRoute.PLAIN_CHAT,
+                reason_hint=(
+                    "skill_context_web_blocked"
+                    if (selected_external_skill_name and not external_skill_web_allowed)
+                    else "default_plain_chat"
+                ),
+                confidence=0.5,
+            )
+        ).to_context_fields(),
         "direct_reply": None,
         "should_call_llm": True,
         "web_used": web_used,
