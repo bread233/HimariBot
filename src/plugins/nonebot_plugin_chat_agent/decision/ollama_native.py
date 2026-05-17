@@ -13,6 +13,7 @@ async def coarse_chat_ollama_native(
     timeout: float,
     max_tokens: int,
     api_key: str = "",
+    keep_alive: str = "30m",
 ) -> str:
     base = str(base_url or "").strip().rstrip("/")
     if not base:
@@ -25,6 +26,7 @@ async def coarse_chat_ollama_native(
         "messages": messages,
         "think": False,
         "stream": False,
+        "keep_alive": str(keep_alive or "30m"),
         "options": {"temperature": 0, "num_predict": int(max_tokens)},
     }
     headers: dict[str, str] = {}
@@ -41,4 +43,3 @@ async def coarse_chat_ollama_native(
         if isinstance(msg, dict):
             content = str(msg.get("content", "") or "").strip()
     return content
-

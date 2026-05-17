@@ -178,17 +178,25 @@ def build_coarse_decision_messages(prompt: str, recent_context: str = "") -> lis
         "Return ONLY one compact JSON object.\n"
         "No markdown. No code fence. No explanation.\n"
         'Required keys exactly: {"route":"chat|agent|unknown","confidence":0.0,"reason":"short"}.\n'
+        "route must be chat, agent, or unknown.\n"
+        "confidence must be between 0.0 and 1.0.\n"
+        "Do not output confidence as 100.\n"
+        "reason <= 12 chars.\n"
         "Do not use type/message keys.\n"
-        "confidence must be a number between 0.0 and 1.0.\n"
         "Do not answer the user. Do not execute tools or actions.\n"
         "route rules:\n"
-        "- chat: greeting/chitchat/emotion/social talk, and clearly does not need tools/search/plugins/realtime/recommendation/task handling.\n"
-        "- agent: asks the bot to do something, including suggestion/recommendation/choice, weather/news, PPT/PDF/file/image handling, guides, plugin help, how-to requests.\n"
+        "- chat: pure greeting/thanks/laughter/emotion/chitchat only.\n"
+        "- chat: does NOT include information lookup, realtime content, recommendation/choice, tool/plugin/task requests.\n"
+        "- agent: requests news/weather/realtime/latest/query/search/recommendation/choice/how-to/guide/plugin actions/file or PPT/PDF/image processing.\n"
+        "- agent: includes '???????', '????', '?????', '?????', '???? PPT', '????????'.\n"
         "- unknown: not enough information.\n"
-        "Examples: '你好啊'->chat, '谢谢'->chat, '哈哈哈'->chat, "
-        "'今天有啥新闻'->agent, '东京天气怎么样'->agent, '帮我做个 PPT'->agent, "
-        "'这个 PDF 能看下吗'->agent, '今天吃啥啊'->agent, '今天吃什么'->agent, "
-        "'修仙怎么双修来着'->agent, '你觉得呢'->unknown."
+        "Few-shot:\n"
+        '?????? => {"route":"chat","confidence":0.9,"reason":"greeting"}\n'
+        '?????????? => {"route":"agent","confidence":0.95,"reason":"news"}\n'
+        '???????? => {"route":"agent","confidence":0.95,"reason":"weather"}\n'
+        '???????? => {"route":"agent","confidence":0.9,"reason":"recommend"}\n'
+        '??????? PPT => {"route":"agent","confidence":0.95,"reason":"task"}\n'
+        '??????????? => {"route":"agent","confidence":0.85,"reason":"how-to"}\n'
     )
     user = (
         f"User prompt:\n{prompt}\n\n"

@@ -96,6 +96,7 @@ class ChatAgentConfig(BaseModel):
     chat_agent_coarse_decision_provider: str = Field(default="openai_compatible")
     chat_agent_coarse_decision_base_url: str = Field(default="")
     chat_agent_coarse_decision_api_key: str = Field(default="")
+    chat_agent_coarse_decision_keep_alive: str = Field(default="30m")
 
     def ensure_data_dir(self) -> Path:
         self.chat_agent_data_dir.mkdir(parents=True, exist_ok=True)
@@ -286,7 +287,7 @@ def get_chat_agent_config() -> ChatAgentConfig:
             _cfg("chat_agent_coarse_decision_timeout", "CHAT_AGENT_COARSE_DECISION_TIMEOUT", 6)
         ),
         chat_agent_coarse_decision_max_tokens=int(
-            _cfg("chat_agent_coarse_decision_max_tokens", "CHAT_AGENT_COARSE_DECISION_MAX_TOKENS", 96)
+            _cfg("chat_agent_coarse_decision_max_tokens", "CHAT_AGENT_COARSE_DECISION_MAX_TOKENS", 48)
         ),
         chat_agent_coarse_decision_provider=str(
             _cfg("chat_agent_coarse_decision_provider", "CHAT_AGENT_COARSE_DECISION_PROVIDER", "openai_compatible")
@@ -296,6 +297,9 @@ def get_chat_agent_config() -> ChatAgentConfig:
         ),
         chat_agent_coarse_decision_api_key=str(
             _cfg("chat_agent_coarse_decision_api_key", "CHAT_AGENT_COARSE_DECISION_API_KEY", "")
+        ),
+        chat_agent_coarse_decision_keep_alive=str(
+            _cfg("chat_agent_coarse_decision_keep_alive", "CHAT_AGENT_COARSE_DECISION_KEEP_ALIVE", "30m")
         ),
     )
     _cached_config.ensure_data_dir()
