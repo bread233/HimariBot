@@ -179,6 +179,7 @@ def build_coarse_decision_messages(prompt: str, recent_context: str = "") -> lis
         "No markdown. No code fence. No explanation.\n"
         'Required keys exactly: {"route":"chat|agent|unknown","confidence":0.0,"reason":"short"}.\n'
         "Do not use type/message keys.\n"
+        "confidence must be a number between 0.0 and 1.0.\n"
         "Do not answer the user. Do not execute tools or actions.\n"
         "route rules:\n"
         "- chat: greeting/chitchat/emotion/social talk, and clearly does not need tools/search/plugins/realtime/recommendation/task handling.\n"
