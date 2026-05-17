@@ -1065,6 +1065,13 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     def _with_decision(payload: dict, decision: RuntimeDecisionResult) -> dict:
         out = dict(payload)
         out.update(decision.to_context_fields())
+        return _with_observe_fields(out)
+    def _with_observe_fields(payload: dict) -> dict:
+        out = dict(payload)
+        out["decision_classifier_observe_enabled"] = bool(decision_classifier_observe_enabled)
+        out["decision_classifier_catalog"] = decision_classifier_catalog if decision_classifier_observe_enabled else ""
+        out["decision_classifier_entries"] = decision_classifier_entries if decision_classifier_observe_enabled else []
+        out["decision_classifier_prompt"] = prompt if decision_classifier_observe_enabled else ""
         return out
     intent = classify_tool_intent(prompt)
     question_intent = detect_question_like(prompt)
@@ -1311,7 +1318,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     if _is_context_question(prompt):
         last_user = _extract_last_user_message(history, prompt)
         if last_user:
-            return {
+            return _with_observe_fields({
                 "direct_reply": f"你刚才说：{last_user}",
                 "should_call_llm": False,
                 "web_used": False,
@@ -1326,7 +1333,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "web_context": "",
                 "skill_context": skill_context,
                 "tool_notes": "",
-            }
+            })
 
     try:
         memories = await load_memories(config, session_id, memory_limit)
@@ -1604,7 +1611,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             tool_notes.append(
                 f"current_fact_direct_source={official_answer.get('source', '')}"
             )
-            return {
+            return _with_observe_fields({
                 **build_runtime_decision(
                     RuntimeDecisionSignals(
                         official_direct_reply=True,
@@ -1626,14 +1633,14 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "web_context": "",
                 "skill_context": skill_context,
                 "tool_notes": "\n".join(tool_notes).strip(),
-            }
+            })
     if _is_explicit_history_query(prompt):
         try:
             direct_history_reply = _build_explicit_history_direct_reply(
                 prompt, summary_retrieval_context, history_context
             )
             tool_notes.append("explicit_history_direct_reply=1")
-            return {
+            return _with_observe_fields({
                 **build_runtime_decision(
                     RuntimeDecisionSignals(
                         history_direct_reply=True,
@@ -1655,10 +1662,10 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "web_context": "",
                 "skill_context": skill_context,
                 "tool_notes": "\n".join(tool_notes).strip(),
-            }
+            })
         except Exception:
             tool_notes.append("explicit_history_direct_reply_error=1")
-            return {
+            return _with_observe_fields({
                 "direct_reply": "\u5386\u53f2\u67e5\u8be2\u6682\u65f6\u4e0d\u53ef\u7528\uff0c\u53ef\u4ee5\u7a0d\u540e\u518d\u8bd5\u3002",
                 "should_call_llm": False,
                 "web_used": False,
@@ -1673,7 +1680,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "web_context": "",
                 "skill_context": skill_context,
                 "tool_notes": "\n".join(tool_notes).strip(),
-            }
+            })
     if _is_community_strategy_question(prompt, intent.kind):
         strategy_query = str(prompt or "").strip()
         strategy_queries = _build_web_strategy_queries(strategy_query)
@@ -1689,7 +1696,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         if strategy_error:
             tool_notes.append(f"web_strategy_error={strategy_error}")
         if not distilled_context:
-            return {
+            return _with_observe_fields({
                 **build_runtime_decision(
                     RuntimeDecisionSignals(
                         lightweight_mode="web_evidence",
@@ -1711,8 +1718,8 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "web_context": "",
                 "skill_context": skill_context,
                 "tool_notes": "\n".join(tool_notes).strip(),
-            }
-        return {
+            })
+        return _with_observe_fields({
             **build_runtime_decision(
                 RuntimeDecisionSignals(
                     lightweight_mode="web_evidence",
@@ -1741,7 +1748,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             ).strip(),
             "skill_context": skill_context,
             "tool_notes": "\n".join(tool_notes).strip(),
-        }
+        })
     if (
         str(prompt or "").strip()
         and not _is_explicit_history_query(prompt)
@@ -1765,7 +1772,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             composed_web_evidence_context = "\n".join(
                 x for x in [rag_web_evidence, external_skill_evidence_context, persona_web_evidence] if x
             ).strip()
-            return {
+            return _with_observe_fields({
                 **build_runtime_decision(
                     RuntimeDecisionSignals(
                         selected_skill_name=selected_external_skill_name,
@@ -1794,7 +1801,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "web_evidence_context": composed_web_evidence_context,
                 "skill_context": skill_context,
                 "tool_notes": "\n".join(tool_notes).strip(),
-            }
+            })
         local_ok = _has_local_evidence_for_question(
             direct_reply=None,
             retrieval_context=retrieval_context,
@@ -1906,7 +1913,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 composed_web_evidence_context = "\n".join(
                     x for x in [rag_web_evidence, evidence_context, persona_web_evidence] if x
                 ).strip()
-                return {
+                return _with_observe_fields({
                     **build_runtime_decision(
                         RuntimeDecisionSignals(
                             selected_skill_name=selected_external_skill_name,
@@ -1936,7 +1943,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     "web_evidence_context": composed_web_evidence_context,
                     "skill_context": skill_context,
                     "tool_notes": "\n".join(tool_notes).strip(),
-                }
+                })
             if evidence_context and effective_top_score >= min_score and evidence_sufficient and eval_answerable:
                 tool_notes.append("evidence_gate_source=web")
                 tool_notes.append(
@@ -1949,7 +1956,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 composed_web_evidence_context = "\n".join(
                     x for x in [rag_web_evidence, evidence_context, persona_web_evidence] if x
                 ).strip()
-                return {
+            return _with_observe_fields({
                     **build_runtime_decision(
                         RuntimeDecisionSignals(
                             selected_skill_name=selected_external_skill_name,
@@ -1979,7 +1986,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     "web_evidence_context": composed_web_evidence_context,
                     "skill_context": skill_context,
                     "tool_notes": "\n".join(tool_notes).strip(),
-                }
+            })
             if evidence_context and effective_top_score < min_score:
                 tool_notes.append("web_evidence_low_score=1")
             tool_notes.append("evidence_gate_source=none")
@@ -2014,7 +2021,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 composed_web_evidence_context = "\n".join(
                     x for x in [rag_web_evidence, evidence_context, persona_web_evidence] if x
                 ).strip()
-                return {
+                return _with_observe_fields({
                     "direct_reply": None,
                     "should_call_llm": True,
                     "web_used": True,
@@ -2033,7 +2040,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     "web_evidence_context": composed_web_evidence_context,
                     "skill_context": skill_context,
                     "tool_notes": "\n".join(tool_notes).strip(),
-                }
+                })
             logger.info(
                 f"web_evidence direct_unknown reason=unknown_fallback evidence_count={evidence_count} "
                 f"raw_top_score={top_score:.3f} final_top_score={final_top_score:.3f} "
@@ -2042,7 +2049,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 f"official_source_boost_count={official_source_boost_count} "
                 f"answerable={1 if web_evidence_answerable else 0}"
             )
-            return {
+            return _with_observe_fields({
                 **build_runtime_decision(
                     RuntimeDecisionSignals(
                         selected_skill_name=selected_external_skill_name,
@@ -2068,13 +2075,13 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 "web_context": "",
                 "skill_context": skill_context,
                 "tool_notes": "\n".join(tool_notes).strip(),
-            }
+            })
         tool_notes.append("evidence_gate_source=local")
     if intent.kind == "local_context":
         tool_notes.append("evidence_gate=1")
         tool_notes.append("evidence_gate_source=local")
         tool_notes.append("evidence_gate_no_answer=1")
-        return {
+        return _with_observe_fields({
             **build_runtime_decision(
                 RuntimeDecisionSignals(
                     local_knowledge_unknown=True,
@@ -2096,7 +2103,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
             "web_context": "",
             "skill_context": skill_context,
             "tool_notes": "\n".join(tool_notes).strip(),
-        }
+            })
     if _is_simple_definition_question(prompt, intent.kind):
         tool_notes.append("simple_definition_routed_to_evidence=1")
     if is_identity_question:
@@ -2176,7 +2183,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
     if persona_casual:
         final_style_context = "\n".join(x for x in [style_context, persona_casual] if x).strip()
 
-    return {
+    return _with_observe_fields({
         **build_runtime_decision(
             RuntimeDecisionSignals(
                 selected_skill_name=selected_external_skill_name,
@@ -2208,4 +2215,4 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
         "question_category": question_intent.category,
         "question_web_eligible": question_intent.web_eligible,
         "tool_notes": "\n".join(tool_notes).strip(),
-    }
+            })
