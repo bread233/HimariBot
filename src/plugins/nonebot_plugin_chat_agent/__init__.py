@@ -149,18 +149,89 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             or str(context_pack.get("internal_skill_route", "")).strip() == "direct_message"
         )
         decision_policy = load_decision_policy(getattr(config, "chat_agent_decision_policy_path", None))
+        current_route = str(context_pack.get("decision_route", "") or "")
+        coarse_enabled = bool(getattr(config, "chat_agent_coarse_decision_enable", False)) and bool(
+            getattr(config, "chat_agent_coarse_decision_observe", False)
+        )
         observe_skip_casual = (
-            str(context_pack.get("decision_route", "")).strip() == "web_evidence"
+            current_route.strip() == "web_evidence"
             and should_skip_classifier_observe_as_casual(prompt, decision_policy)
         )
-        if bool(context_pack.get("decision_classifier_observe_enabled", False)) and observe_skip_direct:
-            if bool(getattr(config, "chat_agent_coarse_decision_enable", False)) and bool(
-                getattr(config, "chat_agent_coarse_decision_observe", False)
-            ):
-                logger.info(
-                    "coarse_decision_observe skipped=1 reason=direct_action "
-                    f"current_route={context_pack.get('decision_route','direct_action')}"
+        if coarse_enabled and observe_skip_direct:
+            logger.info(
+                "coarse_decision_observe skipped=1 reason=direct_action "
+                f"current_route={context_pack.get('decision_route','direct_action')}"
+            )
+        elif coarse_enabled:
+            try:
+                coarse_messages = build_coarse_decision_messages(
+                    str(context_pack.get("decision_classifier_prompt", prompt) or prompt)
                 )
+                coarse_model = (
+                    str(getattr(config, "chat_agent_coarse_decision_model", "") or "").strip() or None
+                )
+                coarse_provider = str(
+                    getattr(config, "chat_agent_coarse_decision_provider", "openai_compatible") or "openai_compatible"
+                ).strip().lower()
+                coarse_base_url = str(getattr(config, "chat_agent_coarse_decision_base_url", "") or "").strip()
+                coarse_api_key = str(getattr(config, "chat_agent_coarse_decision_api_key", "") or "").strip()
+                coarse_timeout = max(
+                    1.0, float(getattr(config, "chat_agent_coarse_decision_timeout", 6.0) or 6.0)
+                )
+                coarse_max_tokens = max(
+                    32, int(getattr(config, "chat_agent_coarse_decision_max_tokens", 96) or 96)
+                )
+                logger.info(
+                    "coarse_decision_observe request=1 "
+                    f"provider={coarse_provider} model={(coarse_model or 'default')} "
+                    f"timeout={coarse_timeout} max_tokens={coarse_max_tokens} current_route={current_route}"
+                )
+                if coarse_provider == "ollama_native":
+                    coarse_raw = await coarse_chat_ollama_native(
+                        base_url=coarse_base_url,
+                        model=str(coarse_model or ""),
+                        messages=coarse_messages,
+                        timeout=coarse_timeout,
+                        max_tokens=coarse_max_tokens,
+                        api_key=coarse_api_key,
+                    )
+                else:
+                    coarse_raw = await chat_completions(
+                        coarse_messages,
+                        config,
+                        model=coarse_model,
+                        timeout=coarse_timeout,
+                        max_tokens=coarse_max_tokens,
+                    )
+                if not str(coarse_raw or "").strip():
+                    raise ValueError("empty_content")
+                coarse_candidate = parse_coarse_decision_reply(coarse_raw)
+                if coarse_candidate is None:
+                    logger.info(
+                        "coarse_decision_observe accepted=0 "
+                        f"reason=parse_failed current_route={current_route}"
+                    )
+                else:
+                    coarse_valid = validate_coarse_decision_candidate(coarse_candidate)
+                    if coarse_valid is None:
+                        logger.info(
+                            "coarse_decision_observe accepted=0 "
+                            f"reason=parse_failed current_route={current_route}"
+                        )
+                    else:
+                        logger.info(
+                            "coarse_decision_observe accepted=1 "
+                            f"route={coarse_valid.route} confidence={coarse_valid.confidence:.2f} "
+                            f"current_route={current_route} reason={coarse_valid.reason[:80]}"
+                        )
+            except Exception as e:
+                logger.info(
+                    "coarse_decision_observe accepted=0 "
+                    f"reason=llm_error current_route={current_route} "
+                    f"provider={str(getattr(config, 'chat_agent_coarse_decision_provider', 'openai_compatible') or 'openai_compatible').strip().lower()} "
+                    f"error={type(e).__name__} detail={str(e)[:160]}"
+                )
+        if bool(context_pack.get("decision_classifier_observe_enabled", False)) and observe_skip_direct:
             logger.info(
                 "decision_classifier_observe skipped=1 reason=direct_action "
                 f"current_route={context_pack.get('decision_route','')} "
@@ -173,78 +244,6 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 f"current_route={context_pack.get('decision_route','')}"
             )
         elif bool(context_pack.get("decision_classifier_observe_enabled", False)):
-            current_route = str(context_pack.get("decision_route", "") or "")
-            if bool(getattr(config, "chat_agent_coarse_decision_enable", False)) and bool(
-                getattr(config, "chat_agent_coarse_decision_observe", False)
-            ):
-                try:
-                    coarse_messages = build_coarse_decision_messages(
-                        str(context_pack.get("decision_classifier_prompt", prompt) or prompt)
-                    )
-                    coarse_model = (
-                        str(getattr(config, "chat_agent_coarse_decision_model", "") or "").strip() or None
-                    )
-                    coarse_provider = str(
-                        getattr(config, "chat_agent_coarse_decision_provider", "openai_compatible") or "openai_compatible"
-                    ).strip().lower()
-                    coarse_base_url = str(getattr(config, "chat_agent_coarse_decision_base_url", "") or "").strip()
-                    coarse_api_key = str(getattr(config, "chat_agent_coarse_decision_api_key", "") or "").strip()
-                    coarse_timeout = max(
-                        1.0, float(getattr(config, "chat_agent_coarse_decision_timeout", 6.0) or 6.0)
-                    )
-                    coarse_max_tokens = max(
-                        32, int(getattr(config, "chat_agent_coarse_decision_max_tokens", 96) or 96)
-                    )
-                    logger.info(
-                        "coarse_decision_observe request=1 "
-                        f"provider={coarse_provider} model={(coarse_model or 'default')} "
-                        f"timeout={coarse_timeout} max_tokens={coarse_max_tokens} current_route={current_route}"
-                    )
-                    if coarse_provider == "ollama_native":
-                        coarse_raw = await coarse_chat_ollama_native(
-                            base_url=coarse_base_url,
-                            model=str(coarse_model or ""),
-                            messages=coarse_messages,
-                            timeout=coarse_timeout,
-                            max_tokens=coarse_max_tokens,
-                            api_key=coarse_api_key,
-                        )
-                    else:
-                        coarse_raw = await chat_completions(
-                            coarse_messages,
-                            config,
-                            model=coarse_model,
-                            timeout=coarse_timeout,
-                            max_tokens=coarse_max_tokens,
-                        )
-                    if not str(coarse_raw or "").strip():
-                        raise ValueError("empty_content")
-                    coarse_candidate = parse_coarse_decision_reply(coarse_raw)
-                    if coarse_candidate is None:
-                        logger.info(
-                            "coarse_decision_observe accepted=0 "
-                            f"reason=parse_failed current_route={current_route}"
-                        )
-                    else:
-                        coarse_valid = validate_coarse_decision_candidate(coarse_candidate)
-                        if coarse_valid is None:
-                            logger.info(
-                                "coarse_decision_observe accepted=0 "
-                                f"reason=parse_failed current_route={current_route}"
-                            )
-                        else:
-                            logger.info(
-                                "coarse_decision_observe accepted=1 "
-                                f"route={coarse_valid.route} confidence={coarse_valid.confidence:.2f} "
-                                f"current_route={current_route} reason={coarse_valid.reason[:80]}"
-                            )
-                except Exception as e:
-                    logger.info(
-                        "coarse_decision_observe accepted=0 "
-                        f"reason=llm_error current_route={current_route} "
-                        f"provider={str(getattr(config, 'chat_agent_coarse_decision_provider', 'openai_compatible') or 'openai_compatible').strip().lower()} "
-                        f"error={type(e).__name__} detail={str(e)[:160]}"
-                    )
             try:
                 catalog_text = str(context_pack.get("decision_classifier_catalog", "") or "").strip()
                 if not catalog_text:
