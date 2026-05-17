@@ -147,7 +147,12 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         coarse_enabled = bool(getattr(config, "chat_agent_coarse_decision_enable", False)) and bool(
             getattr(config, "chat_agent_coarse_decision_observe", False)
         )
+        chat_gate_enable = bool(getattr(config, "chat_agent_coarse_decision_chat_gate_enable", False))
+        chat_gate_min_conf = float(getattr(config, "chat_agent_coarse_decision_chat_gate_min_confidence", 0.90) or 0.90)
         pre_coarse_route = "none"
+        pre_coarse_confidence = 0.0
+        pre_coarse_reason = ""
+        gate_applied = False
         if coarse_enabled:
             try:
                 coarse_t0 = time.perf_counter()
@@ -205,6 +210,8 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                         )
                     else:
                         pre_coarse_route = coarse_valid.route
+                        pre_coarse_confidence = coarse_valid.confidence
+                        pre_coarse_reason = coarse_valid.reason[:80]
                         logger.info(
                             "coarse_decision_preroute_observe accepted=1 "
                             f"route={coarse_valid.route} confidence={coarse_valid.confidence:.2f} "
@@ -217,7 +224,45 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     f"error={type(e).__name__} detail={str(e)[:160]} elapsed={time.perf_counter()-coarse_t0:.3f}s"
                 )
 
-        context_pack = await build_context_pack(config, session_info, prompt, bot=bot, event=event)
+        if (
+            coarse_enabled
+            and chat_gate_enable
+            and pre_coarse_route == "chat"
+            and pre_coarse_confidence >= chat_gate_min_conf
+        ):
+            gate_applied = True
+            logger.info(
+                "coarse_decision_chat_gate applied=1 "
+                f"route=chat confidence={pre_coarse_confidence:.2f} threshold={chat_gate_min_conf:.2f} "
+                f"reason={pre_coarse_reason[:80]}"
+            )
+            context_pack = {
+                "decision_route": "plain_chat",
+                "decision_source": "coarse_chat_gate",
+                "decision_skill_name": "",
+                "internal_skill_action": "",
+                "internal_skill_name": "",
+                "internal_skill_route": "",
+                "tool_notes": ["coarse_chat_gate applied=1"],
+                "web_context": "",
+                "web_evidence_context": "",
+                "local_knowledge_context": "",
+                "direct_reply": "",
+                "decision_classifier_observe_enabled": False,
+                "decision_classifier_catalog": "",
+                "decision_classifier_entries": [],
+                "decision_classifier_prompt": "",
+                "coarse_preroute_route": "chat",
+                "coarse_preroute_confidence": float(pre_coarse_confidence),
+                "coarse_preroute_reason": str(pre_coarse_reason or ""),
+            }
+        else:
+            if coarse_enabled and chat_gate_enable and pre_coarse_route == "chat" and pre_coarse_confidence < chat_gate_min_conf:
+                logger.info(
+                    "coarse_decision_chat_gate applied=0 "
+                    f"reason=low_confidence route=chat confidence={pre_coarse_confidence:.2f} threshold={chat_gate_min_conf:.2f}"
+                )
+            context_pack = await build_context_pack(config, session_info, prompt, bot=bot, event=event)
         observe_skip_direct = (
             str(context_pack.get("decision_route", "")).strip() == "direct_action"
             or bool(str(context_pack.get("internal_skill_action", "")).strip())
@@ -228,7 +273,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             "coarse_decision_preroute_compare "
             f"pre_route={pre_coarse_route} actual_route={current_route} "
             f"actual_skill={context_pack.get('decision_skill_name','') or context_pack.get('internal_skill_name','')} "
-            f"actual_action={context_pack.get('internal_skill_action','')}"
+            f"actual_action={context_pack.get('internal_skill_action','')} gate={1 if gate_applied else 0}"
         )
         observe_skip_casual = (
             current_route.strip() == "web_evidence"

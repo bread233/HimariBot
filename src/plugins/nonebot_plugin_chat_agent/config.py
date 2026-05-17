@@ -97,6 +97,8 @@ class ChatAgentConfig(BaseModel):
     chat_agent_coarse_decision_base_url: str = Field(default="")
     chat_agent_coarse_decision_api_key: str = Field(default="")
     chat_agent_coarse_decision_keep_alive: str = Field(default="30m")
+    chat_agent_coarse_decision_chat_gate_enable: bool = Field(default=False)
+    chat_agent_coarse_decision_chat_gate_min_confidence: float = Field(default=0.90)
 
     def ensure_data_dir(self) -> Path:
         self.chat_agent_data_dir.mkdir(parents=True, exist_ok=True)
@@ -300,6 +302,17 @@ def get_chat_agent_config() -> ChatAgentConfig:
         ),
         chat_agent_coarse_decision_keep_alive=str(
             _cfg("chat_agent_coarse_decision_keep_alive", "CHAT_AGENT_COARSE_DECISION_KEEP_ALIVE", "30m")
+        ),
+        chat_agent_coarse_decision_chat_gate_enable=_as_bool(
+            _cfg("chat_agent_coarse_decision_chat_gate_enable", "CHAT_AGENT_COARSE_DECISION_CHAT_GATE_ENABLE", False),
+            False,
+        ),
+        chat_agent_coarse_decision_chat_gate_min_confidence=float(
+            _cfg(
+                "chat_agent_coarse_decision_chat_gate_min_confidence",
+                "CHAT_AGENT_COARSE_DECISION_CHAT_GATE_MIN_CONFIDENCE",
+                0.90,
+            )
         ),
     )
     _cached_config.ensure_data_dir()
