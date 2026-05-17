@@ -5,6 +5,7 @@ import importlib
 
 from nonebot import logger
 
+from .image_refs import normalize_image_ref_to_base64
 
 @dataclass
 class InternalActionResult:
@@ -51,12 +52,18 @@ async def _run_60s_today_image(action_name: str) -> InternalActionResult:
         except ValueError:
             image_or_text = await mod.get_calendar_url(mod.wechat_oa_cookie, mod.wechat_oa_token)
         payload = str(image_or_text or "").strip()
-        if _is_image_ref(payload):
-            source = "base64" if payload.lower().startswith("base64://") else "url"
+        normalized = await normalize_image_ref_to_base64(payload)
+        if normalized:
+            source = "base64" if payload.lower().startswith("base64://") else "url_to_base64"
             logger.info(
                 f"internal_skill_action name={action_name} success=1 type=image source={source}"
             )
-            return InternalActionResult(image_url=payload, action_name=action_name)
+            return InternalActionResult(image_url=normalized, action_name=action_name)
+        if _is_image_ref(payload):
+            logger.warning(
+                f"internal_skill_action name={action_name} success=0 error=invalid_image_ref value_type={type(image_or_text).__name__}"
+            )
+            return InternalActionResult(text=_as_non_url_text(payload), action_name=action_name)
         logger.warning(
             f"internal_skill_action name={action_name} success=0 error=invalid_image_ref value_type={type(image_or_text).__name__}"
         )
