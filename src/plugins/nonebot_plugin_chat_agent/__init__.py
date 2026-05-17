@@ -28,8 +28,11 @@ from .answer import (
 from .answer.finalizer import build_web_evidence_messages, evaluate_web_evidence_reply
 from .answer.finalizer import handle_unknown_like_retry
 from .decision.classifier import (
+    build_coarse_decision_messages,
     build_decision_classifier_messages,
+    parse_coarse_decision_reply,
     parse_decision_classifier_reply,
+    validate_coarse_decision_candidate,
     validate_decision_candidate,
 )
 from .decision.policy import load_decision_policy, should_skip_classifier_observe_as_casual
@@ -150,6 +153,13 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             and should_skip_classifier_observe_as_casual(prompt, decision_policy)
         )
         if bool(context_pack.get("decision_classifier_observe_enabled", False)) and observe_skip_direct:
+            if bool(getattr(config, "chat_agent_coarse_decision_enable", False)) and bool(
+                getattr(config, "chat_agent_coarse_decision_observe", False)
+            ):
+                logger.info(
+                    "coarse_decision_observe skipped=1 reason=direct_action "
+                    f"current_route={context_pack.get('decision_route','direct_action')}"
+                )
             logger.info(
                 "decision_classifier_observe skipped=1 reason=direct_action "
                 f"current_route={context_pack.get('decision_route','')} "
@@ -163,6 +173,54 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             )
         elif bool(context_pack.get("decision_classifier_observe_enabled", False)):
             current_route = str(context_pack.get("decision_route", "") or "")
+            if bool(getattr(config, "chat_agent_coarse_decision_enable", False)) and bool(
+                getattr(config, "chat_agent_coarse_decision_observe", False)
+            ):
+                try:
+                    coarse_messages = build_coarse_decision_messages(
+                        str(context_pack.get("decision_classifier_prompt", prompt) or prompt)
+                    )
+                    coarse_model = (
+                        str(getattr(config, "chat_agent_coarse_decision_model", "") or "").strip() or None
+                    )
+                    coarse_timeout = max(
+                        1.0, float(getattr(config, "chat_agent_coarse_decision_timeout", 3.0) or 3.0)
+                    )
+                    coarse_max_tokens = max(
+                        32, int(getattr(config, "chat_agent_coarse_decision_max_tokens", 96) or 96)
+                    )
+                    coarse_raw = await chat_completions(
+                        coarse_messages,
+                        config,
+                        model=coarse_model,
+                        timeout=coarse_timeout,
+                        max_tokens=coarse_max_tokens,
+                    )
+                    coarse_candidate = parse_coarse_decision_reply(coarse_raw)
+                    if coarse_candidate is None:
+                        logger.info(
+                            "coarse_decision_observe accepted=0 "
+                            f"reason=parse_failed current_route={current_route}"
+                        )
+                    else:
+                        coarse_valid = validate_coarse_decision_candidate(coarse_candidate)
+                        if coarse_valid is None:
+                            logger.info(
+                                "coarse_decision_observe accepted=0 "
+                                f"reason=parse_failed current_route={current_route}"
+                            )
+                        else:
+                            logger.info(
+                                "coarse_decision_observe accepted=1 "
+                                f"route={coarse_valid.route} confidence={coarse_valid.confidence:.2f} "
+                                f"current_route={current_route} reason={coarse_valid.reason[:80]}"
+                            )
+                except Exception as e:
+                    logger.info(
+                        "coarse_decision_observe accepted=0 "
+                        f"reason=llm_error current_route={current_route} "
+                        f"error={type(e).__name__} detail={str(e)[:160]}"
+                    )
             try:
                 catalog_text = str(context_pack.get("decision_classifier_catalog", "") or "").strip()
                 if not catalog_text:

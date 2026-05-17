@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from ..models import AnswerResult, DecisionResult, EvidenceItem, EvidencePack
 from .classifier import (
+    CoarseDecisionCandidate,
+    build_coarse_decision_messages,
     ParsedDecisionCandidate,
     SkillCatalogEntry,
     build_decision_classifier_messages,
     build_skill_catalog_entries,
+    parse_coarse_decision_reply,
     parse_decision_classifier_reply,
     render_decision_catalog,
+    validate_coarse_decision_candidate,
     validate_decision_candidate,
 )
 from .policy import DecisionPolicy, load_decision_policy, should_skip_classifier_observe_as_casual
@@ -17,11 +21,15 @@ from .router import RuntimeDecisionInput, RuntimeDecisionSignals, build_runtime_
 __all__ = [
     "DecisionResult",
     "SkillCatalogEntry",
+    "CoarseDecisionCandidate",
     "ParsedDecisionCandidate",
     "build_skill_catalog_entries",
     "render_decision_catalog",
+    "build_coarse_decision_messages",
     "build_decision_classifier_messages",
+    "parse_coarse_decision_reply",
     "parse_decision_classifier_reply",
+    "validate_coarse_decision_candidate",
     "validate_decision_candidate",
     "RuntimeDecisionResult",
     "DecisionRoute",

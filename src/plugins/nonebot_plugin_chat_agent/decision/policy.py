@@ -45,6 +45,17 @@ class DecisionPolicy:
             "pdf",
         ]
     )
+    coarse_decision_enable: bool = True
+    coarse_decision_observe: bool = True
+    coarse_decision_model: str = ""
+    coarse_decision_timeout: float = 3.0
+    coarse_decision_max_tokens: int = 96
+    coarse_decision_rule_agent_keywords: list[str] = field(
+        default_factory=lambda: ["新闻", "天气", "ppt", "pdf", "帮我", "怎么", "如何", "推荐", "查"]
+    )
+    coarse_decision_rule_chat_keywords: list[str] = field(
+        default_factory=lambda: ["你好", "您好", "哈喽", "hello", "hi", "谢谢", "晚安", "早安", "拜拜"]
+    )
 
     def canonical_action(self, action_name: str | None) -> str | None:
         action = str(action_name or "").strip().lower()
@@ -138,4 +149,25 @@ def load_decision_policy(path: str | Path | None) -> DecisionPolicy:
     exclude_tokens = _normalize_text_list(raw.get("classifier_observe_casual_skip_exclude"))
     if exclude_tokens:
         policy.classifier_observe_casual_skip_exclude = exclude_tokens
+    if isinstance(raw.get("coarse_decision_enable"), bool):
+        policy.coarse_decision_enable = bool(raw.get("coarse_decision_enable"))
+    if isinstance(raw.get("coarse_decision_observe"), bool):
+        policy.coarse_decision_observe = bool(raw.get("coarse_decision_observe"))
+    coarse_model = str(raw.get("coarse_decision_model", "") or "").strip()
+    if coarse_model:
+        policy.coarse_decision_model = coarse_model
+    try:
+        policy.coarse_decision_timeout = float(raw.get("coarse_decision_timeout", policy.coarse_decision_timeout))
+    except Exception:
+        pass
+    try:
+        policy.coarse_decision_max_tokens = int(raw.get("coarse_decision_max_tokens", policy.coarse_decision_max_tokens))
+    except Exception:
+        pass
+    agent_kw = _normalize_text_list(raw.get("coarse_decision_rule_agent_keywords"))
+    if agent_kw:
+        policy.coarse_decision_rule_agent_keywords = agent_kw
+    chat_kw = _normalize_text_list(raw.get("coarse_decision_rule_chat_keywords"))
+    if chat_kw:
+        policy.coarse_decision_rule_chat_keywords = chat_kw
     return policy
