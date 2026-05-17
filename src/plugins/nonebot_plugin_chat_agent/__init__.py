@@ -35,6 +35,7 @@ from .decision.classifier import (
     validate_coarse_decision_candidate,
     validate_decision_candidate,
 )
+from .decision.ollama_native import coarse_chat_ollama_native
 from .decision.policy import load_decision_policy, should_skip_classifier_observe_as_casual
 
 
@@ -183,19 +184,41 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     coarse_model = (
                         str(getattr(config, "chat_agent_coarse_decision_model", "") or "").strip() or None
                     )
+                    coarse_provider = str(
+                        getattr(config, "chat_agent_coarse_decision_provider", "openai_compatible") or "openai_compatible"
+                    ).strip().lower()
+                    coarse_base_url = str(getattr(config, "chat_agent_coarse_decision_base_url", "") or "").strip()
+                    coarse_api_key = str(getattr(config, "chat_agent_coarse_decision_api_key", "") or "").strip()
                     coarse_timeout = max(
                         1.0, float(getattr(config, "chat_agent_coarse_decision_timeout", 6.0) or 6.0)
                     )
                     coarse_max_tokens = max(
                         32, int(getattr(config, "chat_agent_coarse_decision_max_tokens", 96) or 96)
                     )
-                    coarse_raw = await chat_completions(
-                        coarse_messages,
-                        config,
-                        model=coarse_model,
-                        timeout=coarse_timeout,
-                        max_tokens=coarse_max_tokens,
+                    logger.info(
+                        "coarse_decision_observe request=1 "
+                        f"provider={coarse_provider} model={(coarse_model or 'default')} "
+                        f"timeout={coarse_timeout} max_tokens={coarse_max_tokens} current_route={current_route}"
                     )
+                    if coarse_provider == "ollama_native":
+                        coarse_raw = await coarse_chat_ollama_native(
+                            base_url=coarse_base_url,
+                            model=str(coarse_model or ""),
+                            messages=coarse_messages,
+                            timeout=coarse_timeout,
+                            max_tokens=coarse_max_tokens,
+                            api_key=coarse_api_key,
+                        )
+                    else:
+                        coarse_raw = await chat_completions(
+                            coarse_messages,
+                            config,
+                            model=coarse_model,
+                            timeout=coarse_timeout,
+                            max_tokens=coarse_max_tokens,
+                        )
+                    if not str(coarse_raw or "").strip():
+                        raise ValueError("empty_content")
                     coarse_candidate = parse_coarse_decision_reply(coarse_raw)
                     if coarse_candidate is None:
                         logger.info(
@@ -219,6 +242,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     logger.info(
                         "coarse_decision_observe accepted=0 "
                         f"reason=llm_error current_route={current_route} "
+                        f"provider={str(getattr(config, 'chat_agent_coarse_decision_provider', 'openai_compatible') or 'openai_compatible').strip().lower()} "
                         f"error={type(e).__name__} detail={str(e)[:160]}"
                     )
             try:
