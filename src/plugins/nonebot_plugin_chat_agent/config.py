@@ -91,7 +91,7 @@ class ChatAgentConfig(BaseModel):
     chat_agent_coarse_decision_enable: bool = Field(default=False)
     chat_agent_coarse_decision_observe: bool = Field(default=False)
     chat_agent_coarse_decision_model: str = Field(default="")
-    chat_agent_coarse_decision_timeout: float = Field(default=3.0)
+    chat_agent_coarse_decision_timeout: float = Field(default=6.0)
     chat_agent_coarse_decision_max_tokens: int = Field(default=96)
 
     def ensure_data_dir(self) -> Path:
@@ -280,7 +280,7 @@ def get_chat_agent_config() -> ChatAgentConfig:
             _cfg("chat_agent_coarse_decision_model", "CHAT_AGENT_COARSE_DECISION_MODEL", "")
         ),
         chat_agent_coarse_decision_timeout=float(
-            _cfg("chat_agent_coarse_decision_timeout", "CHAT_AGENT_COARSE_DECISION_TIMEOUT", 3)
+            _cfg("chat_agent_coarse_decision_timeout", "CHAT_AGENT_COARSE_DECISION_TIMEOUT", 6)
         ),
         chat_agent_coarse_decision_max_tokens=int(
             _cfg("chat_agent_coarse_decision_max_tokens", "CHAT_AGENT_COARSE_DECISION_MAX_TOKENS", 96)

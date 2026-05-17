@@ -48,7 +48,7 @@ class DecisionPolicy:
     coarse_decision_enable: bool = True
     coarse_decision_observe: bool = True
     coarse_decision_model: str = ""
-    coarse_decision_timeout: float = 3.0
+    coarse_decision_timeout: float = 6.0
     coarse_decision_max_tokens: int = 96
     coarse_decision_rule_agent_keywords: list[str] = field(
         default_factory=lambda: ["新闻", "天气", "ppt", "pdf", "帮我", "怎么", "如何", "推荐", "查"]
