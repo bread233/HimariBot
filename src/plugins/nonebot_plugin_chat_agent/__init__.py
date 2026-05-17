@@ -32,7 +32,7 @@ from .decision.classifier import (
     parse_decision_classifier_reply,
     validate_decision_candidate,
 )
-from .decision.policy import load_decision_policy
+from .decision.policy import load_decision_policy, should_skip_classifier_observe_as_casual
 
 
 async def chat_agent_rule(bot: Bot, event: MessageEvent, state: T_State) -> bool:
@@ -144,12 +144,22 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             or bool(str(context_pack.get("internal_skill_action", "")).strip())
             or str(context_pack.get("internal_skill_route", "")).strip() == "direct_message"
         )
+        decision_policy = load_decision_policy(getattr(config, "chat_agent_decision_policy_path", None))
+        observe_skip_casual = (
+            str(context_pack.get("decision_route", "")).strip() == "web_evidence"
+            and should_skip_classifier_observe_as_casual(prompt, decision_policy)
+        )
         if bool(context_pack.get("decision_classifier_observe_enabled", False)) and observe_skip_direct:
             logger.info(
                 "decision_classifier_observe skipped=1 reason=direct_action "
                 f"current_route={context_pack.get('decision_route','')} "
                 f"skill={context_pack.get('decision_skill_name','') or context_pack.get('internal_skill_name','')} "
                 f"action={context_pack.get('internal_skill_action','')}"
+            )
+        elif bool(context_pack.get("decision_classifier_observe_enabled", False)) and observe_skip_casual:
+            logger.info(
+                "decision_classifier_observe skipped=1 reason=casual "
+                f"current_route={context_pack.get('decision_route','')}"
             )
         elif bool(context_pack.get("decision_classifier_observe_enabled", False)):
             current_route = str(context_pack.get("decision_route", "") or "")
@@ -164,6 +174,12 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 model_name = str(getattr(config, "chat_agent_decision_classifier_model", "") or "").strip() or None
                 timeout_s = max(3, int(getattr(config, "chat_agent_decision_classifier_timeout", 10) or 10))
                 max_tokens = max(64, int(getattr(config, "chat_agent_decision_classifier_max_tokens", 160) or 160))
+                logger.info(
+                    "decision_classifier_observe request=1 "
+                    f"current_route={current_route} catalog_chars={len(catalog_text)} "
+                    f"skill_count={len(context_pack.get('decision_classifier_entries', []) or [])} "
+                    f"timeout={timeout_s} model={(model_name or 'default')}"
+                )
             except Exception as e:
                 logger.info(
                     "decision_classifier_observe accepted=0 "
@@ -206,7 +222,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                         )
                     else:
                         try:
-                            policy = load_decision_policy(getattr(config, "chat_agent_decision_policy_path", None))
+                            policy = decision_policy
                             entries = context_pack.get("decision_classifier_entries", []) or []
                             validated = validate_decision_candidate(
                                 candidate,

@@ -83,9 +83,9 @@ class ChatAgentConfig(BaseModel):
     chat_agent_decision_policy_path: Path = Field(default=Path("data/nonebot_chat_agent/decision_policy.json"))
     chat_agent_decision_classifier_enable: bool = Field(default=False)
     chat_agent_decision_classifier_observe: bool = Field(default=False)
-    chat_agent_decision_classifier_max_skills: int = Field(default=30)
-    chat_agent_decision_classifier_max_catalog_chars: int = Field(default=6000)
-    chat_agent_decision_classifier_timeout: int = Field(default=10)
+    chat_agent_decision_classifier_max_skills: int = Field(default=10)
+    chat_agent_decision_classifier_max_catalog_chars: int = Field(default=2000)
+    chat_agent_decision_classifier_timeout: int = Field(default=3)
     chat_agent_decision_classifier_max_tokens: int = Field(default=160)
     chat_agent_decision_classifier_model: str = Field(default="")
 
@@ -245,17 +245,17 @@ def get_chat_agent_config() -> ChatAgentConfig:
             False,
         ),
         chat_agent_decision_classifier_max_skills=int(
-            _cfg("chat_agent_decision_classifier_max_skills", "CHAT_AGENT_DECISION_CLASSIFIER_MAX_SKILLS", 30)
+            _cfg("chat_agent_decision_classifier_max_skills", "CHAT_AGENT_DECISION_CLASSIFIER_MAX_SKILLS", 10)
         ),
         chat_agent_decision_classifier_max_catalog_chars=int(
             _cfg(
                 "chat_agent_decision_classifier_max_catalog_chars",
                 "CHAT_AGENT_DECISION_CLASSIFIER_MAX_CATALOG_CHARS",
-                6000,
+                2000,
             )
         ),
         chat_agent_decision_classifier_timeout=int(
-            _cfg("chat_agent_decision_classifier_timeout", "CHAT_AGENT_DECISION_CLASSIFIER_TIMEOUT", 10)
+            _cfg("chat_agent_decision_classifier_timeout", "CHAT_AGENT_DECISION_CLASSIFIER_TIMEOUT", 3)
         ),
         chat_agent_decision_classifier_max_tokens=int(
             _cfg("chat_agent_decision_classifier_max_tokens", "CHAT_AGENT_DECISION_CLASSIFIER_MAX_TOKENS", 160)

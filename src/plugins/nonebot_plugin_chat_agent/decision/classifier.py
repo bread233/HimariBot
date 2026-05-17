@@ -73,11 +73,6 @@ def render_decision_catalog(entries: list[SkillCatalogEntry], policy: DecisionPo
     lines: list[str] = []
     lines.append("Decision Catalog")
     lines.append(f"policy.registered_action_required={1 if policy.registered_action_required else 0}")
-    lines.append(f"policy.web_block_skill_names={','.join(sorted(policy.web_block_skill_names))}")
-    lines.append(f"policy.skill_evidence_names={','.join(sorted(policy.skill_evidence_names))}")
-    if policy.action_aliases:
-        alias_text = ",".join(f"{k}->{v}" for k, v in sorted(policy.action_aliases.items()))
-        lines.append(f"policy.action_aliases={alias_text}")
     lines.append("skills:")
     for i, entry in enumerate(entries, start=1):
         tri = ",".join(entry.triggers[:10])
