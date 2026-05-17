@@ -25,9 +25,13 @@ def is_registered_internal_action(action_name: str) -> bool:
     return _normalize_action_name(action_name) in get_registered_internal_actions()
 
 
-def _is_http_url(value: str) -> bool:
+def _is_image_ref(value: str) -> bool:
     text = str(value or "").strip().lower()
-    return text.startswith("http://") or text.startswith("https://")
+    return (
+        text.startswith("http://")
+        or text.startswith("https://")
+        or text.startswith("base64://")
+    )
 
 
 def _as_non_url_text(value: str) -> str:
@@ -47,9 +51,15 @@ async def _run_60s_today_image(action_name: str) -> InternalActionResult:
         except ValueError:
             image_or_text = await mod.get_calendar_url(mod.wechat_oa_cookie, mod.wechat_oa_token)
         payload = str(image_or_text or "").strip()
-        if _is_http_url(payload):
+        if _is_image_ref(payload):
+            source = "base64" if payload.lower().startswith("base64://") else "url"
+            logger.info(
+                f"internal_skill_action name={action_name} success=1 type=image source={source}"
+            )
             return InternalActionResult(image_url=payload, action_name=action_name)
-        logger.warning(f"internal_skill_action name={action_name} success=0 error=invalid_image_url")
+        logger.warning(
+            f"internal_skill_action name={action_name} success=0 error=invalid_image_ref value_type={type(image_or_text).__name__}"
+        )
         return InternalActionResult(text=_as_non_url_text(payload), action_name=action_name)
     except Exception as e:
         logger.warning(f"internal_skill_action name={action_name} success=0 error={type(e).__name__}")
