@@ -1956,7 +1956,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                 composed_web_evidence_context = "\n".join(
                     x for x in [rag_web_evidence, evidence_context, persona_web_evidence] if x
                 ).strip()
-            return _with_observe_fields({
+                return _with_observe_fields({
                     **build_runtime_decision(
                         RuntimeDecisionSignals(
                             selected_skill_name=selected_external_skill_name,
@@ -1986,7 +1986,7 @@ async def build_context_pack(config, session_info: dict, prompt: str, bot=None, 
                     "web_evidence_context": composed_web_evidence_context,
                     "skill_context": skill_context,
                     "tool_notes": "\n".join(tool_notes).strip(),
-            })
+                })
             if evidence_context and effective_top_score < min_score:
                 tool_notes.append("web_evidence_low_score=1")
             tool_notes.append("evidence_gate_source=none")
