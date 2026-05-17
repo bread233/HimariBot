@@ -4,6 +4,7 @@ from nonebot import get_driver, logger, on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, MessageSegment, PrivateMessageEvent
 from nonebot.rule import Rule
 from nonebot.typing import T_State
+import time
 
 from .config import get_chat_agent_config
 from .runtime.context_pack import build_context_pack
@@ -146,9 +147,15 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         coarse_enabled = bool(getattr(config, "chat_agent_coarse_decision_enable", False)) and bool(
             getattr(config, "chat_agent_coarse_decision_observe", False)
         )
+        chat_gate_enable = bool(getattr(config, "chat_agent_coarse_decision_chat_gate_enable", False))
+        chat_gate_min_conf = float(getattr(config, "chat_agent_coarse_decision_chat_gate_min_confidence", 0.90) or 0.90)
         pre_coarse_route = "none"
+        pre_coarse_confidence = 0.0
+        pre_coarse_reason = ""
+        gate_applied = False
         if coarse_enabled:
             try:
+                coarse_t0 = time.perf_counter()
                 coarse_messages = build_coarse_decision_messages(prompt)
                 coarse_model = (
                     str(getattr(config, "chat_agent_coarse_decision_model", "") or "").strip() or None
@@ -158,16 +165,17 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 ).strip().lower()
                 coarse_base_url = str(getattr(config, "chat_agent_coarse_decision_base_url", "") or "").strip()
                 coarse_api_key = str(getattr(config, "chat_agent_coarse_decision_api_key", "") or "").strip()
+                coarse_keep_alive = str(getattr(config, "chat_agent_coarse_decision_keep_alive", "30m") or "30m").strip() or "30m"
                 coarse_timeout = max(
                     1.0, float(getattr(config, "chat_agent_coarse_decision_timeout", 6.0) or 6.0)
                 )
                 coarse_max_tokens = max(
-                    32, int(getattr(config, "chat_agent_coarse_decision_max_tokens", 96) or 96)
+                    16, int(getattr(config, "chat_agent_coarse_decision_max_tokens", 48) or 48)
                 )
                 logger.info(
                     "coarse_decision_preroute_observe request=1 "
                     f"provider={coarse_provider} model={(coarse_model or 'default')} "
-                    f"timeout={coarse_timeout} max_tokens={coarse_max_tokens}"
+                    f"timeout={coarse_timeout} max_tokens={coarse_max_tokens} keep_alive={coarse_keep_alive}"
                 )
                 if coarse_provider == "ollama_native":
                     coarse_raw = await coarse_chat_ollama_native(
@@ -177,6 +185,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                         timeout=coarse_timeout,
                         max_tokens=coarse_max_tokens,
                         api_key=coarse_api_key,
+                        keep_alive=coarse_keep_alive,
                     )
                 else:
                     coarse_raw = await chat_completions(
@@ -190,30 +199,70 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 if coarse_candidate is None:
                     logger.info(
                         "coarse_decision_preroute_observe accepted=0 "
-                        f"reason=parse_failed raw_preview={str(coarse_raw)[:160]!r}"
+                        f"reason=parse_failed raw_preview={str(coarse_raw)[:160]!r} elapsed={time.perf_counter()-coarse_t0:.3f}s"
                     )
                 else:
                     coarse_valid = validate_coarse_decision_candidate(coarse_candidate)
                     if coarse_valid is None:
                         logger.info(
                             "coarse_decision_preroute_observe accepted=0 "
-                            f"reason=parse_failed raw_preview={str(coarse_raw)[:160]!r}"
+                            f"reason=parse_failed raw_preview={str(coarse_raw)[:160]!r} elapsed={time.perf_counter()-coarse_t0:.3f}s"
                         )
                     else:
                         pre_coarse_route = coarse_valid.route
+                        pre_coarse_confidence = coarse_valid.confidence
+                        pre_coarse_reason = coarse_valid.reason[:80]
                         logger.info(
                             "coarse_decision_preroute_observe accepted=1 "
                             f"route={coarse_valid.route} confidence={coarse_valid.confidence:.2f} "
-                            f"reason={coarse_valid.reason[:80]}"
+                            f"reason={coarse_valid.reason[:80]} elapsed={time.perf_counter()-coarse_t0:.3f}s"
                         )
             except Exception as e:
                 logger.info(
                     "coarse_decision_preroute_observe accepted=0 "
                     f"reason=llm_error provider={str(getattr(config, 'chat_agent_coarse_decision_provider', 'openai_compatible') or 'openai_compatible').strip().lower()} "
-                    f"error={type(e).__name__} detail={str(e)[:160]}"
+                    f"error={type(e).__name__} detail={str(e)[:160]} elapsed={time.perf_counter()-coarse_t0:.3f}s"
                 )
 
-        context_pack = await build_context_pack(config, session_info, prompt, bot=bot, event=event)
+        if (
+            coarse_enabled
+            and chat_gate_enable
+            and pre_coarse_route == "chat"
+            and pre_coarse_confidence >= chat_gate_min_conf
+        ):
+            gate_applied = True
+            logger.info(
+                "coarse_decision_chat_gate applied=1 "
+                f"route=chat confidence={pre_coarse_confidence:.2f} threshold={chat_gate_min_conf:.2f} "
+                f"reason={pre_coarse_reason[:80]}"
+            )
+            context_pack = {
+                "decision_route": "plain_chat",
+                "decision_source": "coarse_chat_gate",
+                "decision_skill_name": "",
+                "internal_skill_action": "",
+                "internal_skill_name": "",
+                "internal_skill_route": "",
+                "tool_notes": ["coarse_chat_gate applied=1"],
+                "web_context": "",
+                "web_evidence_context": "",
+                "local_knowledge_context": "",
+                "direct_reply": "",
+                "decision_classifier_observe_enabled": False,
+                "decision_classifier_catalog": "",
+                "decision_classifier_entries": [],
+                "decision_classifier_prompt": "",
+                "coarse_preroute_route": "chat",
+                "coarse_preroute_confidence": float(pre_coarse_confidence),
+                "coarse_preroute_reason": str(pre_coarse_reason or ""),
+            }
+        else:
+            if coarse_enabled and chat_gate_enable and pre_coarse_route == "chat" and pre_coarse_confidence < chat_gate_min_conf:
+                logger.info(
+                    "coarse_decision_chat_gate applied=0 "
+                    f"reason=low_confidence route=chat confidence={pre_coarse_confidence:.2f} threshold={chat_gate_min_conf:.2f}"
+                )
+            context_pack = await build_context_pack(config, session_info, prompt, bot=bot, event=event)
         observe_skip_direct = (
             str(context_pack.get("decision_route", "")).strip() == "direct_action"
             or bool(str(context_pack.get("internal_skill_action", "")).strip())
@@ -224,7 +273,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             "coarse_decision_preroute_compare "
             f"pre_route={pre_coarse_route} actual_route={current_route} "
             f"actual_skill={context_pack.get('decision_skill_name','') or context_pack.get('internal_skill_name','')} "
-            f"actual_action={context_pack.get('internal_skill_action','')}"
+            f"actual_action={context_pack.get('internal_skill_action','')} gate={1 if gate_applied else 0}"
         )
         observe_skip_casual = (
             current_route.strip() == "web_evidence"
