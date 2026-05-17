@@ -13,6 +13,38 @@ class DecisionPolicy:
     web_block_skill_names: set[str] = field(default_factory=lambda: {"pptx", "docx", "pdf", "xlsx"})
     skill_evidence_names: set[str] = field(default_factory=lambda: {"news", "weather"})
     action_aliases: dict[str, str] = field(default_factory=lambda: {"internal_60s_news": "60s.today_image"})
+    classifier_observe_casual_skip_include: list[str] = field(
+        default_factory=lambda: [
+            "你好",
+            "您好",
+            "哈喽",
+            "hello",
+            "hi",
+            "谢谢",
+            "感谢",
+            "辛苦",
+            "早安",
+            "晚安",
+            "再见",
+            "拜拜",
+        ]
+    )
+    classifier_observe_casual_skip_exclude: list[str] = field(
+        default_factory=lambda: [
+            "帮我",
+            "查",
+            "做",
+            "怎么",
+            "如何",
+            "推荐",
+            "吃啥",
+            "吃什么",
+            "天气",
+            "新闻",
+            "ppt",
+            "pdf",
+        ]
+    )
 
     def canonical_action(self, action_name: str | None) -> str | None:
         action = str(action_name or "").strip().lower()
@@ -40,6 +72,29 @@ def _normalize_aliases(value) -> dict[str, str]:
             if key and val:
                 out[key] = val
     return out
+
+
+def _normalize_text_list(value) -> list[str]:
+    out: list[str] = []
+    if isinstance(value, list):
+        for item in value:
+            s = str(item or "").strip().lower()
+            if s:
+                out.append(s)
+    return out
+
+
+def should_skip_classifier_observe_as_casual(prompt: str, policy: DecisionPolicy) -> bool:
+    text = str(prompt or "").strip().lower()
+    if not text:
+        return False
+    excludes = _normalize_text_list(policy.classifier_observe_casual_skip_exclude)
+    includes = _normalize_text_list(policy.classifier_observe_casual_skip_include)
+    if any(token in text for token in excludes):
+        return False
+    if any(token in text for token in includes):
+        return True
+    return False
 
 
 def load_decision_policy(path: str | Path | None) -> DecisionPolicy:
@@ -77,4 +132,10 @@ def load_decision_policy(path: str | Path | None) -> DecisionPolicy:
         merged = dict(policy.action_aliases)
         merged.update(aliases)
         policy.action_aliases = merged
+    include_tokens = _normalize_text_list(raw.get("classifier_observe_casual_skip_include"))
+    if include_tokens:
+        policy.classifier_observe_casual_skip_include = include_tokens
+    exclude_tokens = _normalize_text_list(raw.get("classifier_observe_casual_skip_exclude"))
+    if exclude_tokens:
+        policy.classifier_observe_casual_skip_exclude = exclude_tokens
     return policy
