@@ -28,6 +28,13 @@ class ParsedDecisionCandidate:
     reason: str
 
 
+@dataclass
+class CoarseDecisionCandidate:
+    route: str
+    confidence: float
+    reason: str
+
+
 def _clamp_confidence(value: Any) -> float:
     try:
         v = float(value)
@@ -161,5 +168,53 @@ def validate_decision_candidate(
         action_route=candidate.action_route,
         web_allowed=(candidate.route != DecisionRoute.SKILL_CONTEXT),
         confidence=candidate.confidence,
+        reason=candidate.reason,
+    )
+
+
+def build_coarse_decision_messages(prompt: str, recent_context: str = "") -> list[dict[str, str]]:
+    system = (
+        "You are a coarse intent classifier. Output JSON object only. "
+        "Do not answer user question. Do not execute tools or actions. "
+        "Allowed route values: chat, agent, unknown.\n"
+        "chat: greeting/chitchat/emotion/simple social talk, no tool/search/file/realtime need.\n"
+        "agent: user asks bot to do tasks, lookup/realtime info, plugin/tool/file handling, "
+        "weather/news/guide/recommendation, or actionable requests.\n"
+        "unknown: insufficient context to decide.\n"
+        "Examples: '你好啊'->chat, '谢谢'->chat, '今天有啥新闻'->agent, "
+        "'东京天气怎么样'->agent, '帮我做个 PPT'->agent, '这个 PDF 能看下吗'->agent, "
+        "'今天吃啥啊'->agent, '修仙怎么双修来着'->agent, '哈哈哈'->chat, '你觉得呢'->unknown."
+    )
+    user = (
+        f"User prompt:\n{prompt}\n\n"
+        f"Recent context:\n{recent_context[:400]}\n\n"
+        'Return JSON with keys: route, confidence, reason. Example: {"route":"chat","confidence":0.82,"reason":"..."}'
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def parse_coarse_decision_reply(text: str) -> CoarseDecisionCandidate | None:
+    try:
+        obj = json.loads(str(text or "").strip())
+    except Exception:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    route = str(obj.get("route", "") or "").strip().lower()
+    if not route:
+        return None
+    return CoarseDecisionCandidate(
+        route=route,
+        confidence=_clamp_confidence(obj.get("confidence", 0.0)),
+        reason=str(obj.get("reason", "") or "").strip(),
+    )
+
+
+def validate_coarse_decision_candidate(candidate: CoarseDecisionCandidate) -> CoarseDecisionCandidate | None:
+    if candidate.route not in {"chat", "agent", "unknown"}:
+        return None
+    return CoarseDecisionCandidate(
+        route=candidate.route,
+        confidence=_clamp_confidence(candidate.confidence),
         reason=candidate.reason,
     )
