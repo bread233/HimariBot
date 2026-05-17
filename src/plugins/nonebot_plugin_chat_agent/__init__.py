@@ -184,7 +184,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                         str(getattr(config, "chat_agent_coarse_decision_model", "") or "").strip() or None
                     )
                     coarse_timeout = max(
-                        1.0, float(getattr(config, "chat_agent_coarse_decision_timeout", 3.0) or 3.0)
+                        1.0, float(getattr(config, "chat_agent_coarse_decision_timeout", 6.0) or 6.0)
                     )
                     coarse_max_tokens = max(
                         32, int(getattr(config, "chat_agent_coarse_decision_max_tokens", 96) or 96)

@@ -174,16 +174,20 @@ def validate_decision_candidate(
 
 def build_coarse_decision_messages(prompt: str, recent_context: str = "") -> list[dict[str, str]]:
     system = (
-        "You are a coarse intent classifier. Output JSON object only. "
-        "Do not answer user question. Do not execute tools or actions. "
-        "Allowed route values: chat, agent, unknown.\n"
-        "chat: greeting/chitchat/emotion/simple social talk, no tool/search/file/realtime need.\n"
-        "agent: user asks bot to do tasks, lookup/realtime info, plugin/tool/file handling, "
-        "weather/news/guide/recommendation, or actionable requests.\n"
-        "unknown: insufficient context to decide.\n"
-        "Examples: '你好啊'->chat, '谢谢'->chat, '今天有啥新闻'->agent, "
-        "'东京天气怎么样'->agent, '帮我做个 PPT'->agent, '这个 PDF 能看下吗'->agent, "
-        "'今天吃啥啊'->agent, '修仙怎么双修来着'->agent, '哈哈哈'->chat, '你觉得呢'->unknown."
+        "You are a coarse intent classifier.\n"
+        "Return ONLY one compact JSON object.\n"
+        "No markdown. No code fence. No explanation.\n"
+        'Required keys exactly: {"route":"chat|agent|unknown","confidence":0.0,"reason":"short"}.\n'
+        "Do not use type/message keys.\n"
+        "Do not answer the user. Do not execute tools or actions.\n"
+        "route rules:\n"
+        "- chat: greeting/chitchat/emotion/social talk, and clearly does not need tools/search/plugins/realtime/recommendation/task handling.\n"
+        "- agent: asks the bot to do something, including suggestion/recommendation/choice, weather/news, PPT/PDF/file/image handling, guides, plugin help, how-to requests.\n"
+        "- unknown: not enough information.\n"
+        "Examples: '你好啊'->chat, '谢谢'->chat, '哈哈哈'->chat, "
+        "'今天有啥新闻'->agent, '东京天气怎么样'->agent, '帮我做个 PPT'->agent, "
+        "'这个 PDF 能看下吗'->agent, '今天吃啥啊'->agent, '今天吃什么'->agent, "
+        "'修仙怎么双修来着'->agent, '你觉得呢'->unknown."
     )
     user = (
         f"User prompt:\n{prompt}\n\n"
@@ -194,8 +198,18 @@ def build_coarse_decision_messages(prompt: str, recent_context: str = "") -> lis
 
 
 def parse_coarse_decision_reply(text: str) -> CoarseDecisionCandidate | None:
+    raw_text = str(text or "").strip()
+    if raw_text.startswith("```"):
+        lines = raw_text.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        raw_text = "\n".join(lines).strip()
+        if raw_text.lower().startswith("json"):
+            raw_text = raw_text[4:].strip()
     try:
-        obj = json.loads(str(text or "").strip())
+        obj = json.loads(raw_text)
     except Exception:
         return None
     if not isinstance(obj, dict):
