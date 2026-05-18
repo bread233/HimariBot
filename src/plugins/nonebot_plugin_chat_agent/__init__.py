@@ -6,6 +6,7 @@ from nonebot.rule import Rule
 from nonebot.typing import T_State
 from datetime import datetime
 from pathlib import Path
+import json
 import re
 import time
 from zoneinfo import ZoneInfo
@@ -1174,6 +1175,23 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         labels.append("user_prompt")
         if len(labels) < len(messages):
             labels.extend([f"system_context_{i+1}" for i in range(len(messages) - len(labels))])
+        system_labels = [x for x in labels if x != "user_prompt"]
+        aligned_labels: list[str] = []
+        sys_idx = 0
+        for i, msg in enumerate(messages):
+            role = str(msg.get("role", "") or "")
+            if i == len(messages) - 1 and role == "user":
+                aligned_labels.append("user_prompt")
+                continue
+            if role == "user":
+                aligned_labels.append("user_context")
+                continue
+            if sys_idx < len(system_labels):
+                aligned_labels.append(system_labels[sys_idx])
+                sys_idx += 1
+            else:
+                aligned_labels.append(f"system_context_{i+1}")
+        labels = aligned_labels
         roles = [str(m.get("role", "")) for m in messages]
         lengths = [len(str(m.get("content", "") or "")) for m in messages]
         profile_len = len(str(context_pack.get("profile_context", "") or ""))
@@ -1201,6 +1219,33 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             f"web_len={web_len} skill_len={skill_len} local_len={local_len} "
             f"bot_persona_loaded={bot_persona_loaded}"
         )
+        if bool(getattr(config, "chat_agent_debug_dump_llm_payload", False)):
+            try:
+                data_dir = Path(getattr(config, "chat_agent_data_dir", Path("data/nonebot_chat_agent")))
+                debug_dir = data_dir / "debug"
+                debug_dir.mkdir(parents=True, exist_ok=True)
+                dump_path = debug_dir / "llm_payload_last.json"
+                payload = {
+                    "timestamp": datetime.now().isoformat(),
+                    "purpose": "default",
+                    "model": str(getattr(config, "chat_agent_model", "") or ""),
+                    "route": str(context_pack.get("decision_route", "") or ""),
+                    "source": str(context_pack.get("decision_source", "") or ""),
+                    "message_count": len(messages),
+                    "labels": labels,
+                    "lengths": lengths,
+                    "messages": messages,
+                }
+                dump_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                logger.info(
+                    "chat_agent_llm payload_dump "
+                    f"written=1 path={dump_path.as_posix()} message_count={len(messages)}"
+                )
+            except Exception as e:
+                logger.warning(
+                    "chat_agent_llm payload_dump "
+                    f"written=0 error={type(e).__name__}:{str(e)[:120]}"
+                )
 
         if config.chat_agent_enable_history:
             try:
