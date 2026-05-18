@@ -58,25 +58,39 @@ class DecisionPolicy:
     )
     chat_gate_agent_guard_include: list[str] = field(
         default_factory=lambda: [
-            "\u65b0\u95fb",              # 新闻
-            "\u4eca\u65e5\u65b0\u95fb",  # 今日新闻
-            "\u4eca\u5929\u6709\u5565",  # 今天有啥
-            "\u5929\u6c14",              # 天气
-            "\u5b9e\u65f6",              # 实时
-            "\u6700\u65b0",              # 最新
-            "\u6307\u4ee4",              # 指令
-            "\u547d\u4ee4",              # 命令
-            "\u600e\u4e48",              # 怎么
-            "\u5982\u4f55",              # 如何
-            "\u67e5\u8be2",              # 查询
-            "\u641c\u7d22",              # 搜索
-            "\u63a8\u8350",              # 推荐
-            "\u5403\u5565",              # 吃啥
-            "\u5403\u4ec0\u4e48",        # 吃什么
+            "\u65b0\u95fb",
+            "\u4eca\u65e5\u65b0\u95fb",
+            "\u4eca\u5929\u6709\u5565",
+            "\u5929\u6c14",
+            "\u5b9e\u65f6",
+            "\u6700\u65b0",
+            "\u6307\u4ee4",
+            "\u547d\u4ee4",
+            "\u600e\u4e48",
+            "\u5982\u4f55",
+            "\u67e5\u8be2",
+            "\u641c\u7d22",
+            "\u63a8\u8350",
+            "\u5403\u5565",
+            "\u5403\u4ec0\u4e48",
+            "\u5403\u70b9\u5565",
+            "\u559d\u4ec0\u4e48",
+            "\u559d\u5565",
+            "\u559d\u70b9\u5565",
+            "\u73b0\u5728\u5403",
+            "\u73b0\u5728\u559d",
+            "\u4eca\u5929\u5403",
+            "\u4eca\u5929\u559d",
+            "\u4eca\u665a\u5403",
+            "\u4eca\u665a\u559d",
+            "\u665a\u4e0a\u5403",
+            "\u665a\u4e0a\u559d",
+            "\u665a\u996d\u5403",
+            "\u591c\u5bb5\u5403",
             "PPT",
             "PDF",
-            "\u56fe\u7247",              # 图片
-            "\u53cc\u4fee",              # 双修
+            "\u56fe\u7247",
+            "\u53cc\u4fee",
         ]
     )
     chat_gate_agent_guard_exclude: list[str] = field(default_factory=list)
