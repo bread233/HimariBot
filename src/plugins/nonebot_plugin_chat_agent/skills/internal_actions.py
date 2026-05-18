@@ -126,7 +126,9 @@ async def _run_what2eat(action_name: str, event) -> InternalActionResult:
         logger.warning(f"internal_skill_action name={action_name} success=0 error=empty_text")
         return InternalActionResult(text=_what2eat_fallback(action_name), action_name=action_name)
     except Exception as e:
-        logger.warning(f"internal_skill_action name={action_name} success=0 error={type(e).__name__}")
+        logger.warning(
+            f"internal_skill_action name={action_name} success=0 error={type(e).__name__} detail={repr(e)}"
+        )
         return InternalActionResult(text=_what2eat_fallback(action_name), action_name=action_name)
 
 

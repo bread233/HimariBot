@@ -722,13 +722,13 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         if action_name and action_route == "direct_message":
             logger.info(f"internal_skill_action name={action_name} route=direct_message selected=1")
             result = await run_internal_skill_action(action_name, event=event)
+            if result and str(result.text or "").strip():
+                logger.info(f"internal_skill_action name={action_name} success=1 type=text")
+                await chat_agent.finish(_with_group_at(event, is_group, str(result.text).strip()))
+                return
             if result and result.image_url:
                 logger.info(f"internal_skill_action name={action_name} success=1 type=image")
                 await chat_agent.finish(MessageSegment.image(result.image_url))
-                return
-            if result and result.text:
-                logger.info(f"internal_skill_action name={action_name} success=0 error=no_image")
-                await chat_agent.finish(_with_group_at(event, is_group, result.text))
                 return
             logger.info(f"internal_skill_action name={action_name} success=0 error=empty_result")
             await chat_agent.finish(_with_group_at(event, is_group, "该内部能力暂时不可用。"))
