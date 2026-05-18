@@ -306,8 +306,6 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     style_context = str(style_profile.get("recommended_bot_style", "") or "").strip()
             except Exception:
                 style_context = ""
-            if bot_persona_context:
-                profile_context = "\n".join([x for x in [bot_persona_context, profile_context] if x]).strip()
             logger.info(
                 "coarse_decision_chat_gate applied=1 "
                 f"route=chat confidence={pre_coarse_confidence:.2f} threshold={chat_gate_min_conf:.2f} "
@@ -327,6 +325,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 "internal_skill_name": "",
                 "internal_skill_route": "",
                 "tool_notes": ["coarse_chat_gate applied=1"],
+                "bot_persona_context": bot_persona_context,
                 "time_context": "",
                 "profile_context": profile_context,
                 "group_context": "",
@@ -944,19 +943,31 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             await chat_agent.finish(_with_group_at(event, is_group, reply))
             return
 
-        messages = [{"role": "system", "content": build_system_prompt()}]
+        messages = []
+        labels = []
+        bot_persona_context = str(context_pack.get("bot_persona_context", "") or "").strip()
+        if bot_persona_context:
+            messages.append({"role": "system", "content": bot_persona_context})
+            labels.append("bot_persona")
+        messages.append({"role": "system", "content": build_system_prompt()})
+        labels.append("base_system")
         skill_evidence_context = str(context_pack.get("skill_evidence_context", "") or "").strip()
         if skill_evidence_context:
             _append_system(messages, "Relevant evidence instructions:\n" + skill_evidence_context)
+            labels.append("skill_evidence")
         skill_context = str(context_pack.get("skill_context", "") or "").strip()
         if skill_context:
             _append_system(messages, "Relevant skill instructions:\n" + skill_context)
+            labels.append("skill_context")
         _append_system(messages, context_pack.get("time_context", ""))
         _append_system(messages, context_pack.get("profile_context", ""))
+        if str(context_pack.get("profile_context", "") or "").strip():
+            labels.append("profile_context")
         _append_system(messages, context_pack.get("group_context", ""))
 
         style_context = str(context_pack.get("style_context", "") or "").strip()
         if style_context:
+            labels.append("style_context")
             _append_system(
                 messages,
                 "你会收到“回复风格提示”。这只用于调整语气、长度和格式。不要向用户提到画像、历史或系统提示。",
@@ -1076,6 +1087,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             ),
         )
         messages.append({"role": "user", "content": prompt})
+        labels.append("user_prompt")
         roles = [str(m.get("role", "")) for m in messages]
         lengths = [len(str(m.get("content", "") or "")) for m in messages]
         profile_len = len(str(context_pack.get("profile_context", "") or ""))
@@ -1093,7 +1105,9 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             f"source={context_pack.get('decision_source','')} "
             f"message_count={len(messages)} "
             f"roles={','.join(roles)} "
+            f"labels={','.join(labels)} "
             f"lengths={','.join(str(x) for x in lengths)} "
+            f"bot_persona_len={bot_persona_len} "
             f"profile_len={profile_len} style_len={style_len} "
             f"web_len={web_len} skill_len={skill_len} local_len={local_len} "
             f"bot_persona_loaded={bot_persona_loaded}"
