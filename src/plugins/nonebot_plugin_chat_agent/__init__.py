@@ -12,11 +12,11 @@ from .clients.llm_client import chat_completions
 from .skills.internal_actions import run_internal_skill_action
 from .skills.internal_actions import get_registered_internal_actions
 from .memory.memory import detect_feedback
-from .stores.profile_store import init_profile_storage, upsert_user_seen
+from .stores.profile_store import init_profile_storage, load_user_profile_context, upsert_user_seen
 from .answer.prompt import build_system_prompt
 from .stores.retrieval_store import init_retrieval_storage
 from .runtime.runtime_state import get_chat_agent_lock
-from .stores.storage import build_session_info, init_storage, save_memory, save_message
+from .stores.storage import build_session_info, get_user_style_profile, init_storage, save_memory, save_message
 from .tools.utils import extract_group_prompt, extract_private_prompt, get_bot_nicknames, get_original_plain_text, sanitize_task_reply, strip_thinking, truncate_reply
 from .answer import (
     build_definition_quality_fallback,
@@ -233,10 +233,30 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             and not agent_guard_blocked
         ):
             gate_applied = True
+            profile_context = ""
+            style_context = ""
+            try:
+                profile_context = str(await load_user_profile_context(config, session_info) or "").strip()
+            except Exception:
+                profile_context = ""
+            try:
+                style_profile = await get_user_style_profile(
+                    config,
+                    str(session_info.get("user_id", "") or "").strip(),
+                    str(session_info.get("group_id", "") or "").strip() or None,
+                )
+                if style_profile:
+                    style_context = str(style_profile.get("recommended_bot_style", "") or "").strip()
+            except Exception:
+                style_context = ""
             logger.info(
                 "coarse_decision_chat_gate applied=1 "
                 f"route=chat confidence={pre_coarse_confidence:.2f} threshold={chat_gate_min_conf:.2f} "
                 f"reason={pre_coarse_reason[:80]}"
+            )
+            logger.info(
+                "coarse_decision_chat_gate_context built=1 "
+                f"persona_loaded={1 if profile_context else 0} style_loaded={1 if style_context else 0} memory_rows=0"
             )
             context_pack = {
                 "decision_route": "plain_chat",
@@ -246,10 +266,21 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 "internal_skill_name": "",
                 "internal_skill_route": "",
                 "tool_notes": ["coarse_chat_gate applied=1"],
+                "time_context": "",
+                "profile_context": profile_context,
+                "group_context": "",
+                "style_context": style_context,
+                "retrieval_context": "",
+                "summary_retrieval_context": "",
+                "memory_context": "",
+                "history_context": "",
+                "skill_context": "",
+                "skill_evidence_context": "",
                 "web_context": "",
                 "web_evidence_context": "",
                 "local_knowledge_context": "",
                 "direct_reply": "",
+                "lightweight_mode": "",
                 "decision_classifier_observe_enabled": False,
                 "decision_classifier_catalog": "",
                 "decision_classifier_entries": [],
