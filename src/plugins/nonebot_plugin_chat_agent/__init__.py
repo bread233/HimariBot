@@ -37,7 +37,7 @@ from .decision.classifier import (
     validate_decision_candidate,
 )
 from .decision.ollama_native import coarse_chat_ollama_native
-from .decision.policy import load_decision_policy, should_skip_classifier_observe_as_casual
+from .decision.policy import load_decision_policy, should_skip_classifier_observe_as_casual, should_block_chat_gate_by_agent_guard
 
 
 async def chat_agent_rule(bot: Bot, event: MessageEvent, state: T_State) -> bool:
@@ -224,11 +224,13 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     f"error={type(e).__name__} detail={str(e)[:160]} elapsed={time.perf_counter()-coarse_t0:.3f}s"
                 )
 
+        agent_guard_blocked, agent_guard_hit = should_block_chat_gate_by_agent_guard(prompt, decision_policy)
         if (
             coarse_enabled
             and chat_gate_enable
             and pre_coarse_route == "chat"
             and pre_coarse_confidence >= chat_gate_min_conf
+            and not agent_guard_blocked
         ):
             gate_applied = True
             logger.info(
@@ -257,11 +259,17 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 "coarse_preroute_reason": str(pre_coarse_reason or ""),
             }
         else:
-            if coarse_enabled and chat_gate_enable and pre_coarse_route == "chat" and pre_coarse_confidence < chat_gate_min_conf:
-                logger.info(
-                    "coarse_decision_chat_gate applied=0 "
-                    f"reason=low_confidence route=chat confidence={pre_coarse_confidence:.2f} threshold={chat_gate_min_conf:.2f}"
-                )
+            if coarse_enabled and chat_gate_enable and pre_coarse_route == "chat":
+                if pre_coarse_confidence < chat_gate_min_conf:
+                    logger.info(
+                        "coarse_decision_chat_gate applied=0 "
+                        f"reason=low_confidence route=chat confidence={pre_coarse_confidence:.2f} threshold={chat_gate_min_conf:.2f}"
+                    )
+                elif agent_guard_blocked:
+                    logger.info(
+                        "coarse_decision_chat_gate applied=0 "
+                        f"reason=agent_guard route=chat confidence={pre_coarse_confidence:.2f} threshold={chat_gate_min_conf:.2f} hit={agent_guard_hit}"
+                    )
             context_pack = await build_context_pack(config, session_info, prompt, bot=bot, event=event)
         observe_skip_direct = (
             str(context_pack.get("decision_route", "")).strip() == "direct_action"

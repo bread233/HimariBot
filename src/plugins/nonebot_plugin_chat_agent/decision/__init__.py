@@ -14,7 +14,12 @@ from .classifier import (
     validate_coarse_decision_candidate,
     validate_decision_candidate,
 )
-from .policy import DecisionPolicy, load_decision_policy, should_skip_classifier_observe_as_casual
+from .policy import (
+    DecisionPolicy,
+    load_decision_policy,
+    should_block_chat_gate_by_agent_guard,
+    should_skip_classifier_observe_as_casual,
+)
 from .result import DecisionResult as RuntimeDecisionResult, DecisionRoute
 from .router import RuntimeDecisionInput, RuntimeDecisionSignals, build_runtime_decision, decide_runtime_route
 
@@ -35,6 +40,7 @@ __all__ = [
     "DecisionRoute",
     "DecisionPolicy",
     "load_decision_policy",
+    "should_block_chat_gate_by_agent_guard",
     "should_skip_classifier_observe_as_casual",
     "RuntimeDecisionInput",
     "RuntimeDecisionSignals",

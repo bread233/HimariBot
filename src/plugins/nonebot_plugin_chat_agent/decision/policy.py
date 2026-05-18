@@ -56,6 +56,31 @@ class DecisionPolicy:
     coarse_decision_rule_chat_keywords: list[str] = field(
         default_factory=lambda: ["你好", "您好", "哈喽", "hello", "hi", "谢谢", "晚安", "早安", "拜拜"]
     )
+    chat_gate_agent_guard_include: list[str] = field(
+        default_factory=lambda: [
+            "\u65b0\u95fb",              # 新闻
+            "\u4eca\u65e5\u65b0\u95fb",  # 今日新闻
+            "\u4eca\u5929\u6709\u5565",  # 今天有啥
+            "\u5929\u6c14",              # 天气
+            "\u5b9e\u65f6",              # 实时
+            "\u6700\u65b0",              # 最新
+            "\u6307\u4ee4",              # 指令
+            "\u547d\u4ee4",              # 命令
+            "\u600e\u4e48",              # 怎么
+            "\u5982\u4f55",              # 如何
+            "\u67e5\u8be2",              # 查询
+            "\u641c\u7d22",              # 搜索
+            "\u63a8\u8350",              # 推荐
+            "\u5403\u5565",              # 吃啥
+            "\u5403\u4ec0\u4e48",        # 吃什么
+            "PPT",
+            "PDF",
+            "\u56fe\u7247",              # 图片
+            "\u53cc\u4fee",              # 双修
+        ]
+    )
+    chat_gate_agent_guard_exclude: list[str] = field(default_factory=list)
+
 
     def canonical_action(self, action_name: str | None) -> str | None:
         action = str(action_name or "").strip().lower()
@@ -106,6 +131,20 @@ def should_skip_classifier_observe_as_casual(prompt: str, policy: DecisionPolicy
     if any(token in text for token in includes):
         return True
     return False
+
+
+def should_block_chat_gate_by_agent_guard(prompt: str, policy: DecisionPolicy) -> tuple[bool, str]:
+    text = str(prompt or "").strip().lower()
+    if not text:
+        return False, ""
+    excludes = _normalize_text_list(policy.chat_gate_agent_guard_exclude)
+    if any(token in text for token in excludes):
+        return False, ""
+    includes = _normalize_text_list(policy.chat_gate_agent_guard_include)
+    for token in includes:
+        if token and token in text:
+            return True, token
+    return False, ""
 
 
 def load_decision_policy(path: str | Path | None) -> DecisionPolicy:
@@ -170,4 +209,10 @@ def load_decision_policy(path: str | Path | None) -> DecisionPolicy:
     chat_kw = _normalize_text_list(raw.get("coarse_decision_rule_chat_keywords"))
     if chat_kw:
         policy.coarse_decision_rule_chat_keywords = chat_kw
+    guard_include = _normalize_text_list(raw.get("chat_gate_agent_guard_include"))
+    if guard_include:
+        policy.chat_gate_agent_guard_include = guard_include
+    guard_exclude = _normalize_text_list(raw.get("chat_gate_agent_guard_exclude"))
+    if guard_exclude:
+        policy.chat_gate_agent_guard_exclude = guard_exclude
     return policy
