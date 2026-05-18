@@ -1046,6 +1046,28 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             ),
         )
         messages.append({"role": "user", "content": prompt})
+        roles = [str(m.get("role", "")) for m in messages]
+        lengths = [len(str(m.get("content", "") or "")) for m in messages]
+        profile_len = len(str(context_pack.get("profile_context", "") or ""))
+        style_len = len(str(context_pack.get("style_context", "") or ""))
+        web_len = len(str(context_pack.get("web_context", "") or ""))
+        skill_len = len(str(context_pack.get("skill_context", "") or ""))
+        local_len = len(str(context_pack.get("local_knowledge_context", "") or ""))
+        bot_persona_loaded = int(
+            "不要自称通用AI助手" in str(context_pack.get("style_context", "") or "")
+        )
+        logger.info(
+            "chat_agent_llm messages_debug "
+            "purpose=default "
+            f"route={context_pack.get('decision_route','')} "
+            f"source={context_pack.get('decision_source','')} "
+            f"message_count={len(messages)} "
+            f"roles={','.join(roles)} "
+            f"lengths={','.join(str(x) for x in lengths)} "
+            f"profile_len={profile_len} style_len={style_len} "
+            f"web_len={web_len} skill_len={skill_len} local_len={local_len} "
+            f"bot_persona_loaded={bot_persona_loaded}"
+        )
 
         if config.chat_agent_enable_history:
             try:
