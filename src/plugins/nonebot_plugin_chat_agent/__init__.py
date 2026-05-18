@@ -16,6 +16,7 @@ from .stores.profile_store import init_profile_storage, load_user_profile_contex
 from .answer.prompt import build_system_prompt
 from .stores.retrieval_store import init_retrieval_storage
 from .runtime.runtime_state import get_chat_agent_lock
+from .runtime.runtime_config import get_persona_profile
 from .stores.storage import build_session_info, get_user_style_profile, init_storage, save_memory, save_message
 from .tools.utils import extract_group_prompt, extract_private_prompt, get_bot_nicknames, get_original_plain_text, sanitize_task_reply, strip_thinking, truncate_reply
 from .answer import (
@@ -79,6 +80,31 @@ def _append_system(messages: list[dict], content: str) -> None:
     text = str(content or "").strip()
     if text:
         messages.append({"role": "system", "content": text})
+
+
+def _build_casual_persona_context(config) -> str:
+    try:
+        persona = get_persona_profile(config) or {}
+    except Exception:
+        return ""
+    name = str(persona.get("name", "") or "").strip()
+    identity = str(persona.get("identity", "") or "").strip()
+    role = str(persona.get("role", "") or "").strip()
+    tone = str((persona.get("speaking_style") or {}).get("tone", "") or "").strip()
+    sentence_style = str((persona.get("speaking_style") or {}).get("sentence_style", "") or "").strip()
+    bits: list[str] = []
+    if name:
+        bits.append(f"你是{name}。")
+    elif identity:
+        bits.append(f"你是{identity}。")
+    if role:
+        bits.append(f"角色定位：{role}。")
+    if tone or sentence_style:
+        style_bits = "、".join([x for x in [tone, sentence_style] if x])
+        if style_bits:
+            bits.append(f"说话风格：{style_bits}。")
+    bits.append("保持角色设定一致，不要自称通用AI助手。")
+    return "\n".join(bits).strip()
 
 
 def _should_sanitize_task_reply(prompt: str, context_pack: dict) -> bool:
@@ -235,6 +261,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             gate_applied = True
             profile_context = ""
             style_context = ""
+            bot_persona_context = _build_casual_persona_context(config)
             try:
                 profile_context = str(await load_user_profile_context(config, session_info) or "").strip()
             except Exception:
@@ -249,6 +276,8 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                     style_context = str(style_profile.get("recommended_bot_style", "") or "").strip()
             except Exception:
                 style_context = ""
+            if bot_persona_context:
+                style_context = "\n".join([x for x in [style_context, bot_persona_context] if x]).strip()
             logger.info(
                 "coarse_decision_chat_gate applied=1 "
                 f"route=chat confidence={pre_coarse_confidence:.2f} threshold={chat_gate_min_conf:.2f} "
@@ -256,7 +285,9 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             )
             logger.info(
                 "coarse_decision_chat_gate_context built=1 "
-                f"persona_loaded={1 if profile_context else 0} style_loaded={1 if style_context else 0} memory_rows=0"
+                f"bot_persona_loaded={1 if bot_persona_context else 0} "
+                f"user_profile_loaded={1 if profile_context else 0} "
+                f"style_loaded={1 if style_context else 0} memory_rows=0"
             )
             context_pack = {
                 "decision_route": "plain_chat",
