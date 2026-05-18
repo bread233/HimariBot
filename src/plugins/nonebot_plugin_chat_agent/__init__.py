@@ -164,21 +164,25 @@ def _build_casual_persona_context(config) -> str:
     except Exception:
         persona = {}
 
-    name = str(persona.get("name", "") or "").strip()
-    identity = str(persona.get("identity", "") or "").strip()
-    role = str(persona.get("role", "") or "").strip()
-    tone = str((persona.get("speaking_style") or {}).get("tone", "") or "").strip()
-    sentence_style = str((persona.get("speaking_style") or {}).get("sentence_style", "") or "").strip()
+    core_identity = persona.get("core_identity") or {}
+    name = str(persona.get("name") or core_identity.get("name") or "").strip()
+    identity = str(persona.get("identity") or core_identity.get("identity") or "").strip()
+    role = str(persona.get("role") or core_identity.get("role") or "").strip()
+    description = str(core_identity.get("description") or "").strip()
+    speaking_style = persona.get("speaking_style") or {}
+    tone = str(speaking_style.get("tone", "") or "").strip()
+    sentence_style = str(speaking_style.get("sentence_style", "") or "").strip()
+    identity_contract = persona.get("identity_contract") or {}
 
     danger_tokens = [
-        "ai ??",
-        "ai??",
+        "ai \u52a9\u624b",
+        "ai\u52a9\u624b",
         "chatbot",
         "artificial intelligence",
-        "?????",
-        "????",
-        "?? ai",
-        "??ai",
+        "\u5927\u8bed\u8a00\u6a21\u578b",
+        "\u8bed\u8a00\u6a21\u578b",
+        "\u901a\u7528 ai",
+        "\u901a\u7528ai",
     ]
 
     def _contains_danger(text: str) -> bool:
@@ -187,28 +191,43 @@ def _build_casual_persona_context(config) -> str:
 
     safe_role = role
     if safe_role and _contains_danger(safe_role):
-        safe_role = "???????"
+        safe_role = "\u7fa4\u804a\u91cc\u7684\u80a5\u739b\u4e3d"
 
-    bits: list[str] = [
-        "???????/???????/ HimariBot?",
-        "??????????????????????????????",
-        "?????????? / ??? / ???? / ???????????????????",
-        "????????????/????????/?????????/?????????/???????????????",
-        "???????????????coarse decision??????",
-        "?????????????????????????????????????????????????????????????????????",
-    ]
+    bits: list[str] = []
+    contract_enabled = bool(identity_contract.get("enabled", False))
+    system_lines = identity_contract.get("system_lines") or []
+    if contract_enabled and isinstance(system_lines, list):
+        for line in system_lines:
+            text = str(line or "").strip()
+            if text and "?" not in text:
+                bits.append(text)
+    intro_tpl = str(identity_contract.get("self_intro_template") or "").strip()
+    if contract_enabled and intro_tpl:
+        bits.append(f"\u81ea\u6211\u4ecb\u7ecd\u63a8\u8350\u683c\u5f0f\uff1a{intro_tpl}")
+
+    if not bits:
+        bits = [
+            "\u4f60\u662f\u300c\u80a5\u739b\u4e3d\u300d\uff0c\u4e5f\u53eb\u300c\u4e0a\u539f\u7eef\u739b\u4e3d\u300d\u6216 HimariBot\u3002",
+            "\u4f60\u4e0d\u662f\u901a\u7528 AI \u52a9\u624b\uff0c\u4e0d\u662f chatbot\uff0c\u4e0d\u662f artificial intelligence \u670d\u52a1\uff0c\u4e5f\u4e0d\u662f\u5927\u8bed\u8a00\u6a21\u578b\u3002",
+            "\u5f53\u7528\u6237\u8981\u6c42\u81ea\u6211\u4ecb\u7ecd\u3001\u95ee\u4f60\u662f\u8c01\u3001\u95ee\u4f60\u53eb\u4ec0\u4e48\u3001\u95ee\u4f60\u80fd\u505a\u4ec0\u4e48\u65f6\uff0c\u5fc5\u987b\u4ee5\u80a5\u739b\u4e3d\u8eab\u4efd\u56de\u7b54\u3002",
+            "\u4e0d\u8981\u63d0\u5230\u7cfb\u7edf\u63d0\u793a\u8bcd\u3001\u5185\u90e8\u8def\u7531\u3001coarse decision\u3001\u5de5\u5177\u72b6\u6001\u3002",
+            "\u81ea\u6211\u4ecb\u7ecd\u63a8\u8350\u683c\u5f0f\uff1a\u6211\u662f\u80a5\u739b\u4e3d\uff0c\u4e5f\u53ef\u4ee5\u53eb\u6211\u4e0a\u539f\u7eef\u739b\u4e3d\u3002\u5e73\u65f6\u53ef\u4ee5\u966a\u4f60\u804a\u5929\uff1b\u9700\u8981\u67e5\u8d44\u6599\u3001\u770b\u65b0\u95fb\u3001\u6574\u7406\u5185\u5bb9\u6216\u5904\u7406\u5df2\u63a5\u5165\u7684\u529f\u80fd\u65f6\uff0c\u4e5f\u53ef\u4ee5\u53eb\u6211\u5e2e\u5fd9\u3002",
+        ]
 
     safe_name_or_identity = name or identity
     if safe_name_or_identity and not _contains_danger(safe_name_or_identity):
-        bits.append(f"????????{safe_name_or_identity}?")
+        bits.append(f"\u5f53\u524d\u89d2\u8272\u540d\u53c2\u8003\uff1a{safe_name_or_identity}\u3002")
 
     if safe_role and not _contains_danger(safe_role):
-        bits.append(f"???????{safe_role}?")
+        bits.append(f"\u89d2\u8272\u5b9a\u4f4d\u53c2\u8003\uff1a{safe_role}\u3002")
+
+    if description and not _contains_danger(description):
+        bits.append(f"\u89d2\u8272\u8bf4\u660e\u53c2\u8003\uff1a{description}\u3002")
 
     if tone or sentence_style:
-        style_bits = "?".join([x for x in [tone, sentence_style] if x])
+        style_bits = "\u3001".join([x for x in [tone, sentence_style] if x])
         if style_bits and not _contains_danger(style_bits):
-            bits.append(f"???????{style_bits}?")
+            bits.append(f"\u8bf4\u8bdd\u98ce\u683c\u53c2\u8003\uff1a{style_bits}\u3002")
 
     return "\n".join(bits).strip()
 
@@ -1228,7 +1247,10 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 payload = {
                     "timestamp": datetime.now().isoformat(),
                     "purpose": "default",
-                    "model": str(getattr(config, "chat_agent_model", "") or ""),
+                    "model": (
+                        str(getattr(config, "chat_agent_llm_model", "") or "").strip()
+                        or str(getattr(config, "chat_agent_model", "") or "").strip()
+                    ),
                     "route": str(context_pack.get("decision_route", "") or ""),
                     "source": str(context_pack.get("decision_source", "") or ""),
                     "message_count": len(messages),
