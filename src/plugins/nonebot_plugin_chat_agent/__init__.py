@@ -4,7 +4,11 @@ from nonebot import get_driver, logger, on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, MessageSegment, PrivateMessageEvent
 from nonebot.rule import Rule
 from nonebot.typing import T_State
+from datetime import datetime
+from pathlib import Path
+import re
 import time
+from zoneinfo import ZoneInfo
 
 from .config import get_chat_agent_config
 from .runtime.context_pack import build_context_pack
@@ -80,6 +84,77 @@ def _append_system(messages: list[dict], content: str) -> None:
     text = str(content or "").strip()
     if text:
         messages.append({"role": "system", "content": text})
+
+
+def _build_runtime_context() -> str:
+    try:
+        now = datetime.now(ZoneInfo("Asia/Tokyo"))
+        now_text = now.strftime("%Y-%m-%d %H:%M Asia/Tokyo")
+    except Exception:
+        now_text = datetime.now().strftime("%Y-%m-%d %H:%M Asia/Tokyo(fallback)")
+    return (
+        "<system-reminder>\n"
+        f"当前日期时间：{now_text}。\n"
+        "涉及“今天、现在、当前、最新、新闻、天气、版本、价格、活动、日程”等问题时，不要凭模型参数记忆回答；"
+        "必须依据工具结果、证据上下文，或明确说明需要查询。\n"
+        "</system-reminder>"
+    )
+
+
+def _build_skill_catalog_context(config) -> str:
+    skills_dir = str(getattr(config, "chat_agent_skills_dir", "") or "").strip() or "data/nonebot_chat_agent/skills"
+    base = Path(skills_dir)
+    try:
+        base = base.resolve()
+    except Exception:
+        return ""
+    if not base.exists() or not base.is_dir():
+        return ""
+    entries: list[str] = []
+    max_items = 20
+    max_total = 2000
+    for skill_dir in sorted([x for x in base.iterdir() if x.is_dir()], key=lambda x: x.name.lower()):
+        try:
+            skill_resolved = skill_dir.resolve()
+            if base not in skill_resolved.parents and skill_resolved != base:
+                continue
+            md_files = sorted([x for x in skill_resolved.glob("*.md") if x.is_file()], key=lambda x: x.name.lower())
+            for md in md_files:
+                text = md.read_text(encoding="utf-8", errors="ignore")
+                lines = [ln.strip() for ln in text.splitlines()]
+                title = ""
+                summary = ""
+                for ln in lines:
+                    if ln.startswith("#"):
+                        title = ln.lstrip("#").strip()
+                        break
+                if not title:
+                    title = md.stem
+                non_empty = [ln for ln in lines if ln and not ln.startswith("#")]
+                if non_empty:
+                    summary = re.sub(r"[`*_>#-]", " ", non_empty[0]).strip()
+                    summary = re.sub(r"\s+", " ", summary)[:80]
+                item = f"- {skill_resolved.name}/{md.name}: {title}" + (f" - {summary}" if summary else "")
+                entries.append(item)
+                if len(entries) >= max_items:
+                    break
+            if len(entries) >= max_items:
+                break
+        except Exception:
+            continue
+    if not entries:
+        return ""
+    body = "\n".join(entries)
+    block = (
+        "<system-reminder>\n"
+        "当前可用技能文档目录：\n"
+        f"{body}\n\n"
+        "这些技能文档由系统路由层读取和注入。你不能在文本中假装已经调用工具。\n"
+        "如果当前上下文没有提供工具结果、技能正文或 evidence，不要编造执行结果。\n"
+        "需要实时信息时，应依据已提供的 evidence/action_result；没有证据时说明需要查询。\n"
+        "</system-reminder>"
+    )
+    return block[:max_total]
 
 
 def _build_casual_persona_context(config) -> str:
@@ -951,6 +1026,14 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             labels.append("bot_persona")
         messages.append({"role": "system", "content": build_system_prompt()})
         labels.append("base_system")
+        runtime_context = _build_runtime_context()
+        if runtime_context:
+            messages.append({"role": "system", "content": runtime_context})
+            labels.append("runtime_context")
+        skill_catalog_context = _build_skill_catalog_context(config)
+        if skill_catalog_context:
+            messages.append({"role": "system", "content": skill_catalog_context})
+            labels.append("skill_catalog")
         skill_evidence_context = str(context_pack.get("skill_evidence_context", "") or "").strip()
         if skill_evidence_context:
             _append_system(messages, "Relevant evidence instructions:\n" + skill_evidence_context)
@@ -1086,8 +1169,11 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 ]
             ),
         )
+        labels.append("final_reply_requirement")
         messages.append({"role": "user", "content": prompt})
         labels.append("user_prompt")
+        if len(labels) < len(messages):
+            labels.extend([f"system_context_{i+1}" for i in range(len(messages) - len(labels))])
         roles = [str(m.get("role", "")) for m in messages]
         lengths = [len(str(m.get("content", "") or "")) for m in messages]
         profile_len = len(str(context_pack.get("profile_context", "") or ""))
@@ -1097,6 +1183,8 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         local_len = len(str(context_pack.get("local_knowledge_context", "") or ""))
         bot_persona_context = str(context_pack.get("bot_persona_context", "") or "").strip()
         bot_persona_len = len(bot_persona_context)
+        runtime_len = len(runtime_context)
+        skill_catalog_len = len(skill_catalog_context)
         bot_persona_loaded = 1 if bot_persona_len > 0 else 0
         logger.info(
             "chat_agent_llm messages_debug "
@@ -1108,6 +1196,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             f"labels={','.join(labels)} "
             f"lengths={','.join(str(x) for x in lengths)} "
             f"bot_persona_len={bot_persona_len} "
+            f"runtime_len={runtime_len} skill_catalog_len={skill_catalog_len} "
             f"profile_len={profile_len} style_len={style_len} "
             f"web_len={web_len} skill_len={skill_len} local_len={local_len} "
             f"bot_persona_loaded={bot_persona_loaded}"
