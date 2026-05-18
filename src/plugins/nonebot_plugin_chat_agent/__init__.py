@@ -232,6 +232,87 @@ def _build_casual_persona_context(config) -> str:
     return "\n".join(bits).strip()
 
 
+def _sanitize_base_system_identity(text: str) -> str:
+    t = str(text or "")
+    banned = [
+        "\u4f60\u662f\u4e00\u4e2a\u7fa4\u804a\u81ea\u7136\u804a\u5929 AI",
+        "AI \u52a9\u624b",
+        "AI\u52a9\u624b",
+        "chatbot",
+        "conversational AI",
+        "artificial intelligence",
+        "\u5927\u8bed\u8a00\u6a21\u578b",
+    ]
+    for token in banned:
+        t = t.replace(token, "")
+    if "\u4f60\u662f" in t and "AI" in t:
+        t = t.replace("AI", "")
+    behavior_block = (
+        "\n\n\u8eab\u4efd\u884c\u4e3a\u89c4\u5219\uff1a\n"
+        "- \u9075\u5b88\u6700\u524d\u9762\u7684\u8eab\u4efd\u8bbe\u5b9a\uff0c\u4e0d\u8981\u91cd\u65b0\u5b9a\u4e49\u81ea\u5df1\u7684\u8eab\u4efd\u3002\n"
+        "- \u56de\u590d\u5e94\u7b80\u77ed\u81ea\u7136\uff0c\u4e8b\u5b9e\u7c7b\u95ee\u9898\u4f18\u5148\u4f9d\u636e\u5de5\u5177\u3001\u8bc1\u636e\u6216\u4e0a\u4e0b\u6587\u3002\n"
+        "- \u4e0d\u786e\u5b9a\u5c31\u76f4\u8bf4\u4e0d\u786e\u5b9a\uff0c\u4e0d\u8981\u7f16\u9020\u3002\n"
+        "- \u4e0d\u8981\u8f93\u51fa\u601d\u8003\u8fc7\u7a0b\uff0c\u4e0d\u8981\u58f0\u79f0\u81ea\u5df1\u662f\u73b0\u5b9e\u4e2d\u7684\u771f\u4eba\u3002"
+    )
+    return t.strip() + behavior_block
+
+
+def _is_identity_request_prompt(prompt: str, config=None) -> bool:
+    q = str(prompt or "").strip().lower()
+    if not q:
+        return False
+    exclude_keys = [
+        "\u4eca\u65e5\u65b0\u95fb",  # 今日新闻
+        "\u65b0\u95fb",              # 新闻
+        "\u5929\u6c14",              # 天气
+    ]
+    if any(k in q for k in exclude_keys):
+        return False
+    keys = [
+        "\u81ea\u6211\u4ecb\u7ecd",              # 自我介绍
+        "\u81ea\u6211\u4ecb\u7ecd\u4e00\u4e0b",  # 自我介绍一下
+        "\u4f60\u662f\u8c01",                    # 你是谁
+        "\u4f60\u53eb\u4ec0\u4e48",              # 你叫什么
+        "\u4f60\u80fd\u505a\u4ec0\u4e48",        # 你能做什么
+        "\u4ecb\u7ecd\u4e00\u4e0b\u4f60\u81ea\u5df1",  # 介绍一下你自己
+        "\u4ecb\u7ecd\u4f60\u81ea\u5df1",        # 介绍你自己
+        "\u4f60\u662f\u4ec0\u4e48",              # 你是什么
+        "\u4f60\u662f\u5e72\u561b\u7684",        # 你是干嘛的
+    ]
+    if config is not None:
+        try:
+            persona = get_persona_profile(config) or {}
+            identity_contract = persona.get("identity_contract") or {}
+            extra = identity_contract.get("identity_triggers") or []
+            if isinstance(extra, list):
+                for item in extra:
+                    token = str(item or "").strip()
+                    if token:
+                        keys.append(token)
+        except Exception:
+            pass
+    return any(k in q for k in keys)
+
+
+def _build_identity_request_context(config) -> str:
+    try:
+        persona = get_persona_profile(config) or {}
+    except Exception:
+        persona = {}
+    identity_contract = persona.get("identity_contract") or {}
+    intro = str(identity_contract.get("self_intro_template") or "").strip()
+    if not intro:
+        intro = "\u6211\u662f\u80a5\u739b\u4e3d\uff0c\u4e5f\u53ef\u4ee5\u53eb\u6211\u4e0a\u539f\u7eef\u739b\u4e3d\u3002\u5e73\u65f6\u53ef\u4ee5\u966a\u4f60\u804a\u5929\uff1b\u9700\u8981\u67e5\u8d44\u6599\u3001\u770b\u65b0\u95fb\u3001\u6574\u7406\u5185\u5bb9\u6216\u5904\u7406\u5df2\u63a5\u5165\u7684\u529f\u80fd\u65f6\uff0c\u4e5f\u53ef\u4ee5\u53eb\u6211\u5e2e\u5fd9\u3002"
+    return (
+        "<system-reminder>\n"
+        "\u5f53\u524d\u7528\u6237\u6b63\u5728\u8be2\u95ee\u4f60\u7684\u8eab\u4efd\u6216\u8981\u6c42\u81ea\u6211\u4ecb\u7ecd\u3002\u8bf7\u76f4\u63a5\u4ee5\u80a5\u739b\u4e3d / \u4e0a\u539f\u7eef\u739b\u4e3d / HimariBot \u8eab\u4efd\u56de\u7b54\u3002\n"
+        f"\u4f18\u5148\u4f7f\u7528\u8fd9\u4e2a\u683c\u5f0f\uff1a{intro}\n"
+        "\u4e0d\u8981\u8bf4\u81ea\u5df1\u662f AI\u3001AI \u52a9\u624b\u3001chatbot\u3001conversational AI\u3001artificial intelligence \u670d\u52a1\u6216\u5927\u8bed\u8a00\u6a21\u578b\u3002\n"
+        "\u4e0d\u8981\u8bf4\u201c\u8fd9\u4efd\u6587\u672c/\u6839\u636e\u4e0a\u4e0b\u6587/\u5de5\u5177\u72b6\u6001\u201d\u3002\n"
+        "</system-reminder>"
+    )
+
+
 def _should_sanitize_task_reply(prompt: str, context_pack: dict) -> bool:
     text = (prompt or "").strip()
     if any(token in text for token in ["你是谁", "自我介绍", "可爱语气", "安慰", "陪聊", "角色扮演"]):
@@ -1044,7 +1125,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         if bot_persona_context:
             messages.append({"role": "system", "content": bot_persona_context})
             labels.append("bot_persona")
-        messages.append({"role": "system", "content": build_system_prompt()})
+        messages.append({"role": "system", "content": _sanitize_base_system_identity(build_system_prompt())})
         labels.append("base_system")
         runtime_context = _build_runtime_context()
         if runtime_context:
@@ -1190,6 +1271,16 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             ),
         )
         labels.append("final_reply_requirement")
+        identity_request_context = ""
+        if (
+            str(context_pack.get("decision_route", "") or "").strip() == "plain_chat"
+            and str(context_pack.get("decision_source", "") or "").strip() == "coarse_chat_gate"
+            and _is_identity_request_prompt(prompt, config)
+        ):
+            identity_request_context = _build_identity_request_context(config)
+            if identity_request_context:
+                messages.append({"role": "system", "content": identity_request_context})
+                labels.append("identity_request_context")
         messages.append({"role": "user", "content": prompt})
         labels.append("user_prompt")
         if len(labels) < len(messages):
@@ -1222,6 +1313,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         bot_persona_len = len(bot_persona_context)
         runtime_len = len(runtime_context)
         skill_catalog_len = len(skill_catalog_context)
+        identity_request_len = len(identity_request_context)
         bot_persona_loaded = 1 if bot_persona_len > 0 else 0
         logger.info(
             "chat_agent_llm messages_debug "
@@ -1233,7 +1325,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             f"labels={','.join(labels)} "
             f"lengths={','.join(str(x) for x in lengths)} "
             f"bot_persona_len={bot_persona_len} "
-            f"runtime_len={runtime_len} skill_catalog_len={skill_catalog_len} "
+            f"runtime_len={runtime_len} skill_catalog_len={skill_catalog_len} identity_request_len={identity_request_len} "
             f"profile_len={profile_len} style_len={style_len} "
             f"web_len={web_len} skill_len={skill_len} local_len={local_len} "
             f"bot_persona_loaded={bot_persona_loaded}"
