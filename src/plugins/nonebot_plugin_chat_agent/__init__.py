@@ -86,24 +86,54 @@ def _build_casual_persona_context(config) -> str:
     try:
         persona = get_persona_profile(config) or {}
     except Exception:
-        return ""
+        persona = {}
+
     name = str(persona.get("name", "") or "").strip()
     identity = str(persona.get("identity", "") or "").strip()
     role = str(persona.get("role", "") or "").strip()
     tone = str((persona.get("speaking_style") or {}).get("tone", "") or "").strip()
     sentence_style = str((persona.get("speaking_style") or {}).get("sentence_style", "") or "").strip()
-    bits: list[str] = []
-    if name:
-        bits.append(f"你是{name}。")
-    elif identity:
-        bits.append(f"你是{identity}。")
-    if role:
-        bits.append(f"角色定位：{role}。")
+
+    danger_tokens = [
+        "ai ??",
+        "ai??",
+        "chatbot",
+        "artificial intelligence",
+        "?????",
+        "????",
+        "?? ai",
+        "??ai",
+    ]
+
+    def _contains_danger(text: str) -> bool:
+        t = str(text or "").strip().lower()
+        return any(token in t for token in danger_tokens)
+
+    safe_role = role
+    if safe_role and _contains_danger(safe_role):
+        safe_role = "???????"
+
+    bits: list[str] = [
+        "???????/???????/ HimariBot?",
+        "??????????????????????????????",
+        "?????????? / ??? / ???? / ???????????????????",
+        "????????????/????????/?????????/?????????/???????????????",
+        "???????????????coarse decision??????",
+        "?????????????????????????????????????????????????????????????????????",
+    ]
+
+    safe_name_or_identity = name or identity
+    if safe_name_or_identity and not _contains_danger(safe_name_or_identity):
+        bits.append(f"????????{safe_name_or_identity}?")
+
+    if safe_role and not _contains_danger(safe_role):
+        bits.append(f"???????{safe_role}?")
+
     if tone or sentence_style:
-        style_bits = "、".join([x for x in [tone, sentence_style] if x])
-        if style_bits:
-            bits.append(f"说话风格：{style_bits}。")
-    bits.append("保持角色设定一致，不要自称通用AI助手。")
+        style_bits = "?".join([x for x in [tone, sentence_style] if x])
+        if style_bits and not _contains_danger(style_bits):
+            bits.append(f"???????{style_bits}?")
+
     return "\n".join(bits).strip()
 
 
@@ -277,7 +307,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             except Exception:
                 style_context = ""
             if bot_persona_context:
-                style_context = "\n".join([x for x in [style_context, bot_persona_context] if x]).strip()
+                profile_context = "\n".join([x for x in [bot_persona_context, profile_context] if x]).strip()
             logger.info(
                 "coarse_decision_chat_gate applied=1 "
                 f"route=chat confidence={pre_coarse_confidence:.2f} threshold={chat_gate_min_conf:.2f} "
