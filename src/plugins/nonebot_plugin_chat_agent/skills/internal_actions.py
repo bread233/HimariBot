@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 import importlib
+import json
+from pathlib import Path
 
 from nonebot import logger
 
@@ -108,12 +110,53 @@ def _load_what2eat_manager():
     return None, ""
 
 
+def _ensure_what2eat_eating_loaded(manager, action_name: str) -> None:
+    eating = getattr(manager, "_eating", None)
+    if not isinstance(eating, dict):
+        eating = {}
+        setattr(manager, "_eating", eating)
+
+    needs_load = any(k not in eating for k in ("basic_food", "group_food", "count"))
+    if needs_load:
+        p = Path(str(getattr(manager, "_eating_json", "") or "").strip())
+        if p:
+            try:
+                text = p.read_text(encoding="utf-8")
+                loaded = json.loads(text)
+                if isinstance(loaded, dict):
+                    setattr(manager, "_eating", loaded)
+                    eating = loaded
+                    logger.info(
+                        f"internal_skill_action name={action_name} loaded_eating_json=1 path={p.as_posix()}"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"internal_skill_action name={action_name} loaded_eating_json=0 error={type(e).__name__}"
+                )
+
+    repaired: list[str] = []
+    if "basic_food" not in eating:
+        eating.setdefault("basic_food", [])
+        repaired.append("basic_food")
+    if "group_food" not in eating:
+        eating.setdefault("group_food", {})
+        repaired.append("group_food")
+    if "count" not in eating:
+        eating.setdefault("count", {})
+        repaired.append("count")
+    if repaired:
+        logger.info(
+            f"internal_skill_action name={action_name} repaired_missing_keys={','.join(repaired)}"
+        )
+
+
 async def _run_what2eat(action_name: str, event) -> InternalActionResult:
     try:
         manager, used_mod = _load_what2eat_manager()
         if manager is None:
             logger.warning(f"internal_skill_action name={action_name} success=0 error=no_manager")
             return InternalActionResult(text=_what2eat_fallback(action_name), action_name=action_name)
+        _ensure_what2eat_eating_loaded(manager, action_name)
         if action_name.endswith("get2drink"):
             value = manager.get2drink(event)
         else:
