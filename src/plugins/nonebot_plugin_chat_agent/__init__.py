@@ -1095,9 +1095,9 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         web_len = len(str(context_pack.get("web_context", "") or ""))
         skill_len = len(str(context_pack.get("skill_context", "") or ""))
         local_len = len(str(context_pack.get("local_knowledge_context", "") or ""))
-        bot_persona_loaded = int(
-            "不要自称通用AI助手" in str(context_pack.get("style_context", "") or "")
-        )
+        bot_persona_context = str(context_pack.get("bot_persona_context", "") or "").strip()
+        bot_persona_len = len(bot_persona_context)
+        bot_persona_loaded = 1 if bot_persona_len > 0 else 0
         logger.info(
             "chat_agent_llm messages_debug "
             "purpose=default "
