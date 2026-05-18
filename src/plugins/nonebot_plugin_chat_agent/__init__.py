@@ -296,6 +296,46 @@ def _is_identity_request_prompt(prompt: str, config=None) -> bool:
     return any(k in q for k in keys)
 
 
+def _detect_what2eat_action(prompt: str) -> str | None:
+    q = str(prompt or "").strip().lower()
+    if not q:
+        return None
+    exclude = [
+        "\u63d2\u4ef6\u600e\u4e48\u7528",
+        "\u600e\u4e48\u6dfb\u52a0\u83dc\u5355",
+        "\u600e\u4e48\u79fb\u9664\u83dc\u54c1",
+        "\u83dc\u5355\u600e\u4e48\u914d\u7f6e",
+        "\u600e\u4e48\u7528",
+    ]
+    if any(k in q for k in exclude):
+        return None
+    eat_keys = [
+        "\u5403\u4ec0\u4e48",
+        "\u5403\u5565",
+        "\u5403\u70b9\u5565",
+        "\u73b0\u5728\u5403",
+        "\u4eca\u5929\u5403",
+        "\u4eca\u665a\u5403",
+        "\u665a\u4e0a\u5403",
+        "\u665a\u996d\u5403",
+        "\u591c\u5bb5\u5403",
+    ]
+    drink_keys = [
+        "\u559d\u4ec0\u4e48",
+        "\u559d\u5565",
+        "\u559d\u70b9\u5565",
+        "\u73b0\u5728\u559d",
+        "\u4eca\u5929\u559d",
+        "\u4eca\u665a\u559d",
+        "\u665a\u4e0a\u559d",
+    ]
+    if any(k in q for k in drink_keys):
+        return "what2eat.get2drink"
+    if any(k in q for k in eat_keys):
+        return "what2eat.get2eat"
+    return None
+
+
 def _build_identity_request_context(config) -> str:
     try:
         persona = get_persona_profile(config) or {}
@@ -459,7 +499,27 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 )
 
         agent_guard_blocked, agent_guard_hit = should_block_chat_gate_by_agent_guard(prompt, decision_policy)
-        if (
+        what2eat_action = _detect_what2eat_action(prompt)
+        if what2eat_action:
+            logger.info(f"internal_skill_action name={what2eat_action} route=direct_message selected=1")
+            context_pack = {
+                "decision_route": "direct_action",
+                "decision_source": "what2eat_bridge",
+                "decision_skill_name": "what2eat",
+                "internal_skill_action": what2eat_action,
+                "internal_skill_name": "what2eat",
+                "internal_skill_route": "direct_message",
+                "tool_notes": ["skill_match selected=what2eat loaded=1"],
+                "web_context": "",
+                "web_evidence_context": "",
+                "local_knowledge_context": "",
+                "direct_reply": "",
+                "decision_classifier_observe_enabled": False,
+                "decision_classifier_catalog": "",
+                "decision_classifier_entries": [],
+                "decision_classifier_prompt": "",
+            }
+        elif (
             coarse_enabled
             and chat_gate_enable
             and pre_coarse_route == "chat"
@@ -661,7 +721,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         action_route = str(context_pack.get("internal_skill_route", "")).strip()
         if action_name and action_route == "direct_message":
             logger.info(f"internal_skill_action name={action_name} route=direct_message selected=1")
-            result = await run_internal_skill_action(action_name)
+            result = await run_internal_skill_action(action_name, event=event)
             if result and result.image_url:
                 logger.info(f"internal_skill_action name={action_name} success=1 type=image")
                 await chat_agent.finish(MessageSegment.image(result.image_url))
