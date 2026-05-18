@@ -99,6 +99,7 @@ class ChatAgentConfig(BaseModel):
     chat_agent_coarse_decision_keep_alive: str = Field(default="30m")
     chat_agent_coarse_decision_chat_gate_enable: bool = Field(default=False)
     chat_agent_coarse_decision_chat_gate_min_confidence: float = Field(default=0.90)
+    chat_agent_debug_dump_llm_payload: bool = Field(default=False)
 
     def ensure_data_dir(self) -> Path:
         self.chat_agent_data_dir.mkdir(parents=True, exist_ok=True)
@@ -313,6 +314,10 @@ def get_chat_agent_config() -> ChatAgentConfig:
                 "CHAT_AGENT_COARSE_DECISION_CHAT_GATE_MIN_CONFIDENCE",
                 0.90,
             )
+        ),
+        chat_agent_debug_dump_llm_payload=_as_bool(
+            _cfg("chat_agent_debug_dump_llm_payload", "CHAT_AGENT_DEBUG_DUMP_LLM_PAYLOAD", False),
+            False,
         ),
     )
     _cached_config.ensure_data_dir()
