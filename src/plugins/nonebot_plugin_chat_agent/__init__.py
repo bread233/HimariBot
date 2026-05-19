@@ -755,7 +755,13 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         image_collect_result = {"image_count": 0, "images": [], "warnings": []}
         try:
             max_images = max(1, int(getattr(config, "chat_agent_vision_max_images", 3) or 3))
-            image_collect_result = await collect_event_images(event, max_images=max_images)
+            image_collect_result = await collect_event_images(
+                event,
+                max_images=max_images,
+                resize_enable=bool(getattr(config, "chat_agent_vision_resize_enable", True)),
+                resize_max_side=int(getattr(config, "chat_agent_vision_resize_max_side", 512) or 512),
+                resize_quality=int(getattr(config, "chat_agent_vision_resize_quality", 80) or 80),
+            )
             if int(image_collect_result.get("image_count", 0) or 0) > 0:
                 current_count = sum(1 for x in (image_collect_result.get("images", []) or []) if x.get("source") == "current")
                 reply_count = sum(1 for x in (image_collect_result.get("images", []) or []) if x.get("source") == "reply")
