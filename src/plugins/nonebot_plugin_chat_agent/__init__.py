@@ -664,6 +664,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             and pre_coarse_route == "chat"
             and pre_coarse_confidence >= chat_gate_min_conf
             and not agent_guard_blocked
+            and not has_image
         ):
             gate_applied = True
             profile_context = ""
@@ -772,6 +773,16 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         except Exception as e:
             logger.warning(f"image_collect detected=0 error={type(e).__name__}:{str(e)[:120]}")
             image_collect_result = {"image_count": 0, "images": [], "warnings": [f"collect_error:{type(e).__name__}"]}
+        if has_image:
+            logger.info(f"image_route suppress_web=1 reason=has_image prompt={prompt[:80]!r}")
+            if str(context_pack.get("decision_route", "") or "").strip() != "direct_action":
+                context_pack["decision_route"] = "image_context"
+                context_pack["decision_source"] = "vision"
+                context_pack["direct_reply"] = ""
+                context_pack["lightweight_mode"] = ""
+                context_pack["web_context"] = ""
+                context_pack["web_evidence_context"] = ""
+        current_route = str(context_pack.get("decision_route", "") or "")
         observe_skip_casual = (
             current_route.strip() == "web_evidence"
             and should_skip_classifier_observe_as_casual(prompt, decision_policy)
@@ -899,14 +910,15 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             if bool(getattr(config, "chat_agent_vision_enable", False)):
                 provider = str(getattr(config, "chat_agent_vision_provider", "ollama_native") or "ollama_native").strip().lower()
                 model = str(getattr(config, "chat_agent_vision_model", "minicpm-v") or "minicpm-v").strip()
+                vision_base_url = str(getattr(config, "chat_agent_vision_base_url", "http://192.168.0.112:11434") or "http://192.168.0.112:11434")
                 logger.info(
                     "vision_extract request=1 "
-                    f"provider={provider} model={model} image_count={int(image_collect_result.get('image_count',0) or 0)}"
+                    f"provider={provider} base_url={vision_base_url} model={model} image_count={int(image_collect_result.get('image_count',0) or 0)}"
                 )
                 result = {"success": False, "content": "", "elapsed": 0.0, "error": "provider_not_supported"}
                 if provider == "ollama_native":
                     result = await extract_with_ollama_vision(
-                        base_url=str(getattr(config, "chat_agent_vision_base_url", "http://192.168.0.112:11434") or "http://192.168.0.112:11434"),
+                        base_url=vision_base_url,
                         model=model,
                         images_base64=[str(x.get("base64", "") or "") for x in (image_collect_result.get("images", []) or []) if str(x.get("base64", "") or "")],
                         timeout=float(getattr(config, "chat_agent_vision_timeout", 120) or 120),
