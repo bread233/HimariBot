@@ -108,6 +108,9 @@ class ChatAgentConfig(BaseModel):
     chat_agent_vision_max_tokens: int = Field(default=160)
     chat_agent_vision_keep_alive: str = Field(default="30m")
     chat_agent_vision_max_images: int = Field(default=3)
+    chat_agent_vision_resize_enable: bool = Field(default=True)
+    chat_agent_vision_resize_max_side: int = Field(default=512)
+    chat_agent_vision_resize_quality: int = Field(default=80)
 
     def ensure_data_dir(self) -> Path:
         self.chat_agent_data_dir.mkdir(parents=True, exist_ok=True)
@@ -351,6 +354,16 @@ def get_chat_agent_config() -> ChatAgentConfig:
         ),
         chat_agent_vision_max_images=int(
             _cfg("chat_agent_vision_max_images", "CHAT_AGENT_VISION_MAX_IMAGES", 3)
+        ),
+        chat_agent_vision_resize_enable=_as_bool(
+            _cfg("chat_agent_vision_resize_enable", "CHAT_AGENT_VISION_RESIZE_ENABLE", True),
+            True,
+        ),
+        chat_agent_vision_resize_max_side=int(
+            _cfg("chat_agent_vision_resize_max_side", "CHAT_AGENT_VISION_RESIZE_MAX_SIDE", 512)
+        ),
+        chat_agent_vision_resize_quality=int(
+            _cfg("chat_agent_vision_resize_quality", "CHAT_AGENT_VISION_RESIZE_QUALITY", 80)
         ),
     )
     _cached_config.ensure_data_dir()
