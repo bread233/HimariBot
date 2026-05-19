@@ -479,6 +479,25 @@ def _detect_image_action(prompt: str) -> str:
     return "image.search" if any(k in q for k in keys) else "image.describe"
 
 
+def _count_event_images(event) -> tuple[int, int]:
+    current_count = 0
+    reply_count = 0
+    try:
+        for seg in (getattr(event, "message", None) or []):
+            if str(getattr(seg, "type", "") or "") == "image":
+                current_count += 1
+    except Exception:
+        pass
+    try:
+        reply = getattr(event, "reply", None)
+        for seg in (getattr(reply, "message", None) or []):
+            if str(getattr(seg, "type", "") or "") == "image":
+                reply_count += 1
+    except Exception:
+        pass
+    return current_count, reply_count
+
+
 
 
 @driver.on_startup
@@ -503,7 +522,15 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
     except Exception:
         pass
 
-    if not prompt:
+    current_img_count, reply_img_count = _count_event_images(event)
+    has_image = (current_img_count + reply_img_count) > 0
+    if has_image:
+        logger.info(
+            "image_trigger detected=1 "
+            f"current={current_img_count} reply={reply_img_count} prompt_len={len(prompt)}"
+        )
+
+    if not prompt and not has_image:
         await chat_agent.finish("叫我有什么事？" if is_group else "你想聊什么呀？")
         return
 
