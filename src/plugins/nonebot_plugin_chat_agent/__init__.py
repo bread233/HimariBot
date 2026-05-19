@@ -355,6 +355,25 @@ def _build_identity_request_context(config) -> str:
     )
 
 
+def _build_identity_direct_reply(config) -> str:
+    default_reply = (
+        "\u6211\u662f\u4e0a\u539f\u7eef\u739b\u4e3d\uff0c\u53ef\u4ee5\u966a\u4f60\u804a\u5929\uff0c"
+        "\u4e5f\u53ef\u4ee5\u5e2e\u4f60\u67e5\u8d44\u6599\u3001\u6574\u7406\u4fe1\u606f\u3001\u5904\u7406\u4e00\u4e9b\u7fa4\u91cc\u7684\u5c0f\u4efb\u52a1\u3002"
+    )
+    try:
+        persona = get_persona_profile(config) or {}
+        identity_contract = persona.get("identity_contract") or {}
+        raw = str(identity_contract.get("self_intro_template") or "").strip()
+        if not raw:
+            return default_reply
+        text = raw.replace("HimariBot", "").replace("\u80a5\u739b\u4e3d", "").replace("\u4e5f\u53eb", "").strip()
+        if "\u4e0a\u539f\u7eef\u739b\u4e3d" not in text:
+            return default_reply
+        return text
+    except Exception:
+        return default_reply
+
+
 def _should_sanitize_task_reply(prompt: str, context_pack: dict) -> bool:
     text = (prompt or "").strip()
     if any(token in text for token in ["你是谁", "自我介绍", "可爱语气", "安慰", "陪聊", "角色扮演"]):
@@ -483,6 +502,12 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 await save_memory(config, session_info, feedback)
             except Exception:
                 pass
+
+        if _is_identity_request_prompt(prompt, config):
+            identity_reply = _build_identity_direct_reply(config)
+            logger.info("identity_direct_reply matched=1 source=persona_contract")
+            await chat_agent.finish(_with_group_at(event, is_group, identity_reply))
+            return
 
         decision_policy = load_decision_policy(getattr(config, "chat_agent_decision_policy_path", None))
         coarse_enabled = bool(getattr(config, "chat_agent_coarse_decision_enable", False)) and bool(
