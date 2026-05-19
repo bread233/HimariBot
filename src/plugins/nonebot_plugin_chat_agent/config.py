@@ -100,6 +100,14 @@ class ChatAgentConfig(BaseModel):
     chat_agent_coarse_decision_chat_gate_enable: bool = Field(default=False)
     chat_agent_coarse_decision_chat_gate_min_confidence: float = Field(default=0.90)
     chat_agent_debug_dump_llm_payload: bool = Field(default=False)
+    chat_agent_vision_enable: bool = Field(default=False)
+    chat_agent_vision_provider: str = Field(default="ollama_native")
+    chat_agent_vision_base_url: str = Field(default="http://192.168.0.112:11434")
+    chat_agent_vision_model: str = Field(default="minicpm-v")
+    chat_agent_vision_timeout: int = Field(default=120)
+    chat_agent_vision_max_tokens: int = Field(default=160)
+    chat_agent_vision_keep_alive: str = Field(default="30m")
+    chat_agent_vision_max_images: int = Field(default=3)
 
     def ensure_data_dir(self) -> Path:
         self.chat_agent_data_dir.mkdir(parents=True, exist_ok=True)
@@ -318,6 +326,31 @@ def get_chat_agent_config() -> ChatAgentConfig:
         chat_agent_debug_dump_llm_payload=_as_bool(
             _cfg("chat_agent_debug_dump_llm_payload", "CHAT_AGENT_DEBUG_DUMP_LLM_PAYLOAD", False),
             False,
+        ),
+        chat_agent_vision_enable=_as_bool(
+            _cfg("chat_agent_vision_enable", "CHAT_AGENT_VISION_ENABLE", False),
+            False,
+        ),
+        chat_agent_vision_provider=str(
+            _cfg("chat_agent_vision_provider", "CHAT_AGENT_VISION_PROVIDER", "ollama_native")
+        ),
+        chat_agent_vision_base_url=str(
+            _cfg("chat_agent_vision_base_url", "CHAT_AGENT_VISION_BASE_URL", "http://192.168.0.112:11434")
+        ),
+        chat_agent_vision_model=str(
+            _cfg("chat_agent_vision_model", "CHAT_AGENT_VISION_MODEL", "minicpm-v")
+        ),
+        chat_agent_vision_timeout=int(
+            _cfg("chat_agent_vision_timeout", "CHAT_AGENT_VISION_TIMEOUT", 120)
+        ),
+        chat_agent_vision_max_tokens=int(
+            _cfg("chat_agent_vision_max_tokens", "CHAT_AGENT_VISION_MAX_TOKENS", 160)
+        ),
+        chat_agent_vision_keep_alive=str(
+            _cfg("chat_agent_vision_keep_alive", "CHAT_AGENT_VISION_KEEP_ALIVE", "30m")
+        ),
+        chat_agent_vision_max_images=int(
+            _cfg("chat_agent_vision_max_images", "CHAT_AGENT_VISION_MAX_IMAGES", 3)
         ),
     )
     _cached_config.ensure_data_dir()
