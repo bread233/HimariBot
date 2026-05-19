@@ -44,6 +44,7 @@ from .decision.classifier import (
 )
 from .decision.ollama_native import coarse_chat_ollama_native
 from .decision.policy import load_decision_policy, should_skip_classifier_observe_as_casual, should_block_chat_gate_by_agent_guard
+from .vision import collect_event_images, extract_with_ollama_vision
 
 
 async def chat_agent_rule(bot: Bot, event: MessageEvent, state: T_State) -> bool:
@@ -459,6 +460,25 @@ def _has_plain_chat_leak(text: str) -> bool:
     return any(x in t for x in leaks)
 
 
+def _detect_image_action(prompt: str) -> str:
+    q = str(prompt or "").strip()
+    keys = [
+        "\u627e\u539f\u56fe",
+        "\u627e\u51fa\u5904",
+        "\u641c\u76f8\u4f3c\u56fe",
+        "\u76f8\u4f3c",
+        "\u89d2\u8272\u662f\u8c01",
+        "\u8fd9\u662f\u8c01",
+        "\u4ec0\u4e48\u756a",
+        "\u54ea\u4e2a\u756a",
+        "\u54ea\u91cc\u4e70",
+        "\u5546\u54c1\u94fe\u63a5",
+        "\u8868\u60c5\u5305\u6765\u6e90",
+        "\u9ad8\u6e05\u56fe",
+    ]
+    return "image.search" if any(k in q for k in keys) else "image.describe"
+
+
 
 
 @driver.on_startup
@@ -704,6 +724,21 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             f"actual_skill={context_pack.get('decision_skill_name','') or context_pack.get('internal_skill_name','')} "
             f"actual_action={context_pack.get('internal_skill_action','')} gate={1 if gate_applied else 0}"
         )
+        image_context_block = ""
+        image_collect_result = {"image_count": 0, "images": [], "warnings": []}
+        try:
+            max_images = max(1, int(getattr(config, "chat_agent_vision_max_images", 3) or 3))
+            image_collect_result = await collect_event_images(event, max_images=max_images)
+            if int(image_collect_result.get("image_count", 0) or 0) > 0:
+                current_count = sum(1 for x in (image_collect_result.get("images", []) or []) if x.get("source") == "current")
+                reply_count = sum(1 for x in (image_collect_result.get("images", []) or []) if x.get("source") == "reply")
+                if current_count:
+                    logger.info(f"image_collect detected=1 source=current image_count={current_count}")
+                if reply_count:
+                    logger.info(f"image_collect detected=1 source=reply image_count={reply_count}")
+        except Exception as e:
+            logger.warning(f"image_collect detected=0 error={type(e).__name__}:{str(e)[:120]}")
+            image_collect_result = {"image_count": 0, "images": [], "warnings": [f"collect_error:{type(e).__name__}"]}
         observe_skip_casual = (
             current_route.strip() == "web_evidence"
             and should_skip_classifier_observe_as_casual(prompt, decision_policy)
@@ -825,6 +860,59 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             logger.info(f"internal_skill_action name={action_name} success=0 error=empty_result")
             await chat_agent.finish(_with_group_at(event, is_group, "该内部能力暂时不可用。"))
             return
+        if int(image_collect_result.get("image_count", 0) or 0) > 0:
+            image_action = _detect_image_action(prompt)
+            search_not_available = image_action == "image.search"
+            if bool(getattr(config, "chat_agent_vision_enable", False)):
+                provider = str(getattr(config, "chat_agent_vision_provider", "ollama_native") or "ollama_native").strip().lower()
+                model = str(getattr(config, "chat_agent_vision_model", "minicpm-v") or "minicpm-v").strip()
+                logger.info(
+                    "vision_extract request=1 "
+                    f"provider={provider} model={model} image_count={int(image_collect_result.get('image_count',0) or 0)}"
+                )
+                result = {"success": False, "content": "", "elapsed": 0.0, "error": "provider_not_supported"}
+                if provider == "ollama_native":
+                    result = await extract_with_ollama_vision(
+                        base_url=str(getattr(config, "chat_agent_vision_base_url", "http://192.168.0.112:11434") or "http://192.168.0.112:11434"),
+                        model=model,
+                        images_base64=[str(x.get("base64", "") or "") for x in (image_collect_result.get("images", []) or []) if str(x.get("base64", "") or "")],
+                        timeout=float(getattr(config, "chat_agent_vision_timeout", 120) or 120),
+                        max_tokens=int(getattr(config, "chat_agent_vision_max_tokens", 160) or 160),
+                        keep_alive=str(getattr(config, "chat_agent_vision_keep_alive", "30m") or "30m"),
+                    )
+                if bool(result.get("success")):
+                    logger.info(
+                        "vision_extract success=1 "
+                        f"elapsed={result.get('elapsed',0)} content_len={len(str(result.get('content','') or ''))}"
+                    )
+                else:
+                    logger.info(f"vision_extract success=0 error={result.get('error','unknown')}")
+                srcs = sorted({str(x.get("source", "")) for x in (image_collect_result.get("images", []) or []) if x.get("source")})
+                lines = [
+                    "<system-reminder>",
+                    f"image_count: {int(image_collect_result.get('image_count',0) or 0)}",
+                    f"sources: {','.join(srcs) or 'unknown'}",
+                    f"image_action: {image_action}",
+                ]
+                if search_not_available:
+                    lines.append("search_not_available: true")
+                    lines.append("当前未接入图搜图结果，只能基于视觉识别信息回答。")
+                if str(result.get("content", "") or "").strip():
+                    lines.append("vision_result:")
+                    lines.append(str(result.get("content", "")).strip())
+                if result.get("error"):
+                    lines.append(f"error: {str(result.get('error'))[:120]}")
+                warnings = image_collect_result.get("warnings", []) or []
+                if warnings:
+                    lines.append(f"warnings: {','.join(str(x) for x in warnings)[:180]}")
+                lines.append("</system-reminder>")
+                image_context_block = "\n".join(lines)
+                logger.info(
+                    "image_context injected=1 "
+                    f"image_count={int(image_collect_result.get('image_count',0) or 0)} action={image_action}"
+                )
+            else:
+                logger.info("vision_extract skipped=1 reason=disabled")
         if context_pack.get("direct_reply"):
             reply = context_pack["direct_reply"]
             if _should_sanitize_task_reply(prompt, context_pack):
@@ -1443,6 +1531,9 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             if identity_request_context:
                 messages.append({"role": "system", "content": identity_request_context})
                 labels.append("identity_request_context")
+        if image_context_block:
+            messages.append({"role": "system", "content": image_context_block})
+            labels.append("image_context")
         messages.append({"role": "user", "content": prompt})
         labels.append("user_prompt")
         if len(labels) < len(messages):
