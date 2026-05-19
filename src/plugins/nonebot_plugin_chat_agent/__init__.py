@@ -550,11 +550,109 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             except Exception:
                 pass
 
-        if _is_identity_request_prompt(prompt, config):
-            identity_reply = _build_identity_direct_reply(config)
-            logger.info("identity_direct_reply matched=1 source=persona_contract")
-            await chat_agent.finish(_with_group_at(event, is_group, identity_reply))
-            return
+        image_context_block = ""
+        image_collect_result = {"image_count": 0, "images": [], "warnings": []}
+        if has_image:
+            logger.info(f"image_route suppress_web=1 reason=has_image prompt={prompt[:80]!r}")
+            try:
+                max_images = max(1, int(getattr(config, "chat_agent_vision_max_images", 3) or 3))
+                image_collect_result = await collect_event_images(
+                    event,
+                    max_images=max_images,
+                    resize_enable=bool(getattr(config, "chat_agent_vision_resize_enable", True)),
+                    resize_max_side=int(getattr(config, "chat_agent_vision_resize_max_side", 512) or 512),
+                    resize_quality=int(getattr(config, "chat_agent_vision_resize_quality", 80) or 80),
+                )
+            except Exception as e:
+                image_collect_result = {"image_count": 0, "images": [], "warnings": [f"collect_error:{type(e).__name__}"]}
+                logger.warning(f"image_collect detected=0 error={type(e).__name__}:{str(e)[:120]}")
+            current_count = sum(1 for x in (image_collect_result.get("images", []) or []) if x.get("source") == "current")
+            reply_count = sum(1 for x in (image_collect_result.get("images", []) or []) if x.get("source") == "reply")
+            if current_count:
+                logger.info(f"image_collect detected=1 source=current image_count={current_count}")
+            if reply_count:
+                logger.info(f"image_collect detected=1 source=reply image_count={reply_count}")
+
+            image_action = _detect_image_action(prompt)
+            search_not_available = image_action == "image.search"
+            if not bool(getattr(config, "chat_agent_vision_enable", False)):
+                logger.info("vision_extract skipped=1 reason=disabled")
+                await chat_agent.finish(_with_group_at(event, is_group, "图片识别未开启，我这次没读出来。"))
+                return
+            provider = str(getattr(config, "chat_agent_vision_provider", "ollama_native") or "ollama_native").strip().lower()
+            model = str(getattr(config, "chat_agent_vision_model", "minicpm-v") or "minicpm-v").strip()
+            vision_base_url = str(getattr(config, "chat_agent_vision_base_url", "http://192.168.0.112:11434") or "http://192.168.0.112:11434")
+            logger.info(
+                "vision_extract request=1 "
+                f"provider={provider} base_url={vision_base_url} model={model} image_count={int(image_collect_result.get('image_count',0) or 0)}"
+            )
+            vision_result = {"success": False, "content": "", "elapsed": 0.0, "error": "provider_not_supported"}
+            if provider == "ollama_native":
+                vision_result = await extract_with_ollama_vision(
+                    base_url=vision_base_url,
+                    model=model,
+                    images_base64=[str(x.get("base64", "") or "") for x in (image_collect_result.get("images", []) or []) if str(x.get("base64", "") or "")],
+                    timeout=float(getattr(config, "chat_agent_vision_timeout", 120) or 120),
+                    max_tokens=int(getattr(config, "chat_agent_vision_max_tokens", 160) or 160),
+                    keep_alive=str(getattr(config, "chat_agent_vision_keep_alive", "30m") or "30m"),
+                )
+            if not bool(vision_result.get("success")):
+                logger.info(f"vision_extract success=0 error={vision_result.get('error','unknown')}")
+                logger.info("image_route direct_fail_reply=1 reason=vision_extract_failed")
+                await chat_agent.finish(_with_group_at(event, is_group, "图片识别超时了，我这次没读出来。"))
+                return
+            logger.info(
+                "vision_extract success=1 "
+                f"elapsed={vision_result.get('elapsed',0)} content_len={len(str(vision_result.get('content','') or ''))}"
+            )
+            srcs = sorted({str(x.get("source", "")) for x in (image_collect_result.get("images", []) or []) if x.get("source")})
+            lines = [
+                "<system-reminder>",
+                f"image_count: {int(image_collect_result.get('image_count',0) or 0)}",
+                f"sources: {','.join(srcs) or 'unknown'}",
+                f"image_action: {image_action}",
+            ]
+            if search_not_available:
+                lines.append("search_not_available: true")
+                lines.append("当前未接入图搜图结果，只能基于视觉识别信息回答。")
+            lines.append("vision_result:")
+            lines.append(str(vision_result.get("content", "")).strip())
+            warnings = image_collect_result.get("warnings", []) or []
+            if warnings:
+                lines.append(f"warnings: {','.join(str(x) for x in warnings)[:180]}")
+            lines.append("</system-reminder>")
+            image_context_block = "\n".join(lines)
+            logger.info(
+                "image_context injected=1 "
+                f"image_count={int(image_collect_result.get('image_count',0) or 0)} action={image_action}"
+            )
+            context_pack = {
+                "decision_route": "image_context",
+                "decision_source": "vision",
+                "decision_skill_name": "",
+                "internal_skill_action": "",
+                "internal_skill_name": "",
+                "internal_skill_route": "",
+                "tool_notes": ["image_route suppress_web=1 reason=has_image"],
+                "bot_persona_context": _build_casual_persona_context(config),
+                "profile_context": "",
+                "style_context": "",
+                "web_context": "",
+                "web_evidence_context": "",
+                "local_knowledge_context": "",
+                "direct_reply": "",
+                "lightweight_mode": "",
+                "decision_classifier_observe_enabled": False,
+                "decision_classifier_catalog": "",
+                "decision_classifier_entries": [],
+                "decision_classifier_prompt": "",
+            }
+        else:
+            if _is_identity_request_prompt(prompt, config):
+                identity_reply = _build_identity_direct_reply(config)
+                logger.info("identity_direct_reply matched=1 source=persona_contract")
+                await chat_agent.finish(_with_group_at(event, is_group, identity_reply))
+                return
 
         decision_policy = load_decision_policy(getattr(config, "chat_agent_decision_policy_path", None))
         coarse_enabled = bool(getattr(config, "chat_agent_coarse_decision_enable", False)) and bool(
@@ -566,7 +664,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
         pre_coarse_confidence = 0.0
         pre_coarse_reason = ""
         gate_applied = False
-        if coarse_enabled:
+        if coarse_enabled and not has_image:
             try:
                 coarse_t0 = time.perf_counter()
                 coarse_messages = build_coarse_decision_messages(prompt)
@@ -638,8 +736,8 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 )
 
         agent_guard_blocked, agent_guard_hit = should_block_chat_gate_by_agent_guard(prompt, decision_policy)
-        what2eat_action = _detect_what2eat_action(prompt)
-        if what2eat_action:
+        what2eat_action = _detect_what2eat_action(prompt) if not has_image else None
+        if what2eat_action and not has_image:
             logger.info(f"internal_skill_action name={what2eat_action} route=direct_message selected=1")
             context_pack = {
                 "decision_route": "direct_action",
@@ -727,7 +825,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
                 "coarse_preroute_confidence": float(pre_coarse_confidence),
                 "coarse_preroute_reason": str(pre_coarse_reason or ""),
             }
-        else:
+        elif not has_image:
             if coarse_enabled and chat_gate_enable and pre_coarse_route == "chat":
                 if pre_coarse_confidence < chat_gate_min_conf:
                     logger.info(
@@ -752,27 +850,28 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             f"actual_skill={context_pack.get('decision_skill_name','') or context_pack.get('internal_skill_name','')} "
             f"actual_action={context_pack.get('internal_skill_action','')} gate={1 if gate_applied else 0}"
         )
-        image_context_block = ""
-        image_collect_result = {"image_count": 0, "images": [], "warnings": []}
-        try:
-            max_images = max(1, int(getattr(config, "chat_agent_vision_max_images", 3) or 3))
-            image_collect_result = await collect_event_images(
-                event,
-                max_images=max_images,
-                resize_enable=bool(getattr(config, "chat_agent_vision_resize_enable", True)),
-                resize_max_side=int(getattr(config, "chat_agent_vision_resize_max_side", 512) or 512),
-                resize_quality=int(getattr(config, "chat_agent_vision_resize_quality", 80) or 80),
-            )
-            if int(image_collect_result.get("image_count", 0) or 0) > 0:
-                current_count = sum(1 for x in (image_collect_result.get("images", []) or []) if x.get("source") == "current")
-                reply_count = sum(1 for x in (image_collect_result.get("images", []) or []) if x.get("source") == "reply")
-                if current_count:
-                    logger.info(f"image_collect detected=1 source=current image_count={current_count}")
-                if reply_count:
-                    logger.info(f"image_collect detected=1 source=reply image_count={reply_count}")
-        except Exception as e:
-            logger.warning(f"image_collect detected=0 error={type(e).__name__}:{str(e)[:120]}")
-            image_collect_result = {"image_count": 0, "images": [], "warnings": [f"collect_error:{type(e).__name__}"]}
+        if not has_image:
+            image_context_block = ""
+            image_collect_result = {"image_count": 0, "images": [], "warnings": []}
+            try:
+                max_images = max(1, int(getattr(config, "chat_agent_vision_max_images", 3) or 3))
+                image_collect_result = await collect_event_images(
+                    event,
+                    max_images=max_images,
+                    resize_enable=bool(getattr(config, "chat_agent_vision_resize_enable", True)),
+                    resize_max_side=int(getattr(config, "chat_agent_vision_resize_max_side", 512) or 512),
+                    resize_quality=int(getattr(config, "chat_agent_vision_resize_quality", 80) or 80),
+                )
+                if int(image_collect_result.get("image_count", 0) or 0) > 0:
+                    current_count = sum(1 for x in (image_collect_result.get("images", []) or []) if x.get("source") == "current")
+                    reply_count = sum(1 for x in (image_collect_result.get("images", []) or []) if x.get("source") == "reply")
+                    if current_count:
+                        logger.info(f"image_collect detected=1 source=current image_count={current_count}")
+                    if reply_count:
+                        logger.info(f"image_collect detected=1 source=reply image_count={reply_count}")
+            except Exception as e:
+                logger.warning(f"image_collect detected=0 error={type(e).__name__}:{str(e)[:120]}")
+                image_collect_result = {"image_count": 0, "images": [], "warnings": [f"collect_error:{type(e).__name__}"]}
         if has_image:
             logger.info(f"image_route suppress_web=1 reason=has_image prompt={prompt[:80]!r}")
             if str(context_pack.get("decision_route", "") or "").strip() != "direct_action":
@@ -904,7 +1003,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
             logger.info(f"internal_skill_action name={action_name} success=0 error=empty_result")
             await chat_agent.finish(_with_group_at(event, is_group, "该内部能力暂时不可用。"))
             return
-        if int(image_collect_result.get("image_count", 0) or 0) > 0:
+        if (not has_image) and int(image_collect_result.get("image_count", 0) or 0) > 0:
             image_action = _detect_image_action(prompt)
             search_not_available = image_action == "image.search"
             if bool(getattr(config, "chat_agent_vision_enable", False)):
