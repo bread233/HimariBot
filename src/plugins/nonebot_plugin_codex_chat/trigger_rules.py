@@ -1,6 +1,8 @@
 import re
 from typing import Tuple
 
+from . import interest_skill
+
 def is_group_allowed(group_id: int, allowed_groups: list[int]) -> bool:
     """群白名单判断"""
     return group_id in allowed_groups
@@ -53,6 +55,22 @@ def score_interest_text(text: str, config=None) -> int:
     if _regex_hit(zero_pattern, lower):
         return 0
 
+    skill_path = _pattern(config, "codex_chat_interest_skill_path", "")
+    reload_seconds = getattr(config, "codex_chat_interest_skill_reload_seconds", 10) if config is not None else 10
+    try:
+        interest_skill._reload_seconds = max(0, int(reload_seconds or 0))
+    except Exception:
+        interest_skill._reload_seconds = 10
+    skill = interest_skill.load_interest_skill(skill_path)
+    patterns = (skill or {}).get("patterns") or {}
+    weights = (skill or {}).get("weights") or {}
+
+    if _regex_hit(str(patterns.get("zero") or ""), lower):
+        return 0
+    if _regex_hit(str(patterns.get("low_value") or ""), lower):
+        return 0
+    service_request_hit = _regex_hit(str(patterns.get("service_request") or ""), lower)
+
     rules = [
         (_pattern(config, "codex_chat_active_interest_pattern",
                   r"怎么回事|发生什么|有新瓜|什么瓜|真的假的|笑死|乐子|抽象|绷不住|离谱|太怪了|逆天"), 5),
@@ -78,6 +96,16 @@ def score_interest_text(text: str, config=None) -> int:
     for pattern, weight in rules:
         if _regex_hit(pattern, lower):
             score += weight
+            matched = True
+
+    for sec, pattern in patterns.items():
+        if not pattern or sec in {"zero", "low_value", "service_request"}:
+            continue
+        if _regex_hit(pattern, lower):
+            try:
+                score += int(weights.get(sec, 0) or 0)
+            except Exception:
+                score += 0
             matched = True
 
     if not matched:

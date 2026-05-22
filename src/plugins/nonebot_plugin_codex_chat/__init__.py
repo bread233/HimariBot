@@ -1,14 +1,17 @@
 from pathlib import Path
-from nonebot import logger, on_message
+from nonebot import get_driver, logger, on_command, on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent
-from nonebot.params import EventMessage
+from nonebot.params import CommandArg, EventMessage
 from nonebot.typing import T_State
 import asyncio
+import secrets
+import time
 
 from .config import get_config
-from .trigger_rules import should_trigger
+from .trigger_rules import should_trigger, score_interest_text
 from .codex_provider import ask_codex
 from .cooldown import UserCooldown
+from .interest_skill import load_interest_skill
 
 __plugin_meta__ = {
     "name": "codex_chat",
@@ -21,6 +24,8 @@ _codex_lock = asyncio.Lock()
 _proactive_interval = UserCooldown(plugin_config.codex_chat_proactive_min_interval_seconds)
 
 codex_chat = on_message(priority=plugin_config.codex_chat_command_priority, block=False)
+driver = get_driver()
+_superusers = {str(x) for x in (getattr(driver.config, "superusers", set()) or set())}
 logger.info(
     "codex_chat config_loaded=1 "
     f"enable={1 if plugin_config.codex_chat_enable else 0} "
@@ -28,6 +33,38 @@ logger.info(
     f"allowed_groups={plugin_config.allowed_groups_list} "
     f"threshold={plugin_config.codex_chat_interest_threshold}"
 )
+
+_INTEREST_ALLOWED_SECTIONS = {
+    "active",
+    "technical",
+    "technical_error",
+    "culture",
+    "news",
+    "activity",
+    "question",
+    "sharp",
+    "life",
+    "low_value",
+    "zero",
+    "service_request",
+}
+
+_INTEREST_SECTION_DEFAULT_WEIGHT = {
+    "active": 5,
+    "technical": 6,
+    "technical_error": 2,
+    "culture": 6,
+    "news": 3,
+    "activity": 8,
+    "question": 2,
+    "sharp": 3,
+    "life": 5,
+    "low_value": 0,
+    "zero": 0,
+    "service_request": 0,
+}
+
+_interest_pending: dict[str, dict] = {}
 
 _DEFAULT_PERSONA = "你是上原绯玛丽。请用适合发到 QQ 群里的简短中文回答。"
 
@@ -77,6 +114,173 @@ def _is_reply_to_bot(event: GroupMessageEvent, bot: Bot) -> bool:
         return int(user_id) == int(getattr(bot, "self_id", 0) or 0)
     except Exception:
         return False
+
+def _is_superuser(event: MessageEvent) -> bool:
+    try:
+        uid = str(getattr(event, "user_id", "") or "")
+    except Exception:
+        uid = ""
+    return bool(uid) and uid in _superusers
+
+def _interest_skill_path() -> str:
+    return str(getattr(plugin_config, "codex_chat_interest_skill_path", "") or "").strip()
+
+def _load_interest_terms() -> dict:
+    path = _interest_skill_path()
+    data = load_interest_skill(path, force=False)
+    return dict((data or {}).get("terms") or {})
+
+def _update_interest_rules_file(path: str, section: str, terms: list[str]) -> tuple[bool, str]:
+    p = str(path or "").strip()
+    if not p or p != _interest_skill_path():
+        return False, "path_not_allowed"
+    sec = str(section or "").strip().lower()
+    if sec not in _INTEREST_ALLOWED_SECTIONS:
+        return False, "invalid_section"
+    cleaned_terms = []
+    seen = set()
+    for t in terms or []:
+        s = str(t or "").strip()
+        if not s:
+            continue
+        k = s.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        cleaned_terms.append(s)
+    if not cleaned_terms:
+        return False, "empty_terms"
+
+    fp = Path(p)
+    fp.parent.mkdir(parents=True, exist_ok=True)
+    if fp.exists():
+        try:
+            lines = fp.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            lines = []
+    else:
+        lines = ["# Codex Chat Interest Rules", ""]
+
+    header = f"## {sec} +{int(_INTEREST_SECTION_DEFAULT_WEIGHT.get(sec, 0) or 0)}"
+    start = None
+    for i, line in enumerate(lines):
+        if line.strip().lower().startswith("## "):
+            if line.strip().lower().startswith(f"## {sec}"):
+                start = i
+                break
+    if start is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append(header)
+        for term in cleaned_terms:
+            lines.append(f"- {term}")
+        lines.append("")
+        try:
+            fp.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        except Exception:
+            return False, "write_failed"
+        return True, "ok"
+
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        if lines[j].strip().startswith("## "):
+            end = j
+            break
+
+    existing = set()
+    for k in range(start + 1, end):
+        raw = lines[k].strip()
+        if raw.startswith("- "):
+            existing.add(raw[2:].strip().lower())
+    insert_terms = [t for t in cleaned_terms if t.lower() not in existing]
+    if not insert_terms:
+        return True, "no_change"
+
+    insert_at = end
+    while insert_at > start + 1 and lines[insert_at - 1].strip() == "":
+        insert_at -= 1
+    for offset, term in enumerate(insert_terms):
+        lines.insert(insert_at + offset, f"- {term}")
+    if insert_at + len(insert_terms) < len(lines) and lines[insert_at + len(insert_terms)].strip() != "":
+        lines.insert(insert_at + len(insert_terms), "")
+    try:
+        fp.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    except Exception:
+        return False, "write_failed"
+    return True, "ok"
+
+
+codex_interest = on_command("codex_interest", priority=1, block=True)
+
+
+@codex_interest.handle()
+async def _(bot: Bot, event: MessageEvent, arg=CommandArg()):
+    text = str(arg.extract_plain_text() or "").strip()
+    if not text:
+        await codex_interest.finish("用法：/codex_interest add|confirm|reload|test|show ...")
+    parts = [p for p in text.split() if p.strip()]
+    action = parts[0].lower()
+    if action in {"add", "confirm", "reload"} and not _is_superuser(event):
+        await codex_interest.finish("权限不足：仅 SUPERUSERS 可用。")
+
+    if action == "add":
+        if len(parts) < 3:
+            await codex_interest.finish("用法：/codex_interest add <section> <词1> <词2> ...")
+        section = parts[1].lower()
+        if section not in _INTEREST_ALLOWED_SECTIONS:
+            await codex_interest.finish("section 无效。")
+        terms = parts[2:]
+        token = secrets.token_hex(4)
+        _interest_pending[token] = {
+            "section": section,
+            "terms": terms,
+            "user_id": str(getattr(event, "user_id", "") or ""),
+            "group_id": str(getattr(event, "group_id", "") or ""),
+            "created_at": int(time.time()),
+        }
+        await codex_interest.finish(f"已生成确认 token={token}，请执行：/codex_interest confirm {token}")
+
+    if action == "confirm":
+        if len(parts) != 2:
+            await codex_interest.finish("用法：/codex_interest confirm <token>")
+        token = parts[1].strip()
+        payload = _interest_pending.get(token)
+        if not payload:
+            await codex_interest.finish("token 不存在或已过期。")
+        ok, reason = _update_interest_rules_file(
+            _interest_skill_path(),
+            payload.get("section", ""),
+            payload.get("terms", []),
+        )
+        _interest_pending.pop(token, None)
+        if not ok:
+            await codex_interest.finish(f"写入失败：{reason}")
+        load_interest_skill(_interest_skill_path(), force=True)
+        await codex_interest.finish("已写入并 reload。")
+
+    if action == "reload":
+        load_interest_skill(_interest_skill_path(), force=True)
+        await codex_interest.finish("已 reload。")
+
+    if action == "test":
+        if len(parts) < 2:
+            await codex_interest.finish("用法：/codex_interest test <文本>")
+        sample = " ".join(parts[1:]).strip()
+        score = score_interest_text(sample, config=plugin_config)
+        thr = int(getattr(plugin_config, "codex_chat_interest_threshold", 8) or 8)
+        trigger = score >= thr
+        await codex_interest.finish(f"文本：{sample}\nscore={score} threshold={thr} trigger={str(bool(trigger)).lower()}")
+
+    if action == "show":
+        if len(parts) != 2:
+            await codex_interest.finish("用法：/codex_interest show <section>")
+        section = parts[1].lower()
+        if section not in _INTEREST_ALLOWED_SECTIONS:
+            await codex_interest.finish("section 无效。")
+        terms = _load_interest_terms().get(section, [])
+        await codex_interest.finish(f"{section}：{', '.join(terms) if terms else '(empty)'}")
+
+    await codex_interest.finish("未知子命令。")
 
 @codex_chat.handle()
 async def _(bot: Bot, event: MessageEvent, state: T_State, msg=EventMessage()):
