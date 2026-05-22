@@ -56,6 +56,7 @@ WORKDIR /app
 # 运行依赖（git + Playwright + 字体 + 图形库）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
+    docker.io \
     locales \
     locales-all \
     fontconfig \
