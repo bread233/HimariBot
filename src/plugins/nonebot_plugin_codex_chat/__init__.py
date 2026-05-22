@@ -3,6 +3,7 @@ from nonebot import logger, on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent
 from nonebot.params import EventMessage
 from nonebot.typing import T_State
+import asyncio
 
 from .config import get_config
 from .trigger_rules import should_trigger
@@ -16,7 +17,8 @@ __plugin_meta__ = {
 }
 
 plugin_config = get_config()
-_cooldown = UserCooldown(plugin_config.codex_chat_cd_seconds)
+_codex_lock = asyncio.Lock()
+_proactive_interval = UserCooldown(plugin_config.codex_chat_proactive_min_interval_seconds)
 
 codex_chat = on_message(priority=plugin_config.codex_chat_command_priority, block=False)
 logger.info(
@@ -104,22 +106,36 @@ async def _(bot: Bot, event: MessageEvent, state: T_State, msg=EventMessage()):
         if not trigger:
             logger.info(f"codex_chat skip_trigger mode={mode} group_id={group_id} score={score} prompt_len={prompt_len}")
             return
+        mode = "proactive"
 
-    remain = _cooldown.remaining(user_id)
-    if remain > 0:
-        logger.info(f"codex_chat cooldown_block mode={mode} user_id={user_id} group_id={group_id} remain={remain}")
-        await codex_chat.finish("先等一下，过会儿再叫我。")
+    if mode in {"at", "reply"}:
+        if _codex_lock.locked():
+            logger.info(f"codex_chat busy_skip=1 mode={mode} group_id={group_id} user_id={user_id} prompt_len={prompt_len}")
+            await codex_chat.finish("我还在思考上一条，稍后再 @ 我～")
+    else:
+        remain = _proactive_interval.remaining(group_id)
+        if remain > 0:
+            logger.info(
+                f"codex_chat proactive_skip=1 reason=min_interval group_id={group_id} user_id={user_id} "
+                f"remain={remain} score={score} prompt_len={prompt_len}"
+            )
+            return
+        if _codex_lock.locked():
+            logger.info(
+                f"codex_chat proactive_skip=1 reason=busy group_id={group_id} user_id={user_id} score={score} prompt_len={prompt_len}"
+            )
+            return
+        _proactive_interval.hit(group_id)
 
     if not prompt:
-        _cooldown.hit(user_id)
         logger.info(f"codex_chat empty_prompt mode={mode} group_id={group_id} prompt_len={prompt_len}")
         await codex_chat.finish("我在，想问什么？")
 
     logger.info(f"codex_chat trigger=1 mode={mode} group_id={group_id} score={score} prompt_len={prompt_len}")
     persona = _load_persona(plugin_config.codex_chat_persona_path)
     final_prompt = _build_prompt(persona, prompt)
-    result = await ask_codex(plugin_config, final_prompt)
-    _cooldown.hit(user_id)
+    async with _codex_lock:
+        result = await ask_codex(plugin_config, final_prompt)
 
     if result.ok and result.text:
         await codex_chat.finish(result.text)

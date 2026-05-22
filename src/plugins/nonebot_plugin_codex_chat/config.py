@@ -25,6 +25,7 @@ class ConfigModel(BaseModel):
     codex_chat_interest_threshold: int = Field(default=8)
     # Proactive 自动模式开关
     codex_chat_proactive_enabled: bool = Field(default=True)
+    codex_chat_proactive_min_interval_seconds: int = Field(default=60)
 
     class Config:
         extra = "ignore"
