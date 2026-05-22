@@ -45,7 +45,7 @@ def should_trigger(group_id: int, text: str, config) -> Tuple[bool, int]:
     if not config.codex_chat_proactive_enabled:
         return False, 0
 
-    if not is_group_allowed(group_id, config.codex_chat_allowed_groups):
+    if not is_group_allowed(group_id, config.allowed_groups_list):
         return False, 0
 
     score = score_interest_text(text)
