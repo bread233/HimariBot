@@ -13,26 +13,32 @@ class CodexResult:
 async def ask_codex(config, prompt: str) -> CodexResult:
     logger.info(f"codex_chat request=1 model={config.codex_chat_model} timeout={config.codex_chat_timeout}")
     started = time.perf_counter()
-    process = await asyncio.create_subprocess_exec(
-        "docker",
-        "exec",
-        "-i",
-        config.codex_chat_docker_container,
-        "codex",
-        "exec",
-        "-m",
-        config.codex_chat_model,
-        "--ask-for-approval",
-        "never",
-        "--sandbox",
-        "read-only",
-        "-C",
-        config.codex_chat_workdir,
-        "-",
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "docker",
+            "exec",
+            "-i",
+            config.codex_chat_docker_container,
+            "codex",
+            "exec",
+            "-m",
+            config.codex_chat_model,
+            "-s",
+            "read-only",
+            "-C",
+            config.codex_chat_workdir,
+            "--skip-git-repo-check",
+            "-",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        logger.warning("codex_chat success=0 error_type=docker_not_found")
+        return CodexResult(ok=False, text="", reason="docker_not_found")
+    except Exception:
+        logger.exception("codex_chat success=0 error_type=process_start_error")
+        return CodexResult(ok=False, text="", reason="process_start_error")
     try:
         stdout, stderr = await asyncio.wait_for(
             process.communicate(input=prompt.encode("utf-8")),
