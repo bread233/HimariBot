@@ -65,6 +65,10 @@ class ConfigModel(BaseModel):
     # Proactive 自动模式开关
     codex_chat_proactive_enabled: bool = Field(default=True)
     codex_chat_proactive_min_interval_seconds: int = Field(default=60)
+    codex_chat_interest_skill_path: str = Field(
+        default="data/nonebot_chat_agent/codex_chat/interest_rules.md",
+    )
+    codex_chat_interest_skill_reload_seconds: int = Field(default=10)
 
     class Config:
         extra = "ignore"
