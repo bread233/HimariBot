@@ -1,6 +1,6 @@
 from pathlib import Path
 from nonebot import get_driver, logger, on_command, on_message
-from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg, EventMessage
 from nonebot.typing import T_State
 import asyncio
@@ -84,6 +84,17 @@ def _build_prompt(persona: str, user_prompt: str) -> str:
         p = _DEFAULT_PERSONA
     u = str(user_prompt or "").strip()
     return f"{p}\n\n用户消息：{u}\n请直接给出适合发到 QQ 群里的简短回答。"
+
+def _as_reply(event: GroupMessageEvent, text: str) -> Message:
+    return Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(str(text or "")),
+    ])
+
+def _reply_if_direct(event: GroupMessageEvent, mode: str, text: str):
+    if mode in {"at", "reply"}:
+        return _as_reply(event, text)
+    return text
 
 def _extract_prompt(event: GroupMessageEvent) -> str:
     text = event.get_plaintext().strip()
@@ -315,7 +326,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State, msg=EventMessage()):
     if mode in {"at", "reply"}:
         if _codex_lock.locked():
             logger.info(f"codex_chat busy_skip=1 mode={mode} group_id={group_id} user_id={user_id} prompt_len={prompt_len}")
-            await codex_chat.finish("我还在思考上一条，稍后再 @ 我～")
+            await codex_chat.finish(_reply_if_direct(event, mode, "我还在思考上一条，稍后再 @ 我～"))
     else:
         remain = _proactive_interval.remaining(group_id)
         if remain > 0:
@@ -333,7 +344,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State, msg=EventMessage()):
 
     if not prompt:
         logger.info(f"codex_chat empty_prompt mode={mode} group_id={group_id} prompt_len={prompt_len}")
-        await codex_chat.finish("我在，想问什么？")
+        await codex_chat.finish(_reply_if_direct(event, mode, "我在，想问什么？"))
 
     logger.info(f"codex_chat trigger=1 mode={mode} group_id={group_id} score={score} prompt_len={prompt_len}")
     persona = _load_persona(plugin_config.codex_chat_persona_path)
@@ -342,5 +353,5 @@ async def _(bot: Bot, event: MessageEvent, state: T_State, msg=EventMessage()):
         result = await ask_codex(plugin_config, final_prompt)
 
     if result.ok and result.text:
-        await codex_chat.finish(result.text)
-    await codex_chat.finish("我这边暂时没想出来，稍后再试。")
+        await codex_chat.finish(_reply_if_direct(event, mode, result.text))
+    await codex_chat.finish(_reply_if_direct(event, mode, "我这边暂时没想出来，稍后再试。"))
