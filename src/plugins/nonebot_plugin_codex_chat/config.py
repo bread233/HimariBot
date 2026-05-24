@@ -14,6 +14,13 @@ class ConfigModel(BaseModel):
     codex_chat_docker_container: str = Field(default="codexcli")
     codex_chat_model: str = Field(default="gpt-5.4-mini")
     codex_chat_max_prompt_chars: int = Field(default=2000)
+    codex_chat_extract_message_context: bool = True
+    codex_chat_extract_forward_context: bool = True
+    codex_chat_extract_json_context: bool = True
+    codex_chat_extract_bilibili_context: bool = True
+    codex_chat_bilibili_context_max_chars: int = 1200
+    codex_chat_forward_context_max_chars: int = 1500
+    codex_chat_json_context_max_chars: int = 1000
     codex_chat_persona_path: str = Field(
         default="data/nonebot_chat_agent/personas/himari_codex.md",
     )

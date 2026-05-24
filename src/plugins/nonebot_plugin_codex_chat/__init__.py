@@ -6,12 +6,12 @@ from nonebot.typing import T_State
 import asyncio
 import secrets
 import time
-
 from .config import get_config
 from .trigger_rules import should_trigger, score_interest_text
 from .codex_provider import ask_codex
 from .cooldown import UserCooldown
 from .interest_skill import load_interest_skill
+from .context_extractors import extract_message_context
 
 __plugin_meta__ = {
     "name": "codex_chat",
@@ -78,12 +78,37 @@ def _load_persona(path: str) -> str:
         return _DEFAULT_PERSONA
     return text if text else _DEFAULT_PERSONA
 
-def _build_prompt(persona: str, user_prompt: str) -> str:
+def _build_prompt(persona: str, user_prompt: str, context_prompt: str = "") -> str:
     p = str(persona or "").strip()
+    u = str(user_prompt or "").strip()
+    c = str(context_prompt or "").strip()
+
     if not p:
         p = _DEFAULT_PERSONA
-    u = str(user_prompt or "").strip()
-    return f"{p}\n\n用户消息：{u}\n请直接给出适合发到 QQ 群里的简短回答。"
+
+    parts = [p]
+
+    if u:
+        parts.append(f"用户消息：\n{u}")
+    else:
+        parts.append("用户消息：\n（用户没有附加文字，主要内容见群聊附加上下文）")
+
+    if c:
+        parts.append(
+            "群聊附加上下文：\n"
+            f"{c}\n\n"
+            "请只根据上面的上下文自然接话或吐槽，不要编造没有提供的信息。"
+        )
+
+    parts.append(
+        "回复要求：\n"
+        "- 直接给出适合发到 QQ 群里的简短中文回答。\n"
+        "- 如果是合并消息、搬运内容或卡片分享，可以根据内容自然吐槽。\n"
+        "- 不要解释你为什么触发。\n"
+        "- 不要编造没有提供的信息。"
+    )
+
+    return "\n\n".join(x for x in parts if x)
 
 def _as_reply(event: GroupMessageEvent, text: str) -> Message:
     return Message([
@@ -305,6 +330,13 @@ async def _(bot: Bot, event: MessageEvent, state: T_State, msg=EventMessage()):
     prompt_len = len(prompt)
     mode = "proactive"
     score = 0
+    context = await extract_message_context(bot, event, plugin_config)
+    context_text = str(context.get("text") or "").strip()
+    context_prompt = str(context.get("prompt") or "").strip()
+    context_sources = context.get("sources") or []
+    context_len = len(context_text)
+
+    score_text = "\n".join(x for x in [prompt, context_text] if x).strip()
     is_to_me = False
     try:
         is_to_me = bool(event.is_tome())
@@ -317,9 +349,13 @@ async def _(bot: Bot, event: MessageEvent, state: T_State, msg=EventMessage()):
         mode = "reply"
         trigger = True
     else:
-        trigger, score = should_trigger(group_id, prompt, plugin_config)
+        trigger, score = should_trigger(group_id, score_text, plugin_config)
         if not trigger:
-            logger.info(f"codex_chat skip_trigger mode={mode} group_id={group_id} score={score} prompt_len={prompt_len}")
+            logger.info(
+                f"codex_chat skip_trigger mode={mode} group_id={group_id} "
+                f"score={score} prompt_len={prompt_len} "
+                f"context_sources={context_sources} context_len={context_len}"
+            )
             return
         mode = "proactive"
 
@@ -342,13 +378,20 @@ async def _(bot: Bot, event: MessageEvent, state: T_State, msg=EventMessage()):
             return
         _proactive_interval.hit(group_id)
 
-    if not prompt:
-        logger.info(f"codex_chat empty_prompt mode={mode} group_id={group_id} prompt_len={prompt_len}")
+    if not prompt and not context_text:
+        logger.info(
+            f"codex_chat empty_prompt mode={mode} group_id={group_id} "
+            f"prompt_len={prompt_len} context_sources={context_sources} context_len={context_len}"
+        )
         await codex_chat.finish(_reply_if_direct(event, mode, "我在，想问什么？"))
 
-    logger.info(f"codex_chat trigger=1 mode={mode} group_id={group_id} score={score} prompt_len={prompt_len}")
+    logger.info(
+        f"codex_chat trigger=1 mode={mode} group_id={group_id} "
+        f"score={score} prompt_len={prompt_len} "
+        f"context_sources={context_sources} context_len={context_len}"
+    )
     persona = _load_persona(plugin_config.codex_chat_persona_path)
-    final_prompt = _build_prompt(persona, prompt)
+    final_prompt = _build_prompt(persona, prompt, context_prompt)
     async with _codex_lock:
         result = await ask_codex(plugin_config, final_prompt)
 
