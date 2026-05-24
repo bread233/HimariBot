@@ -114,12 +114,14 @@ def check_message(
         msg_plaintext = msg_plaintext.strip()
 
     if match.type == "regex":
-        plaintext = False
+        plaintext = match.allow_plaintext
         flag = re.IGNORECASE if match.ignore_case else 0
-        match_obj = re.search(match_template, msg_str, flag)
-        if (not match_obj) and match.allow_plaintext:
-            plaintext = True
-            match_obj = re.search(match_template, msg_plaintext, flag)
+        target = msg_plaintext if match.allow_plaintext else msg_str
+
+        if not target:
+            return False, None
+
+        match_obj = re.search(match_template, target, flag)
 
         if match_obj:
             var_dict = {}
@@ -145,53 +147,25 @@ def check_message(
     if match.ignore_case:
         # regex 匹配已经处理过了，这边不需要管
         msg_str = msg_str.lower()
+        msg_plaintext = msg_plaintext.lower()
         match_template = match_template.lower()
 
+    target = msg_plaintext if match.allow_plaintext else msg_str
+
+    if not target:
+        return False, None
+
     if match.type == "full":
-        return (
-            (
-                (msg_str == match_template)
-                or (msg_plaintext == match_template if match.allow_plaintext else False)
-            ),
-            None,
-        )
+        return target == match_template, None
 
     if match.type == "start":
-        return (
-            (
-                msg_str.startswith(match_template)
-                or (
-                    msg_plaintext.startswith(match_template)
-                    if match.allow_plaintext
-                    else False
-                )
-            ),
-            None,
-        )
+        return target.startswith(match_template), None
 
     if match.type == "end":
-        return (
-            (
-                msg_str.endswith(match_template)
-                or (
-                    msg_plaintext.endswith(match_template)
-                    if match.allow_plaintext
-                    else False
-                )
-            ),
-            None,
-        )
+        return target.endswith(match_template), None
 
     # default fuzzy
-    if (not msg_str) or (match.allow_plaintext and (not msg_plaintext)):
-        return False, None
-    return (
-        (
-            (match_template in msg_str)
-            or ((match_template in msg_plaintext) if match.allow_plaintext else False)
-        ),
-        None,
-    )
+    return match_template in target, None
 
 
 def check_poke(match: MatchModel, event: PokeNotifyEvent) -> bool:
