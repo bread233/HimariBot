@@ -153,6 +153,24 @@ async def get_msg(event: Event, text: str, search: bool = False) -> Union[List[s
 async def handle_analysis(event: Event) -> None:
     text = str(event.message).strip()
     msg = await get_msg(event, text)
+
+    try:
+        from src.plugins.nonebot_plugin_codex_chat.context_extractors import (
+            put_bilibili_context,
+            _flatten_bili_msg,
+            _unique_join,
+        )
+
+        group_id = int(getattr(event, "group_id", 0) or 0)
+        message_id = int(getattr(event, "message_id", 0) or 0)
+        lines = _flatten_bili_msg(msg)
+        context_text = _unique_join(lines, 1200)
+
+        if group_id and message_id and context_text:
+            put_bilibili_context(group_id, message_id, context_text)
+    except Exception:
+        logger.warning("analysis_bilibili codex_context_cache failed", exc_info=True)
+
     await send_msg(msg,text)
 
 
