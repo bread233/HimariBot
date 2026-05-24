@@ -19,8 +19,11 @@ except Exception:
     bili_keyword = None
 
 _BILI_PATTERN = re.compile(
-    r"(b23.tv)|(bili(22|23|33|2233).cn)|(.bilibili.com)|"
-    r"(^(av|cv)(\d+))|(^BV([a-zA-Z0-9]{10})+)|"
+    r"(b23\.tv)|"
+    r"(bili(22|23|33|2233)\.cn)|"
+    r"(bilibili\.com)|"
+    r"(?<![A-Za-z0-9])(?:av|cv)\d+(?![A-Za-z0-9])|"
+    r"(?<![A-Za-z0-9])BV[A-Za-z0-9]{10}(?![A-Za-z0-9])|"
     r"(\[\[QQ小程序\]哔哩哔哩\])|"
     r"(QQ小程序&amp;#93;哔哩哔哩)|"
     r"(QQ小程序&#93;哔哩哔哩)",
@@ -77,12 +80,17 @@ async def _extract_bilibili_context(event: GroupMessageEvent, config) -> tuple[s
     if not getattr(config, "codex_chat_extract_bilibili_context", True):
         return "", ""
 
-    raw_text = str(event.message).strip()
+    plain_text = event.get_plaintext().strip()
+    raw_text = plain_text or str(event.message).strip()
     if not raw_text:
         return "", ""
 
     if not _BILI_PATTERN.search(raw_text):
         return "", ""
+
+    logger.info(
+        f"codex_chat context_extract source=bilibili matched=1 raw_len={len(raw_text)}"
+    )
 
     if bili_keyword is None or b23_extract is None or bili_config is None:
         logger.warning("codex_chat context_extract source=bilibili unavailable=1")
@@ -104,7 +112,7 @@ async def _extract_bilibili_context(event: GroupMessageEvent, config) -> tuple[s
         async with ClientSession(trust_env=trust_env, headers=headers) as session:
             text = raw_text
 
-            if re.search(r"(b23.tv)|(bili(22|23|33|2233).cn)", text, re.I):
+            if re.search(r"(b23\.tv)|(bili(22|23|33|2233)\.cn)", text, re.I):
                 text = await b23_extract(text, session=session)
 
             msg = await bili_keyword(group_id, text, session=session)
@@ -113,13 +121,26 @@ async def _extract_bilibili_context(event: GroupMessageEvent, config) -> tuple[s
         logger.warning("codex_chat context_extract source=bilibili success=0", exc_info=True)
         return "", ""
 
-    if not msg or isinstance(msg, str):
+    if not msg:
+        logger.info("codex_chat context_extract source=bilibili empty_msg=1")
+        return "", ""
+
+    if isinstance(msg, str):
+        logger.info(
+            f"codex_chat context_extract source=bilibili msg_is_str=1 msg={msg[:120]!r}"
+        )
         return "", ""
 
     lines = _flatten_bili_msg(msg)
+    logger.info(
+        f"codex_chat context_extract source=bilibili raw_type={type(msg).__name__} "
+        f"lines_count={len(lines)}"
+    )
+
     text = _unique_join(lines, max_chars)
 
     if not text:
+        logger.info("codex_chat context_extract source=bilibili empty_text=1")
         return "", ""
 
     prompt = f"Bilibili 视频解析摘要：\n{text}"
