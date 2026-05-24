@@ -1,11 +1,11 @@
 import json
+import re
+import time
 from typing import Any
 
+from aiohttp import ClientSession
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
-
-import re
-from aiohttp import ClientSession
 
 try:
     from src.plugins.analysis_bilibili.analysis_bilibili import (
@@ -17,6 +17,8 @@ except Exception:
     bili_config = None
     b23_extract = None
     bili_keyword = None
+
+_BILI_CONTEXT_CACHE: dict[tuple[int, int], tuple[float, str]] = {}
 
 _BILI_PATTERN = re.compile(
     r"(b23\.tv)|"
@@ -43,6 +45,31 @@ _INTERESTING_JSON_KEYS = {
     "tags",
     "name",
 }
+
+def put_bilibili_context(group_id: int, message_id: int, text: str, ttl_seconds: int = 60) -> None:
+    if not text:
+        return
+    now = time.time()
+    key = (int(group_id), int(message_id))
+    _BILI_CONTEXT_CACHE[key] = (now + ttl_seconds, text)
+
+    # 顺手清理过期项
+    expired = [k for k, (expire_at, _) in _BILI_CONTEXT_CACHE.items() if expire_at < now]
+    for k in expired:
+        _BILI_CONTEXT_CACHE.pop(k, None)
+
+
+def pop_bilibili_context(group_id: int, message_id: int) -> str:
+    now = time.time()
+    key = (int(group_id), int(message_id))
+    item = _BILI_CONTEXT_CACHE.pop(key, None)
+    if not item:
+        return ""
+
+    expire_at, text = item
+    if expire_at < now:
+        return ""
+    return text
 
 def _is_image_url_or_file(text: str) -> bool:
     s = str(text or "").strip().lower()
@@ -92,11 +119,29 @@ async def _extract_bilibili_context(event: GroupMessageEvent, config) -> tuple[s
         f"codex_chat context_extract source=bilibili matched=1 raw_len={len(raw_text)}"
     )
 
+    group_id_value = getattr(event, "group_id", 0) or 0
+    message_id_value = getattr(event, "message_id", 0) or 0
+
+    try:
+        group_id_int = int(group_id_value)
+        message_id_int = int(message_id_value)
+    except Exception:
+        group_id_int = 0
+        message_id_int = 0
+
+    if group_id_int and message_id_int:
+        cached = pop_bilibili_context(group_id_int, message_id_int)
+        if cached:
+            logger.info(
+                f"codex_chat context_extract source=bilibili cache_hit=1 len={len(cached)}"
+            )
+            return cached, f"Bilibili 视频解析摘要：\n{cached}"
+
     if bili_keyword is None or b23_extract is None or bili_config is None:
         logger.warning("codex_chat context_extract source=bilibili unavailable=1")
         return "", ""
 
-    group_id = str(getattr(event, "group_id", "") or "")
+    group_id = str(group_id_value or "")
     trust_env = getattr(bili_config, "analysis_trust_env", False)
     max_chars = int(getattr(config, "codex_chat_bilibili_context_max_chars", 1200) or 1200)
 
