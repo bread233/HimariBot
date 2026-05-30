@@ -44,13 +44,16 @@ class ConfigModel(BaseModel):
     @validator("pjsk_emoji_source", pre=True)
     def check_emoji_source(cls, v):  # noqa: N805
         try:
-            getattr(EmojiSource, v)
-        except AttributeError as e:
+            source = getattr(EmojiSource, v)
+            if callable(source):
+                source()
+        except Exception as e:
             raise ValueError("Invalid emoji source") from e
         return v
 
     def get_emoji_source(self) -> EmojiSource:
-        return getattr(EmojiSource, self.pjsk_emoji_source)
+        source = getattr(EmojiSource, self.pjsk_emoji_source)
+        return source() if callable(source) else source
 
 
 config: ConfigModel = ConfigModel.parse_obj(get_driver().config.dict())
