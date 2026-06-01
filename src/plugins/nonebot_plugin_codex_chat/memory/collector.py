@@ -174,6 +174,15 @@ class MemoryCollector:
         if not cleaned_text:
             return
 
+        lower_text = cleaned_text.lower()
+        if (
+            lower_text.startswith("/codex_memory")
+            or lower_text.startswith("codex_memory")
+            or cleaned_text.startswith("/codex记忆")
+            or cleaned_text.startswith("codex记忆")
+        ):
+            return
+
         timestamp = int(getattr(event, "time", 0) or time.time())
         message_id = str(getattr(event, "message_id", "") or "")
 
@@ -320,4 +329,3 @@ def register_memory_collector() -> None:
 
     _lifecycle_registered = True
     logger.info("codex_chat_memory registered")
-    
