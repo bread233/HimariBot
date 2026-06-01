@@ -12,6 +12,7 @@ from .codex_provider import ask_codex
 from .cooldown import UserCooldown
 from .interest_skill import load_interest_skill
 from .context_extractors import extract_message_context
+from .memory import register_memory_collector
 
 __plugin_meta__ = {
     "name": "codex_chat",
@@ -22,6 +23,8 @@ __plugin_meta__ = {
 plugin_config = get_config()
 _codex_lock = asyncio.Lock()
 _proactive_interval = UserCooldown(plugin_config.codex_chat_proactive_min_interval_seconds)
+
+register_memory_collector()
 
 codex_chat = on_message(priority=plugin_config.codex_chat_command_priority, block=False)
 driver = get_driver()
