@@ -13,6 +13,7 @@ from .cooldown import UserCooldown
 from .interest_skill import load_interest_skill
 from .context_extractors import extract_message_context
 from .memory import register_memory_collector, register_memory_commands
+from .log_sanitize import sanitize_for_log
 
 __plugin_meta__ = {
     "name": "codex_chat",
@@ -31,11 +32,13 @@ codex_chat = on_message(priority=plugin_config.codex_chat_command_priority, bloc
 driver = get_driver()
 _superusers = {str(x) for x in (getattr(driver.config, "superusers", set()) or set())}
 logger.info(
-    "codex_chat config_loaded=1 "
-    f"enable={1 if plugin_config.codex_chat_enable else 0} "
-    f"proactive={1 if plugin_config.codex_chat_proactive_enabled else 0} "
-    f"allowed_groups={plugin_config.allowed_groups_list} "
-    f"threshold={plugin_config.codex_chat_interest_threshold}"
+    "codex_chat config_loaded=1 %s",
+    sanitize_for_log({
+        "enable": 1 if plugin_config.codex_chat_enable else 0,
+        "proactive": 1 if plugin_config.codex_chat_proactive_enabled else 0,
+        "allowed_groups": plugin_config.allowed_groups_list,
+        "threshold": plugin_config.codex_chat_interest_threshold,
+    })
 )
 
 _INTEREST_ALLOWED_SECTIONS = {
