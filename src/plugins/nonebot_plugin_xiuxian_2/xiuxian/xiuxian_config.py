@@ -79,9 +79,9 @@ class XiuConfig:
         # 境界列表，别动
         self.level_up_cd = 0  
         # 突破CD(分钟)
-        self.closing_exp = 100  
+        self.closing_exp = 1000
         # 闭关每分钟获取的修为
-        self.closing_exp_upper_limit = 1.5  
+        self.closing_exp_upper_limit = 10.0
         # 闭关获取修为上限（例如：1.5 下个境界的修为数*1.5）
         self.level_punishment_floor = 10  
         # 突破失败扣除修为，惩罚下限（百分比）
