@@ -8,9 +8,12 @@ from nonebot import get_driver, logger, on_command
 from nonebot.adapters.onebot.v11 import Message, MessageEvent
 from nonebot.params import CommandArg
 
+from ..config import ConfigModel
+from .episodes import generate_episode_for_memcell
 from .query import (
     get_memcell_detail,
     get_memory_status,
+    get_recent_group_episodes,
     get_recent_memcells,
     get_user_messages,
 )
@@ -70,6 +73,10 @@ def _normalize_subcommand(command: str) -> str:
         "memcell": "memcell",
         "detail": "memcell",
         "详情": "memcell",
+        "episode": "episode",
+        "抽取": "episode",
+        "episodes": "episodes",
+        "摘要": "episodes",
     }
     return mapping.get(command.strip().lower(), "")
 
@@ -149,6 +156,93 @@ def _format_user(args: list[str]) -> str:
             lines.append(f"  {text}")
 
     return "\n".join(lines)
+
+
+async def _format_episode(args: list[str]) -> str:
+    if not args:
+        return "用法：/codex_memory episode <memcell_id> [--force]"
+
+    force = False
+    memcell_str = args[0]
+
+    for arg in args[1:]:
+        if arg == "--force":
+            force = True
+
+    try:
+        memcell_id = int(memcell_str)
+    except ValueError:
+        return "用法：/codex_memory episode <memcell_id> [--force]"
+
+    plugin_config = ConfigModel.parse_obj(get_driver().config.dict())
+
+    try:
+        result = await generate_episode_for_memcell(plugin_config, memcell_id, force)
+    except Exception:
+        logger.warning(
+            f"codex_chat_memory episode_failed memcell_id={memcell_id}",
+            exc_info=True,
+        )
+        return f"Episode 生成失败\nerror=exception memcell_id={memcell_id}"
+
+    if not result.get("ok"):
+        error = result.get("error", "unknown")
+        return f"Episode 生成失败\nerror={error} memcell_id={memcell_id}"
+
+    if result.get("skipped"):
+        return (
+            f"Episode 已存在\n"
+            f"memcell_id={memcell_id}\n"
+            f"使用 --force 可重新生成"
+        )
+
+    lines = [
+        "Episode 已生成",
+        f"memcell_id={memcell_id}",
+        f"group_episode_saved={result.get('group_episode_saved', '?')}",
+        f"user_episode_saved={result.get('user_episode_saved', '?')}",
+        f"summary={_truncate(result.get('summary', ''), 200)}",
+        f"topic={_truncate(result.get('topic', ''), 200)}",
+    ]
+
+    return "\n".join(lines)
+
+
+def _format_episodes(args: list[str]) -> str:
+    group_id = None
+    limit = 5
+
+    if len(args) >= 1:
+        group_id = args[0]
+    if len(args) >= 2:
+        try:
+            limit = int(args[1])
+        except ValueError:
+            limit = 5
+
+    episodes = get_recent_group_episodes(group_id=group_id, limit=limit)
+
+    if not episodes:
+        target = f" group={group_id}" if group_id else ""
+        return f"最近 Episodes{target}\n无数据"
+
+    lines = ["最近 Episodes"]
+
+    for ep in episodes:
+        header = (
+            f"#id={ep['id']} memcell={ep.get('memcell_id', '?')} "
+            f"group={ep.get('group_id', '?')} "
+            f"importance={ep.get('importance', 0)} "
+            f"confidence={ep.get('confidence', 0.0)}"
+        )
+        topic = _truncate(ep.get("topic", ""), 200)
+        summary = _truncate(ep.get("summary", ""), 200)
+
+        lines.append(header)
+        lines.append(f"topic={topic}")
+        lines.append(f"summary={summary}")
+
+    return "\n\n".join(lines)
 
 
 def _format_memcell(args: list[str]) -> str:
@@ -237,13 +331,19 @@ async def _handle_memory_command(
             reply = _format_user(rest)
         elif subcommand == "memcell":
             reply = _format_memcell(rest)
+        elif subcommand == "episode":
+            reply = await _format_episode(rest)
+        elif subcommand == "episodes":
+            reply = _format_episodes(rest)
         else:
             reply = (
                 "用法：\n"
                 "/codex_memory status\n"
                 "/codex_memory recent [group_id] [limit]\n"
                 "/codex_memory user <group_id> <user_id> [limit]\n"
-                "/codex_memory memcell <memcell_id>"
+                "/codex_memory memcell <memcell_id>\n"
+                "/codex_memory episode <memcell_id> [--force]\n"
+                "/codex_memory episodes [group_id] [limit]"
             )
     except Exception:
         logger.warning("codex_chat_memory command_failed", exc_info=True)
@@ -260,4 +360,4 @@ def register_memory_commands() -> None:
 
     _memory_command_registered = True
     logger.info("codex_chat_memory commands_registered")
-    
+

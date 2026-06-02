@@ -71,6 +71,127 @@ def get_memory_status() -> dict[str, Any]:
         "latest_created_at": latest["created_at"] if latest else None,
     }
 
+def get_recent_group_episodes(
+    group_id: str | None = None,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    if not _db_exists():
+        return []
+
+    limit = _clamp_limit(limit, default=5)
+
+    with _open_readonly_conn() as conn:
+        if group_id:
+            rows = conn.execute(
+                """
+                SELECT id, memcell_id, group_id, summary, topic,
+                       keywords_json, importance, confidence, model_name,
+                       created_at, updated_at
+                FROM chat_agent_group_episodes
+                WHERE group_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (str(group_id), limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, memcell_id, group_id, summary, topic,
+                       keywords_json, importance, confidence, model_name,
+                       created_at, updated_at
+                FROM chat_agent_group_episodes
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def get_recent_user_episodes(
+    group_id: str,
+    user_id: str | None = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    if not _db_exists():
+        return []
+
+    limit = _clamp_limit(limit, default=10)
+
+    with _open_readonly_conn() as conn:
+        if user_id:
+            rows = conn.execute(
+                """
+                SELECT id, memcell_id, group_id, user_id, summary, attitude,
+                       preference_candidates_json, style_observation,
+                       topic_keywords_json, importance, confidence,
+                       model_name, created_at, updated_at
+                FROM chat_agent_user_episodes
+                WHERE group_id = ? AND user_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (str(group_id), str(user_id), limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, memcell_id, group_id, user_id, summary, attitude,
+                       preference_candidates_json, style_observation,
+                       topic_keywords_json, importance, confidence,
+                       model_name, created_at, updated_at
+                FROM chat_agent_user_episodes
+                WHERE group_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (str(group_id), limit),
+            ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def get_episode_by_memcell(memcell_id: int) -> dict[str, Any] | None:
+    if not _db_exists():
+        return None
+
+    with _open_readonly_conn() as conn:
+        group_episode = conn.execute(
+            """
+            SELECT id, memcell_id, group_id, summary, topic,
+                   keywords_json, importance, confidence, model_name,
+                   created_at, updated_at
+            FROM chat_agent_group_episodes
+            WHERE memcell_id = ?
+            """,
+            (int(memcell_id),),
+        ).fetchone()
+
+        user_episodes = conn.execute(
+            """
+            SELECT id, memcell_id, group_id, user_id, summary, attitude,
+                   preference_candidates_json, style_observation,
+                   topic_keywords_json, importance, confidence,
+                   model_name, created_at, updated_at
+            FROM chat_agent_user_episodes
+            WHERE memcell_id = ?
+            ORDER BY id ASC
+            """,
+            (int(memcell_id),),
+        ).fetchall()
+
+    group_episode_dict = dict(group_episode) if group_episode else None
+    user_episode_list = [dict(row) for row in user_episodes]
+
+    if group_episode_dict is None and not user_episode_list:
+        return None
+
+    return {
+        "group_episode": group_episode_dict,
+        "user_episodes": user_episode_list,
+    }
 
 def get_recent_memcells(group_id: str | None = None, limit: int = 5) -> list[dict[str, Any]]:
     if not _db_exists():

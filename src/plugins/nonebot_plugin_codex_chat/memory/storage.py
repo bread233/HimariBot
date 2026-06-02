@@ -110,10 +110,76 @@ def init_tables(conn: sqlite3.Connection) -> None:
         """
     )
 
+    # Create new tables for episodes
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chat_agent_group_episodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memcell_id INTEGER NOT NULL UNIQUE,
+            group_id TEXT NOT NULL,
+            summary TEXT NOT NULL DEFAULT '',
+            topic TEXT NOT NULL DEFAULT '',
+            keywords_json TEXT NOT NULL DEFAULT '[]',
+            importance INTEGER NOT NULL DEFAULT 0,
+            confidence REAL NOT NULL DEFAULT 0,
+            model_name TEXT NOT NULL DEFAULT '',
+            raw_json TEXT NOT NULL DEFAULT '{}',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(memcell_id) REFERENCES chat_agent_memcells(id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_chat_agent_group_episodes_group_created
+        ON chat_agent_group_episodes(group_id, created_at)
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chat_agent_user_episodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memcell_id INTEGER NOT NULL,
+            group_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            summary TEXT NOT NULL DEFAULT '',
+            attitude TEXT NOT NULL DEFAULT '',
+            preference_candidates_json TEXT NOT NULL DEFAULT '[]',
+            style_observation TEXT NOT NULL DEFAULT '',
+            topic_keywords_json TEXT NOT NULL DEFAULT '[]',
+            importance INTEGER NOT NULL DEFAULT 0,
+            confidence REAL NOT NULL DEFAULT 0,
+            model_name TEXT NOT NULL DEFAULT '',
+            raw_json TEXT NOT NULL DEFAULT '{}',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(memcell_id) REFERENCES chat_agent_memcells(id),
+            UNIQUE(memcell_id, user_id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_chat_agent_user_episodes_group_user_created
+        ON chat_agent_user_episodes(group_id, user_id, created_at)
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_chat_agent_user_episodes_memcell
+        ON chat_agent_user_episodes(memcell_id)
+        """
+    )
+
     conn.commit()
     logger.info(
         "codex_chat_memory db_init tables="
-        "[chat_agent_memcells chat_agent_memcell_messages]"
+        "[chat_agent_memcells chat_agent_memcell_messages chat_agent_group_episodes chat_agent_user_episodes]"
     )
 
 
@@ -258,3 +324,166 @@ def insert_memcell(records: Sequence[MessageRecord], preview_max_chars: int = 12
         conn.commit()
 
     return memcell_id
+
+
+def _as_list(value: object) -> list:
+    return value if isinstance(value, list) else []
+
+def _as_dict(value: object) -> dict:
+    return value if isinstance(value, dict) else {}
+
+def _as_int(value: object) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return 0
+
+
+def _as_float(value: object) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def save_episode_result(memcell_id: int, result: dict, model_name: str) -> dict:
+    """Save episode results to database with idempotent writes."""
+    if not isinstance(result, dict):
+        raise ValueError("result must be a dict")
+
+    now = int(time.time())
+    saved_user_episodes = 0
+
+    with get_conn() as conn:
+        cur = conn.cursor()
+
+        cur.execute(
+            "SELECT group_id FROM chat_agent_memcells WHERE id = ?",
+            (memcell_id,),
+        )
+        row = cur.fetchone()
+
+        if not row:
+            raise ValueError(f"Memcell {memcell_id} does not exist")
+
+        group_id = str(row[0])
+
+        group_episode = _as_dict(result.get("group_episode"))
+
+        summary = str(group_episode.get("summary", ""))
+        topic = str(group_episode.get("topic", ""))
+        keywords = _as_list(group_episode.get("keywords"))
+        importance = _as_int(group_episode.get("importance"))
+        confidence = _as_float(group_episode.get("confidence"))
+
+        keywords_json = json.dumps(keywords, ensure_ascii=False)
+        group_raw_json = json.dumps(group_episode, ensure_ascii=False)
+
+        cur.execute(
+            """
+            INSERT INTO chat_agent_group_episodes (
+                memcell_id, group_id, summary, topic,
+                keywords_json, importance, confidence, model_name, raw_json,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(memcell_id) DO UPDATE SET
+                group_id = excluded.group_id,
+                summary = excluded.summary,
+                topic = excluded.topic,
+                keywords_json = excluded.keywords_json,
+                importance = excluded.importance,
+                confidence = excluded.confidence,
+                model_name = excluded.model_name,
+                raw_json = excluded.raw_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                memcell_id,
+                group_id,
+                summary,
+                topic,
+                keywords_json,
+                importance,
+                confidence,
+                str(model_name or ""),
+                group_raw_json,
+                now,
+                now,
+            ),
+        )
+
+        user_episodes = _as_list(result.get("user_episodes"))
+
+        for episode_raw in user_episodes:
+            episode = _as_dict(episode_raw)
+            if not episode:
+                continue
+
+            user_id = str(episode.get("user_id", "")).strip()
+            if not user_id:
+                continue
+
+            summary = str(episode.get("summary", ""))
+            attitude = str(episode.get("attitude", ""))
+            preference_candidates = _as_list(episode.get("preference_candidates"))
+            style_observation = str(episode.get("style_observation", ""))
+            topic_keywords = _as_list(episode.get("topic_keywords"))
+            importance = _as_int(episode.get("importance"))
+            confidence = _as_float(episode.get("confidence"))
+
+            preference_candidates_json = json.dumps(
+                preference_candidates,
+                ensure_ascii=False,
+            )
+            topic_keywords_json = json.dumps(topic_keywords, ensure_ascii=False)
+            user_raw_json = json.dumps(episode, ensure_ascii=False)
+
+            cur.execute(
+                """
+                INSERT INTO chat_agent_user_episodes (
+                    memcell_id, group_id, user_id, summary, attitude,
+                    preference_candidates_json, style_observation, topic_keywords_json,
+                    importance, confidence, model_name, raw_json,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(memcell_id, user_id) DO UPDATE SET
+                    group_id = excluded.group_id,
+                    summary = excluded.summary,
+                    attitude = excluded.attitude,
+                    preference_candidates_json = excluded.preference_candidates_json,
+                    style_observation = excluded.style_observation,
+                    topic_keywords_json = excluded.topic_keywords_json,
+                    importance = excluded.importance,
+                    confidence = excluded.confidence,
+                    model_name = excluded.model_name,
+                    raw_json = excluded.raw_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    memcell_id,
+                    group_id,
+                    user_id,
+                    summary,
+                    attitude,
+                    preference_candidates_json,
+                    style_observation,
+                    topic_keywords_json,
+                    importance,
+                    confidence,
+                    str(model_name or ""),
+                    user_raw_json,
+                    now,
+                    now,
+                ),
+            )
+
+            saved_user_episodes += 1
+
+        conn.commit()
+
+    return {
+        "group_episode_saved": 1,
+        "user_episode_saved": saved_user_episodes,
+        "memcell_id": memcell_id,
+        "group_id": group_id,
+    }
