@@ -1384,7 +1384,7 @@ async def sect_task_complete_(bot: Bot, event: GroupMessageEvent | PrivateMessag
             else:
                 max_exp_limit = user_info['sect_position']
             speeds = jsondata.sect_config_data()[str(max_exp_limit)]["speeds"]
-            max_exp = int(sect_info['sect_scale'] * 1000)  # P1平衡调整：宗门任务修为上限倍率 100 -> 1000
+            max_exp = int(sect_info['sect_scale'] * 100000)  # P1平衡调整：宗门任务修为上限倍率 1000 -> 100000
             if max_exp >= 100000000000000:
                 max_exp = 100000000000000
             max_exp = max_exp * speeds
@@ -1424,7 +1424,7 @@ async def sect_task_complete_(bot: Bot, event: GroupMessageEvent | PrivateMessag
             else:
                 max_exp_limit = user_info['sect_position']
             speeds = jsondata.sect_config_data()[str(max_exp_limit)]["speeds"]
-            max_exp = int(sect_info['sect_scale'] * 1000)  # P1平衡调整：宗门任务修为上限倍率 100 -> 1000
+            max_exp = int(sect_info['sect_scale'] * 100000)  # P1平衡调整：宗门任务修为上限倍率 1000 -> 100000
             if max_exp >= 100000000000000:
                 max_exp = 100000000000000
             max_exp = max_exp * speeds
