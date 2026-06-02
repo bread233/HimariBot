@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -9,12 +10,16 @@ from .storage import DB_PATH, get_conn
 _MAX_LIMIT = 20
 
 
-def _clamp_limit(limit: int | str | None, default: int = 5) -> int:
+def _clamp_limit(
+    limit: int | str | None,
+    default: int = 5,
+    max_limit: int = _MAX_LIMIT,
+) -> int:
     try:
         value = int(limit) if limit is not None else default
     except Exception:
         value = default
-    return max(1, min(value, _MAX_LIMIT))
+    return max(1, min(value, max_limit))
 
 
 def _db_exists() -> bool:
@@ -288,3 +293,43 @@ def get_memcell_detail(memcell_id: int) -> dict[str, Any] | None:
         "memcell": dict(memcell),
         "messages": [dict(row) for row in messages],
     }
+
+
+def get_pending_memcells_for_episode(
+    allowed_group_ids: list[str] | None = None,
+    limit: int = 20,
+    min_age_seconds: int = 180,
+) -> list[dict[str, Any]]:
+    if not _db_exists():
+        return []
+
+    limit = _clamp_limit(limit, default=20, max_limit=50)
+
+    with _open_readonly_conn() as conn:
+        where_parts = ["ge.memcell_id IS NULL", "m.message_count > 0"]
+        params: list[Any] = []
+
+        if allowed_group_ids:
+            placeholders = ", ".join(["?" for _ in range(len(allowed_group_ids))])
+            where_parts.append(f"m.group_id IN ({placeholders})")
+            params.extend([str(g) for g in allowed_group_ids])
+
+        age_threshold = int(time.time()) - min_age_seconds
+        where_parts.append(f"m.created_at <= ?")
+        params.append(age_threshold)
+
+        where_clause = " AND ".join(where_parts)
+
+        rows = conn.execute(
+            f"""
+            SELECT m.id, m.group_id, m.message_count, m.raw_text_preview, m.created_at
+            FROM chat_agent_memcells m
+            LEFT JOIN chat_agent_group_episodes ge ON ge.memcell_id = m.id
+            WHERE {where_clause}
+            ORDER BY m.id DESC
+            LIMIT ?
+            """,
+            params + [limit],
+        ).fetchall()
+
+    return [dict(row) for row in rows]
