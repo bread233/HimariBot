@@ -384,7 +384,8 @@ async def _handle_memory_command(
         elif subcommand == "episodes":
             reply = _format_episodes(rest)
         elif subcommand == "recall":
-            group_id_default = event.get_group_id() or None
+            group_id_default_raw = getattr(event, "group_id", None)
+            group_id_default = str(group_id_default_raw) if group_id_default_raw is not None else None
             reply = _format_recall(rest, current_group_id=group_id_default)
         else:
             reply = (
