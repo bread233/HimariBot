@@ -17,6 +17,7 @@ from .query import (
     get_recent_memcells,
     get_user_messages,
 )
+from .recall import build_memory_recall
 
 _MAX_REPLY_CHARS = 1800
 _PREVIEW_TRUNC = 300
@@ -77,6 +78,8 @@ def _normalize_subcommand(command: str) -> str:
         "抽取": "episode",
         "episodes": "episodes",
         "摘要": "episodes",
+        "recall": "recall",
+        "回忆": "recall",
     }
     return mapping.get(command.strip().lower(), "")
 
@@ -245,6 +248,51 @@ def _format_episodes(args: list[str]) -> str:
     return "\n\n".join(lines)
 
 
+def _format_recall(args: list[str], current_group_id: str | None = None) -> str:
+    group_id = None
+    user_id = None
+    limit = 5
+
+    positional_args = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--limit" and i + 1 < len(args):
+            try:
+                limit = int(args[i + 1])
+            except ValueError:
+                pass
+            i += 2
+        elif args[i].startswith("--limit="):
+            try:
+                limit = int(args[i][len("--limit="):])
+            except ValueError:
+                pass
+            i += 1
+        else:
+            positional_args.append(args[i])
+            i += 1
+
+    # 位置参数：group_id, user_id
+    if len(positional_args) >= 1 and positional_args[0]:
+        group_id = positional_args[0]
+    elif current_group_id:
+        group_id = current_group_id
+
+    if len(positional_args) >= 2 and positional_args[1]:
+        user_id = positional_args[1]
+
+    recall_text = build_memory_recall(
+        group_id=group_id,
+        user_id=user_id,
+        limit=limit,
+    )
+
+    if not recall_text.strip():
+        return "暂无可用记忆"
+
+    return recall_text
+
+
 def _format_memcell(args: list[str]) -> str:
     if not args:
         return "用法：/codex_memory memcell <memcell_id>"
@@ -335,6 +383,9 @@ async def _handle_memory_command(
             reply = await _format_episode(rest)
         elif subcommand == "episodes":
             reply = _format_episodes(rest)
+        elif subcommand == "recall":
+            group_id_default = event.get_group_id() or None
+            reply = _format_recall(rest, current_group_id=group_id_default)
         else:
             reply = (
                 "用法：\n"
@@ -343,7 +394,8 @@ async def _handle_memory_command(
                 "/codex_memory user <group_id> <user_id> [limit]\n"
                 "/codex_memory memcell <memcell_id>\n"
                 "/codex_memory episode <memcell_id> [--force]\n"
-                "/codex_memory episodes [group_id] [limit]"
+                "/codex_memory episodes [group_id] [limit]\n"
+                "/codex_memory recall [group_id] [user_id] [--limit N]"
             )
     except Exception:
         logger.warning("codex_chat_memory command_failed", exc_info=True)
