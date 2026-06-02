@@ -12,7 +12,7 @@ from .codex_provider import ask_codex
 from .cooldown import UserCooldown
 from .interest_skill import load_interest_skill
 from .context_extractors import extract_message_context
-from .memory import register_memory_collector, register_memory_commands
+from .memory import register_memory_collector, register_memory_commands, register_memory_episode_worker
 from .log_sanitize import sanitize_for_log
 
 __plugin_meta__ = {
@@ -27,6 +27,7 @@ _proactive_interval = UserCooldown(plugin_config.codex_chat_proactive_min_interv
 
 register_memory_collector()
 register_memory_commands()
+register_memory_episode_worker()
 
 codex_chat = on_message(priority=plugin_config.codex_chat_command_priority, block=False)
 driver = get_driver()

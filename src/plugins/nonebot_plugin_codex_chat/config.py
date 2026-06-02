@@ -77,6 +77,13 @@ class ConfigModel(BaseModel):
     )
     codex_chat_interest_skill_reload_seconds: int = Field(default=10)
 
+    # Episode 自动抽取配置（默认关闭）
+    codex_chat_memory_episode_auto_enabled: bool = False
+    codex_chat_memory_episode_auto_interval_seconds: int = 300
+    codex_chat_memory_episode_auto_limit_per_tick: int = 1
+    codex_chat_memory_episode_auto_recent_limit: int = 20
+    codex_chat_memory_episode_auto_min_age_seconds: int = 180
+
     class Config:
         extra = "ignore"
 
