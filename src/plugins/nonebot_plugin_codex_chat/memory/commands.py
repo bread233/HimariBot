@@ -18,6 +18,10 @@ from .query import (
     get_user_messages,
 )
 from .recall import build_memory_recall
+from .consolidation import (
+    generate_long_memory_candidates_preview,
+    generate_and_save_long_memory_candidates,
+)
 
 _MAX_REPLY_CHARS = 1800
 _PREVIEW_TRUNC = 300
@@ -80,6 +84,16 @@ def _normalize_subcommand(command: str) -> str:
         "摘要": "episodes",
         "recall": "recall",
         "回忆": "recall",
+        "consolidate-preview": "consolidate_preview",
+        "consolidate_preview": "consolidate_preview",
+        "preview-long": "consolidate_preview",
+        "预览长期记忆": "consolidate_preview",
+        "长期记忆预览": "consolidate_preview",
+        "consolidate-save": "consolidate_save",
+        "consolidate_save": "consolidate_save",
+        "save-long": "consolidate_save",
+        "保存长期记忆": "consolidate_save",
+        "长期记忆保存": "consolidate_save",
     }
     return mapping.get(command.strip().lower(), "")
 
@@ -352,6 +366,107 @@ def _format_memcell(args: list[str]) -> str:
     return "\n".join(lines)
 
 
+def _parse_group_user_limit_args(
+    args: list[str],
+    current_group_id: str | None = None,
+    default_limit: int = 20,
+    max_limit: int = 50,
+) -> tuple[str | None, str | None, int]:
+    positional_args: list[str] = []
+    limit = default_limit
+
+    i = 0
+    while i < len(args):
+        if args[i] == "--limit" and i + 1 < len(args):
+            try:
+                limit = int(args[i + 1])
+            except ValueError:
+                pass
+            i += 2
+        elif args[i].startswith("--limit="):
+            try:
+                limit = int(args[i][len("--limit="):])
+            except ValueError:
+                pass
+            i += 1
+        else:
+            positional_args.append(args[i])
+            i += 1
+
+    limit = max(1, min(limit, max_limit))
+
+    group_id = None
+    user_id = None
+    if len(positional_args) >= 1 and positional_args[0]:
+        group_id = positional_args[0]
+    elif current_group_id:
+        group_id = current_group_id
+    if len(positional_args) >= 2 and positional_args[1]:
+        user_id = positional_args[1]
+
+    return group_id, user_id, limit
+
+
+def _format_candidate_preview_result(result: dict, saved_mode: bool = False) -> str:
+    ok = result.get("ok", False)
+    skipped = result.get("skipped", False)
+    reason = result.get("reason", "")
+    group_id = result.get("group_id", "")
+    user_id = result.get("user_id", "")
+    ep_counts = result.get("episode_counts", {})
+    candidates = result.get("candidates", [])
+    candidate_count = len(candidates)
+
+    lines = [
+        "长期记忆候选预览",
+        f"ok={ok} skipped={skipped} reason={reason}",
+        f"group_id={group_id} user_id={user_id}",
+        f"episodes group={ep_counts.get('group', 0)} user={ep_counts.get('user', 0)}",
+        f"candidates={candidate_count}",
+    ]
+
+    if ok and not skipped:
+        for idx, c in enumerate(candidates[:10], 1):
+            scope_type = c.get("scope_type", "?")
+            memory_type = c.get("memory_type", "?")
+            importance = c.get("importance", 0)
+            confidence = c.get("confidence", 0.0)
+            title = _truncate(c.get("title", ""), 80)
+            summary = _truncate(c.get("summary", ""), 120)
+            mem_ids = c.get("evidence_memcell_ids", [])
+            ep_ids = c.get("evidence_episode_ids", [])
+
+            lines.append(
+                f"\n[{idx}] {scope_type}/{memory_type} "
+                f"importance={importance} confidence={confidence}"
+            )
+            if title:
+                lines.append(f"title={title}")
+            lines.append(f"summary={summary}")
+            if mem_ids or ep_ids:
+                lines.append(
+                    f"evidence episodes={ep_ids} memcells={mem_ids}"
+                )
+
+        remaining = candidate_count - 10
+        if remaining > 0:
+            lines.append(f"\n... 还有 {remaining} 条")
+
+    if saved_mode:
+        saved = result.get("saved", 0)
+        skipped_save = result.get("skipped_save", 0)
+        candidate_ids = result.get("candidate_ids", [])
+        lines.append(f"saved={saved} skipped_save={skipped_save}")
+        lines.append(f"candidate_ids={candidate_ids}")
+
+    return "\n".join(lines)
+
+
+def _build_greg(event: MessageEvent) -> str | None:
+    raw = getattr(event, "group_id", None)
+    return str(raw) if raw is not None else None
+
+
 @_memory_cmd.handle()
 async def _handle_memory_command(
     event: MessageEvent,
@@ -387,6 +502,28 @@ async def _handle_memory_command(
             group_id_default_raw = getattr(event, "group_id", None)
             group_id_default = str(group_id_default_raw) if group_id_default_raw is not None else None
             reply = _format_recall(rest, current_group_id=group_id_default)
+        elif subcommand == "consolidate_preview":
+            current_gid = _build_greg(event)
+            gid, uid, lim = _parse_group_user_limit_args(rest, current_gid)
+            if not gid:
+                reply = "缺少 group_id，请在群内使用或显式传入 group_id"
+            else:
+                plugin_config = ConfigModel.parse_obj(get_driver().config.dict())
+                result = await generate_long_memory_candidates_preview(
+                    plugin_config, gid, uid, lim
+                )
+                reply = _format_candidate_preview_result(result)
+        elif subcommand == "consolidate_save":
+            current_gid = _build_greg(event)
+            gid, uid, lim = _parse_group_user_limit_args(rest, current_gid)
+            if not gid:
+                reply = "缺少 group_id，请在群内使用或显式传入 group_id"
+            else:
+                plugin_config = ConfigModel.parse_obj(get_driver().config.dict())
+                result = await generate_and_save_long_memory_candidates(
+                    plugin_config, gid, uid, lim
+                )
+                reply = _format_candidate_preview_result(result, saved_mode=True)
         else:
             reply = (
                 "用法：\n"
@@ -396,7 +533,9 @@ async def _handle_memory_command(
                 "/codex_memory memcell <memcell_id>\n"
                 "/codex_memory episode <memcell_id> [--force]\n"
                 "/codex_memory episodes [group_id] [limit]\n"
-                "/codex_memory recall [group_id] [user_id] [--limit N]"
+                "/codex_memory recall [group_id] [user_id] [--limit N]\n"
+                "/codex_memory consolidate-preview [group_id] [user_id] [--limit N]\n"
+                "/codex_memory consolidate-save [group_id] [user_id] [--limit N]"
             )
     except Exception:
         logger.warning("codex_chat_memory command_failed", exc_info=True)
