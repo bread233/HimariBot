@@ -6,13 +6,18 @@ from nonebot.typing import T_State
 import asyncio
 import secrets
 import time
-from .config import get_config
+from .config import ConfigModel, get_config
 from .trigger_rules import should_trigger, score_interest_text
 from .codex_provider import ask_codex
 from .cooldown import UserCooldown
 from .interest_skill import load_interest_skill
 from .context_extractors import extract_message_context
-from .memory import register_memory_collector, register_memory_commands, register_memory_episode_worker
+from .memory import (
+    register_memory_collector,
+    register_memory_commands,
+    register_memory_episode_worker,
+    build_memory_recall,
+)
 from .log_sanitize import sanitize_for_log
 
 __plugin_meta__ = {
@@ -117,6 +122,55 @@ def _build_prompt(persona: str, user_prompt: str, context_prompt: str = "") -> s
     )
 
     return "\n\n".join(x for x in parts if x)
+
+def _get_event_group_id(event: MessageEvent) -> str | None:
+    group_id = getattr(event, "group_id", None)
+    return str(group_id) if group_id is not None else None
+
+def _build_memory_recall_context(event: MessageEvent, plugin_config: ConfigModel) -> str:
+    if not plugin_config.codex_chat_memory_recall_enabled:
+        return ""
+
+    group_id = _get_event_group_id(event)
+    if not group_id:
+        return ""
+
+    user_id = str(event.get_user_id() or "")
+    if not plugin_config.codex_chat_memory_recall_include_user:
+        user_id = ""
+
+    limit = plugin_config.codex_chat_memory_recall_limit
+    try:
+        limit = int(limit)
+    except Exception:
+        limit = 5
+    limit = max(1, min(limit, 10))
+
+    try:
+        recall_text = build_memory_recall(
+            group_id=group_id,
+            user_id=user_id or None,
+            limit=limit,
+        ).strip()
+    except Exception:
+        logger.warning("codex_chat_memory recall_context_failed", exc_info=True)
+        return ""
+
+    if not recall_text:
+        return ""
+
+    logger.info(
+        "codex_chat_memory recall_context injected group_id={} user_id={} len={}",
+        group_id,
+        user_id or "",
+        len(recall_text),
+    )
+
+    return (
+        "【可参考的历史记忆】\n"
+        "以下内容来自近期群聊摘要，可能不完整；只作为辅助参考，不确定时不要编造。\n"
+        f"{recall_text}"
+    )
 
 def _as_reply(event: GroupMessageEvent, text: str) -> Message:
     return Message([
@@ -399,6 +453,12 @@ async def _(bot: Bot, event: MessageEvent, state: T_State, msg=EventMessage()):
         f"context_sources={context_sources} context_len={context_len}"
     )
     persona = _load_persona(plugin_config.codex_chat_persona_path)
+    memory_recall_context = _build_memory_recall_context(event, plugin_config)
+    if memory_recall_context:
+        if context_prompt:
+            context_prompt = f"{context_prompt}\n\n{memory_recall_context}"
+        else:
+            context_prompt = memory_recall_context
     final_prompt = _build_prompt(persona, prompt, context_prompt)
     async with _codex_lock:
         result = await ask_codex(plugin_config, final_prompt)
