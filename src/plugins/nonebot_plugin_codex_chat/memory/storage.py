@@ -588,6 +588,17 @@ def _is_similar_long_memory(
     return False
 
 
+def _row_get(row: object, key: str, index: int, default: object = "") -> object:
+    try:
+        return row[key]
+    except Exception:
+        pass
+    try:
+        return row[index]
+    except Exception:
+        return default
+
+
 def save_long_memory_candidates(
     candidates: list[dict],
     *,
@@ -659,11 +670,9 @@ def save_long_memory_candidates(
 
             is_duplicate = False
             for row in existing_rows:
-                if _is_similar_long_memory(
-                    title, summary,
-                    str(row["title"] or ""),
-                    str(row["summary"] or ""),
-                ):
+                existing_title = str(_row_get(row, "title", 1, "") or "")
+                existing_summary = str(_row_get(row, "summary", 2, "") or "")
+                if _is_similar_long_memory(title, summary, existing_title, existing_summary):
                     is_duplicate = True
                     break
 
