@@ -16,6 +16,7 @@ from .memory import (
     register_memory_collector,
     register_memory_commands,
     register_memory_episode_worker,
+    build_long_memory_recall,
     build_memory_recall,
 )
 from .log_sanitize import sanitize_for_log
@@ -206,6 +207,87 @@ def _build_memory_recall_context(event: MessageEvent, plugin_config: ConfigModel
         "以下内容来自近期群聊摘要，可能不完整；只作为辅助参考，不确定时不要编造。\n"
         f"{recall_text}"
     )
+
+
+def _build_long_memory_recall_context(event: MessageEvent, plugin_config: ConfigModel) -> str:
+    if not plugin_config.codex_chat_memory_long_recall_enabled:
+        return ""
+
+    group_id = _get_event_group_id(event)
+    if not group_id:
+        logger.debug("codex_chat_memory long_recall_context skipped reason=no_group_id")
+        return ""
+
+    user_id = str(event.get_user_id() or "")
+
+    limit = plugin_config.codex_chat_memory_long_recall_limit
+    try:
+        limit = int(limit)
+    except Exception:
+        limit = 10
+    limit = max(1, min(limit, 20))
+
+    min_importance = plugin_config.codex_chat_memory_long_recall_min_importance
+    try:
+        min_importance = int(min_importance)
+    except Exception:
+        min_importance = 0
+    min_importance = max(0, min(min_importance, 10))
+
+    min_confidence = plugin_config.codex_chat_memory_long_recall_min_confidence
+    try:
+        min_confidence = float(min_confidence)
+    except Exception:
+        min_confidence = 0.0
+    min_confidence = max(0.0, min(min_confidence, 1.0))
+
+    max_chars = plugin_config.codex_chat_memory_long_recall_max_chars
+    try:
+        max_chars = int(max_chars)
+    except Exception:
+        max_chars = 1200
+    max_chars = max(200, min(max_chars, 3000))
+
+    try:
+        long_recall_text = build_long_memory_recall(
+            group_id=group_id,
+            user_id=user_id or None,
+            limit=limit,
+            min_importance=min_importance,
+            min_confidence=min_confidence,
+            max_chars=max_chars,
+        ).strip()
+    except Exception:
+        logger.warning("codex_chat_memory long_recall_context_failed", exc_info=True)
+        return ""
+
+    if not long_recall_text:
+        logger.info(
+            "codex_chat_memory long_recall_context skipped reason=empty group_id={} user_id={} min_importance={} min_confidence={}",
+            group_id,
+            user_id or "",
+            min_importance,
+            min_confidence,
+        )
+        return ""
+
+    logger.info(
+        "codex_chat_memory long_recall_context injected group_id={} user_id={} len={} limit={} min_importance={} min_confidence={} max_chars={}",
+        group_id,
+        user_id or "",
+        len(long_recall_text),
+        limit,
+        min_importance,
+        min_confidence,
+        max_chars,
+    )
+
+    return (
+        "【可参考的长期记忆】\n"
+        "以下内容来自已保存的长期记忆，可能不完整；只作为辅助参考，不确定时不要编造。\n"
+        f"{long_recall_text}"
+    )
+
 
 def _as_reply(event: GroupMessageEvent, text: str) -> Message:
     return Message([
@@ -503,6 +585,26 @@ async def _(bot: Bot, event: MessageEvent, state: T_State, msg=EventMessage()):
             context_len_before_recall,
             context_len_after_recall,
         )
+
+    long_memory_recall_context = _build_long_memory_recall_context(event, plugin_config)
+    if long_memory_recall_context:
+        context_len_before_long_recall = len(context_prompt or "")
+
+        if context_prompt:
+            context_prompt = f"{context_prompt}\n\n{long_memory_recall_context}"
+        else:
+            context_prompt = long_memory_recall_context
+
+        context_len_after_long_recall = len(context_prompt or "")
+
+        logger.info(
+            "codex_chat_memory long_recall_context merged group_id={} recall_len={} context_len_before={} context_len_after={}",
+            _get_event_group_id(event) or "",
+            len(long_memory_recall_context),
+            context_len_before_long_recall,
+            context_len_after_long_recall,
+        )
+
     final_prompt = _build_prompt(persona, prompt, context_prompt)
     async with _codex_lock:
         result = await ask_codex(plugin_config, final_prompt)

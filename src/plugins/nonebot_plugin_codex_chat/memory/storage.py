@@ -633,7 +633,7 @@ def save_long_memory_candidates(
                     evidence_episode_ids_json,
                     importance,
                     confidence,
-                    "pending",
+                    "approved",
                     source,
                     source_model,
                     now,
@@ -649,7 +649,7 @@ def save_long_memory_candidates(
     saved_count = len(saved_ids)
 
     logger.info(
-        "codex_chat_memory candidates_saved saved={} skipped={} source_model={}",
+        "codex_chat_memory long_memory_saved saved={} skipped={} source_model={} status=approved",
         saved_count,
         skipped,
         source_model or "",

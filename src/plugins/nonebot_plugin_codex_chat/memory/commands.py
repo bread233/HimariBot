@@ -17,7 +17,7 @@ from .query import (
     get_recent_memcells,
     get_user_messages,
 )
-from .recall import build_memory_recall
+from .recall import build_long_memory_recall, build_memory_recall
 from .consolidation import (
     generate_long_memory_candidates_preview,
     generate_and_save_long_memory_candidates,
@@ -94,6 +94,12 @@ def _normalize_subcommand(command: str) -> str:
         "save-long": "consolidate_save",
         "保存长期记忆": "consolidate_save",
         "长期记忆保存": "consolidate_save",
+        "long-recall": "long_recall",
+        "long_recall": "long_recall",
+        "长期回忆": "long_recall",
+        "长期记忆": "long_recall",
+        "long-memory": "long_recall",
+        "long_memory": "long_recall",
     }
     return mapping.get(command.strip().lower(), "")
 
@@ -417,8 +423,9 @@ def _format_candidate_preview_result(result: dict, saved_mode: bool = False) -> 
     candidates = result.get("candidates", [])
     candidate_count = len(candidates)
 
+    title = "长期记忆已保存" if saved_mode else "长期记忆候选预览"
     lines = [
-        "长期记忆候选预览",
+        title,
         f"ok={ok} skipped={skipped} reason={reason}",
         f"group_id={group_id} user_id={user_id}",
         f"episodes group={ep_counts.get('group', 0)} user={ep_counts.get('user', 0)}",
@@ -457,6 +464,7 @@ def _format_candidate_preview_result(result: dict, saved_mode: bool = False) -> 
         skipped_save = result.get("skipped_save", 0)
         candidate_ids = result.get("candidate_ids", [])
         lines.append(f"saved={saved} skipped_save={skipped_save}")
+        lines.append("status=approved")
         lines.append(f"candidate_ids={candidate_ids}")
 
     return "\n".join(lines)
@@ -502,6 +510,30 @@ async def _handle_memory_command(
             group_id_default_raw = getattr(event, "group_id", None)
             group_id_default = str(group_id_default_raw) if group_id_default_raw is not None else None
             reply = _format_recall(rest, current_group_id=group_id_default)
+        elif subcommand == "long_recall":
+            current_gid = _build_greg(event)
+            gid, uid, lim = _parse_group_user_limit_args(rest, current_gid, default_limit=10, max_limit=20)
+            if not gid:
+                reply = "缺少 group_id，请在群内使用或显式传入 group_id"
+            else:
+                recall_text = build_long_memory_recall(
+                    group_id=gid,
+                    user_id=uid,
+                    limit=lim,
+                    min_importance=0,
+                    min_confidence=0.0,
+                    max_chars=1200,
+                )
+                if not recall_text.strip():
+                    reply = "暂无可用长期记忆"
+                else:
+                    reply = (
+                        f"长期记忆 recall\n"
+                        f"group_id={gid}\n"
+                        f"user_id={uid or ''}\n"
+                        f"limit={lim}\n\n"
+                        f"{recall_text}"
+                    )
         elif subcommand == "consolidate_preview":
             current_gid = _build_greg(event)
             gid, uid, lim = _parse_group_user_limit_args(rest, current_gid)
@@ -534,6 +566,7 @@ async def _handle_memory_command(
                 "/codex_memory episode <memcell_id> [--force]\n"
                 "/codex_memory episodes [group_id] [limit]\n"
                 "/codex_memory recall [group_id] [user_id] [--limit N]\n"
+                "/codex_memory long-recall [group_id] [user_id] [--limit N]\n"
                 "/codex_memory consolidate-preview [group_id] [user_id] [--limit N]\n"
                 "/codex_memory consolidate-save [group_id] [user_id] [--limit N]"
             )
