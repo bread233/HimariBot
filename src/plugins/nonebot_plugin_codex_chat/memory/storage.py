@@ -176,10 +176,66 @@ def init_tables(conn: sqlite3.Connection) -> None:
         """
     )
 
+    # Long-term memory candidates (read-only this round; writers come later)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chat_agent_long_memory_candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scope_type TEXT NOT NULL,
+            group_id TEXT,
+            user_id TEXT,
+            target_user_id TEXT,
+            memory_type TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
+            keywords_json TEXT NOT NULL DEFAULT '[]',
+            evidence_memcell_ids_json TEXT NOT NULL DEFAULT '[]',
+            evidence_episode_ids_json TEXT NOT NULL DEFAULT '[]',
+            importance INTEGER NOT NULL DEFAULT 0,
+            confidence REAL NOT NULL DEFAULT 0.0,
+            status TEXT NOT NULL DEFAULT 'pending',
+            source TEXT NOT NULL DEFAULT 'episode_consolidation',
+            source_model TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            notes TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_long_memory_candidates_scope
+        ON chat_agent_long_memory_candidates(scope_type, group_id, user_id, status, updated_at)
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_long_memory_candidates_status
+        ON chat_agent_long_memory_candidates(status, updated_at)
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_long_memory_candidates_group
+        ON chat_agent_long_memory_candidates(group_id, updated_at)
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_long_memory_candidates_user
+        ON chat_agent_long_memory_candidates(group_id, user_id, updated_at)
+        """
+    )
+
     conn.commit()
     logger.info(
         "codex_chat_memory db_init tables="
-        "[chat_agent_memcells chat_agent_memcell_messages chat_agent_group_episodes chat_agent_user_episodes]"
+        "[chat_agent_memcells chat_agent_memcell_messages chat_agent_group_episodes "
+        "chat_agent_user_episodes chat_agent_long_memory_candidates]"
     )
 
 

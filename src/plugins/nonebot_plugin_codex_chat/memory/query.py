@@ -333,3 +333,78 @@ def get_pending_memcells_for_episode(
         ).fetchall()
 
     return [dict(row) for row in rows]
+
+
+def get_recent_long_memory_candidates(
+    scope_type: str | None = None,
+    group_id: str | None = None,
+    user_id: str | None = None,
+    status: str | None = "pending",
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    if not _db_exists():
+        return []
+
+    limit = _clamp_limit(limit, default=20)
+
+    where_parts: list[str] = []
+    params: list[Any] = []
+
+    if scope_type:
+        where_parts.append("scope_type = ?")
+        params.append(str(scope_type))
+    if group_id:
+        where_parts.append("group_id = ?")
+        params.append(str(group_id))
+    if user_id:
+        where_parts.append("user_id = ?")
+        params.append(str(user_id))
+    if status is not None and str(status) != "":
+        where_parts.append("status = ?")
+        params.append(str(status))
+
+    where_clause = " AND ".join(where_parts) if where_parts else "1=1"
+
+    with _open_readonly_conn() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT id, scope_type, group_id, user_id, target_user_id,
+                   memory_type, title, summary, keywords_json,
+                   evidence_memcell_ids_json, evidence_episode_ids_json,
+                   importance, confidence, status, source, source_model,
+                   created_at, updated_at, notes
+            FROM chat_agent_long_memory_candidates
+            WHERE {where_clause}
+            ORDER BY updated_at DESC, id DESC
+            LIMIT ?
+            """,
+            params + [limit],
+        ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def get_long_memory_candidate(candidate_id: int) -> dict[str, Any] | None:
+    if not _db_exists():
+        return None
+
+    try:
+        cid = int(candidate_id)
+    except Exception:
+        return None
+
+    with _open_readonly_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT id, scope_type, group_id, user_id, target_user_id,
+                   memory_type, title, summary, keywords_json,
+                   evidence_memcell_ids_json, evidence_episode_ids_json,
+                   importance, confidence, status, source, source_model,
+                   created_at, updated_at, notes
+            FROM chat_agent_long_memory_candidates
+            WHERE id = ?
+            """,
+            (cid,),
+        ).fetchone()
+
+    return _row_to_dict(row)
