@@ -462,8 +462,9 @@ def _format_candidate_preview_result(result: dict, saved_mode: bool = False) -> 
     if saved_mode:
         saved = result.get("saved", 0)
         skipped_save = result.get("skipped_save", 0)
+        duplicate_skipped = result.get("duplicate_skipped", 0)
         candidate_ids = result.get("candidate_ids", [])
-        lines.append(f"saved={saved} skipped_save={skipped_save}")
+        lines.append(f"saved={saved} skipped_save={skipped_save} duplicate_skipped={duplicate_skipped}")
         lines.append("status=approved")
         lines.append(f"candidate_ids={candidate_ids}")
 
