@@ -3147,13 +3147,13 @@ def game_api_sect_task_complete():
         max_exp_limit = 4
     else:
         max_exp_limit = sect_position
-    speeds = jsondata.sect_config_data()[str(max_exp_limit)]["speeds"]
+    speeds = float(jsondata.sect_config_data()[str(max_exp_limit)]["speeds"])
 
     get_exp = int(user_exp * float(give))
-    max_exp = int(sect.get("sect_scale") or 0) * 100
+    max_exp = int(sect.get("sect_scale") or 0) * 100000
     if max_exp >= 100000000000000:
         max_exp = 100000000000000
-    max_exp = max_exp * speeds
+    max_exp = int(max_exp * speeds)
     if get_exp >= max_exp:
         get_exp = max_exp
 
