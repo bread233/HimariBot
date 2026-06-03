@@ -99,6 +99,14 @@ class ConfigModel(BaseModel):
     codex_chat_memory_long_recall_min_confidence: float = 0.0
     codex_chat_memory_long_recall_max_chars: int = 1200
 
+    # Long memory consolidation provider 配置
+    codex_chat_memory_long_consolidation_provider: str = "codex"
+    codex_chat_memory_long_consolidation_ollama_base_url: str = "http://172.17.0.1:11435"
+    codex_chat_memory_long_consolidation_ollama_model: str = "llama32-finalizer-fast:latest"
+    codex_chat_memory_long_consolidation_ollama_timeout_seconds: int = 90
+    codex_chat_memory_long_consolidation_ollama_think: bool = False
+    codex_chat_memory_long_consolidation_fallback_to_codex: bool = False
+
     class Config:
         extra = "ignore"
 

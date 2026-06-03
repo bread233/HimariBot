@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import time
+import urllib.request
 
 from nonebot import logger
 
@@ -109,6 +112,85 @@ def _extract_json_object(text: str) -> str:
     if end == -1 or end < start:
         return ""
     return s[start:end + 1]
+
+
+async def _ask_ollama_for_long_memory_candidates(
+    plugin_config: ConfigModel,
+    prompt: str,
+) -> dict:
+    base_url = str(
+        getattr(plugin_config, "codex_chat_memory_long_consolidation_ollama_base_url", "")
+        or "http://172.17.0.1:11435"
+    ).rstrip("/")
+    model = str(
+        getattr(plugin_config, "codex_chat_memory_long_consolidation_ollama_model", "")
+        or "llama32-finalizer-fast:latest"
+    )
+    think_val = bool(
+        getattr(plugin_config, "codex_chat_memory_long_consolidation_ollama_think", False)
+    )
+    timeout_seconds = int(
+        getattr(plugin_config, "codex_chat_memory_long_consolidation_ollama_timeout_seconds", 90)
+    )
+    timeout_seconds = max(10, min(timeout_seconds, 300))
+
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "format": "json",
+        "think": think_val,
+        "options": {
+            "temperature": 0.1,
+            "num_predict": 1200,
+        },
+    }
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    url = f"{base_url}/api/generate"
+
+    start_time = time.time()
+    try:
+        def _post_ollama() -> str:
+            req = urllib.request.Request(
+                url,
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+                return resp.read().decode("utf-8")
+
+        raw = await asyncio.to_thread(_post_ollama)
+        elapsed = time.time() - start_time
+        parsed = json.loads(raw)
+        response_text = str(parsed.get("response", "") or "")
+        logger.info(
+            "codex_chat_memory ollama_llm ok model={} elapsed={:.2f}s",
+            model,
+            elapsed,
+        )
+        return {
+            "ok": True,
+            "text": response_text,
+            "error": "",
+            "provider": "ollama",
+            "model": model,
+        }
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.warning(
+            "codex_chat_memory ollama_llm failed model={} elapsed={:.2f}s error={}",
+            model,
+            elapsed,
+            str(e),
+        )
+        return {
+            "ok": False,
+            "text": "",
+            "error": str(e),
+            "provider": "ollama",
+            "model": model,
+        }
 
 
 def build_long_memory_candidate_prompt(
@@ -353,8 +435,38 @@ async def generate_long_memory_candidates_preview(
         max_episodes=limit,
     )
 
+    provider = str(
+        getattr(plugin_config, "codex_chat_memory_long_consolidation_provider", "codex") or "codex"
+    ).lower()
+
     try:
-        result = await ask_codex(plugin_config, prompt)
+        if provider == "ollama":
+            llm_result = await _ask_ollama_for_long_memory_candidates(plugin_config, prompt)
+            if not llm_result["ok"] and getattr(
+                plugin_config, "codex_chat_memory_long_consolidation_fallback_to_codex", False
+            ):
+                logger.info(
+                    "codex_chat_memory candidates_preview ollama_fallback group_id={} user_id={}",
+                    group_id,
+                    user_id or "",
+                )
+                codex_ask = await ask_codex(plugin_config, prompt)
+                llm_result = {
+                    "ok": codex_ask.ok,
+                    "text": codex_ask.text or "",
+                    "error": codex_ask.error or "",
+                    "provider": "codex",
+                    "model": str(getattr(plugin_config, "codex_chat_model", "") or ""),
+                }
+        else:
+            codex_ask = await ask_codex(plugin_config, prompt)
+            llm_result = {
+                "ok": codex_ask.ok,
+                "text": codex_ask.text or "",
+                "error": codex_ask.error or "",
+                "provider": "codex",
+                "model": str(getattr(plugin_config, "codex_chat_model", "") or ""),
+            }
     except Exception as e:
         logger.warning(
             "codex_chat_memory candidates_preview exception group_id={} user_id={} error={}",
@@ -373,37 +485,45 @@ async def generate_long_memory_candidates_preview(
             "candidates": [],
             "raw_text": "",
             "episode_counts": {"group": group_count, "user": user_count},
+            "provider": provider,
+            "model": "",
         }
 
-    if not result.ok:
+    if not llm_result["ok"]:
         logger.info(
-            "codex_chat_memory candidates_preview llm_failed group_id={} user_id={} error={}",
+            "codex_chat_memory candidates_preview llm_failed group_id={} user_id={} error={} provider={} model={}",
             group_id,
             user_id or "",
-            result.error or "",
+            llm_result["error"],
+            llm_result.get("provider", provider),
+            llm_result.get("model", ""),
         )
         return {
             "ok": False,
             "skipped": False,
             "reason": "llm_failed",
-            "error": result.error or "",
+            "error": llm_result["error"],
             "group_id": group_id,
             "user_id": user_id or "",
             "candidates": [],
-            "raw_text": result.text or "",
+            "raw_text": llm_result["text"],
             "episode_counts": {"group": group_count, "user": user_count},
+            "provider": llm_result.get("provider", provider),
+            "model": llm_result.get("model", ""),
         }
 
-    parsed = parse_long_memory_candidate_json(result.text or "")
+    parsed = parse_long_memory_candidate_json(llm_result["text"])
     candidates = parsed.get("candidates", [])
 
     logger.info(
-        "codex_chat_memory candidates_preview ok group_id={} user_id={} group_count={} user_count={} candidate_count={}",
+        "codex_chat_memory candidates_preview ok group_id={} user_id={} group_count={} user_count={} candidate_count={} provider={} model={}",
         group_id,
         user_id or "",
         group_count,
         user_count,
         len(candidates),
+        llm_result.get("provider", provider),
+        llm_result.get("model", ""),
     )
 
     return {
@@ -413,8 +533,10 @@ async def generate_long_memory_candidates_preview(
         "group_id": group_id,
         "user_id": user_id or "",
         "candidates": candidates,
-        "raw_text": result.text or "",
+        "raw_text": llm_result["text"],
         "episode_counts": {"group": group_count, "user": user_count},
+        "provider": llm_result.get("provider", provider),
+        "model": llm_result.get("model", ""),
     }
 
 
@@ -442,7 +564,17 @@ async def generate_and_save_long_memory_candidates(
         preview["candidate_ids"] = []
         return preview
 
-    source_model = str(getattr(plugin_config, "codex_chat_model", "") or "")
+    provider = str(
+        getattr(plugin_config, "codex_chat_memory_long_consolidation_provider", "codex") or "codex"
+    ).lower()
+
+    if provider == "ollama":
+        source_model = str(
+            getattr(plugin_config, "codex_chat_memory_long_consolidation_ollama_model", "")
+            or "llama32-finalizer-fast:latest"
+        )
+    else:
+        source_model = str(getattr(plugin_config, "codex_chat_model", "") or "")
 
     try:
         save_result = save_long_memory_candidates(
