@@ -84,6 +84,11 @@ class ConfigModel(BaseModel):
     codex_chat_memory_episode_auto_recent_limit: int = 20
     codex_chat_memory_episode_auto_min_age_seconds: int = 180
 
+    # Memory recall 注入配置（默认关闭）
+    codex_chat_memory_recall_enabled: bool = False
+    codex_chat_memory_recall_limit: int = 5
+    codex_chat_memory_recall_include_user: bool = True
+
     class Config:
         extra = "ignore"
 
