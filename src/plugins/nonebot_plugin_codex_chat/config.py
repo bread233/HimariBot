@@ -92,6 +92,13 @@ class ConfigModel(BaseModel):
     codex_chat_memory_recall_min_confidence: float = 0.0
     codex_chat_memory_recall_max_chars: int = 1200
 
+    # Long memory recall 注入配置（默认关闭）
+    codex_chat_memory_long_recall_enabled: bool = False
+    codex_chat_memory_long_recall_limit: int = 10
+    codex_chat_memory_long_recall_min_importance: int = 0
+    codex_chat_memory_long_recall_min_confidence: float = 0.0
+    codex_chat_memory_long_recall_max_chars: int = 1200
+
     class Config:
         extra = "ignore"
 
