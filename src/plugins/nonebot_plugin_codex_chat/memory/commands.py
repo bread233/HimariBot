@@ -417,8 +417,9 @@ def _format_candidate_preview_result(result: dict, saved_mode: bool = False) -> 
     candidates = result.get("candidates", [])
     candidate_count = len(candidates)
 
+    title = "长期记忆已保存" if saved_mode else "长期记忆候选预览"
     lines = [
-        "长期记忆候选预览",
+        title,
         f"ok={ok} skipped={skipped} reason={reason}",
         f"group_id={group_id} user_id={user_id}",
         f"episodes group={ep_counts.get('group', 0)} user={ep_counts.get('user', 0)}",
@@ -457,6 +458,7 @@ def _format_candidate_preview_result(result: dict, saved_mode: bool = False) -> 
         skipped_save = result.get("skipped_save", 0)
         candidate_ids = result.get("candidate_ids", [])
         lines.append(f"saved={saved} skipped_save={skipped_save}")
+        lines.append("status=approved")
         lines.append(f"candidate_ids={candidate_ids}")
 
     return "\n".join(lines)
