@@ -599,6 +599,45 @@ def _row_get(row: object, key: str, index: int, default: object = "") -> object:
         return default
 
 
+def _parse_int_id_list_json(value: object) -> set[int]:
+    try:
+        data = json.loads(str(value or "[]"))
+        if isinstance(data, list):
+            result: set[int] = set()
+            for x in data:
+                try:
+                    result.add(int(x))
+                except Exception:
+                    pass
+            return result
+    except Exception:
+        pass
+    return set()
+
+
+def _overlap_ratio(a: set[int], b: set[int]) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / max(1, min(len(a), len(b)))
+
+
+def _is_duplicate_by_evidence(
+    candidate_episode_ids: set[int],
+    candidate_memcell_ids: set[int],
+    existing_episode_ids: set[int],
+    existing_memcell_ids: set[int],
+) -> bool:
+    if _overlap_ratio(candidate_episode_ids, existing_episode_ids) >= 0.8 and len(candidate_episode_ids & existing_episode_ids) >= 1:
+        return True
+    if _overlap_ratio(candidate_memcell_ids, existing_memcell_ids) >= 0.8 and len(candidate_memcell_ids & existing_memcell_ids) >= 1:
+        return True
+    if candidate_episode_ids and candidate_episode_ids == existing_episode_ids:
+        return True
+    if candidate_memcell_ids and candidate_memcell_ids == existing_memcell_ids:
+        return True
+    return False
+
+
 def save_long_memory_candidates(
     candidates: list[dict],
     *,
@@ -657,22 +696,44 @@ def save_long_memory_candidates(
             confidence = max(0.0, min(confidence, 1.0))
 
             existing_rows = cur.execute(
-                """SELECT id, title, summary
+                """SELECT id, title, summary, memory_type, evidence_episode_ids_json, evidence_memcell_ids_json
                    FROM chat_agent_long_memory_candidates
                    WHERE status = 'approved'
                      AND scope_type = ? AND group_id = ?
                      AND user_id = ? AND target_user_id = ?
-                     AND memory_type = ?
                    ORDER BY updated_at DESC, id DESC
-                   LIMIT 50""",
-                (scope_type, group_id, user_id, target_user_id, memory_type),
+                   LIMIT 80""",
+                (scope_type, group_id, user_id, target_user_id),
             ).fetchall()
+
+            candidate_episode_ids: set[int] = set()
+            for x in _as_list(candidate.get("evidence_episode_ids", [])):
+                try:
+                    candidate_episode_ids.add(int(x))
+                except Exception:
+                    pass
+            candidate_memcell_ids: set[int] = set()
+            for x in _as_list(candidate.get("evidence_memcell_ids", [])):
+                try:
+                    candidate_memcell_ids.add(int(x))
+                except Exception:
+                    pass
 
             is_duplicate = False
             for row in existing_rows:
                 existing_title = str(_row_get(row, "title", 1, "") or "")
                 existing_summary = str(_row_get(row, "summary", 2, "") or "")
-                if _is_similar_long_memory(title, summary, existing_title, existing_summary):
+                existing_memory_type = str(_row_get(row, "memory_type", 3, "") or "")
+                existing_episode_ids = _parse_int_id_list_json(_row_get(row, "evidence_episode_ids_json", 4, "[]"))
+                existing_memcell_ids = _parse_int_id_list_json(_row_get(row, "evidence_memcell_ids_json", 5, "[]"))
+                same_memory_type = existing_memory_type == memory_type
+                if _is_duplicate_by_evidence(
+                    candidate_episode_ids, candidate_memcell_ids,
+                    existing_episode_ids, existing_memcell_ids,
+                ):
+                    is_duplicate = True
+                    break
+                if same_memory_type and _is_similar_long_memory(title, summary, existing_title, existing_summary):
                     is_duplicate = True
                     break
 
