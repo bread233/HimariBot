@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Sequence
 
@@ -554,6 +555,39 @@ _VALID_MEMORY_TYPES = frozenset({
 })
 
 
+def _normalize_memory_text(value: object) -> str:
+    s = str(value or "").strip().lower()[:500]
+    return "".join(s.split())
+
+
+def _is_similar_long_memory(
+    title_a: str,
+    summary_a: str,
+    title_b: str,
+    summary_b: str,
+) -> bool:
+    norm_summary_a = _normalize_memory_text(summary_a)
+    norm_summary_b = _normalize_memory_text(summary_b)
+
+    if norm_summary_a and norm_summary_a == norm_summary_b:
+        return True
+
+    if not norm_summary_a or not norm_summary_b:
+        return False
+
+    ratio = SequenceMatcher(None, norm_summary_a, norm_summary_b).ratio()
+
+    norm_title_a = _normalize_memory_text(title_a)
+    norm_title_b = _normalize_memory_text(title_b)
+    if norm_title_a and norm_title_a == norm_title_b and ratio >= 0.75:
+        return True
+
+    if ratio >= 0.92:
+        return True
+
+    return False
+
+
 def save_long_memory_candidates(
     candidates: list[dict],
     *,
@@ -561,11 +595,12 @@ def save_long_memory_candidates(
     source: str = "episode_consolidation",
 ) -> dict:
     if not isinstance(candidates, list):
-        return {"saved": 0, "skipped": 0, "candidate_ids": []}
+        return {"saved": 0, "skipped": 0, "duplicate_skipped": 0, "candidate_ids": []}
 
     now = int(time.time())
     saved_ids: list[int] = []
     skipped = 0
+    duplicate_skipped = 0
 
     with get_conn() as conn:
         cur = conn.cursor()
@@ -610,6 +645,33 @@ def save_long_memory_candidates(
             confidence = _as_float(candidate.get("confidence"))
             confidence = max(0.0, min(confidence, 1.0))
 
+            existing_rows = cur.execute(
+                """SELECT id, title, summary
+                   FROM chat_agent_long_memory_candidates
+                   WHERE status = 'approved'
+                     AND scope_type = ? AND group_id = ?
+                     AND user_id = ? AND target_user_id = ?
+                     AND memory_type = ?
+                   ORDER BY updated_at DESC, id DESC
+                   LIMIT 50""",
+                (scope_type, group_id, user_id, target_user_id, memory_type),
+            ).fetchall()
+
+            is_duplicate = False
+            for row in existing_rows:
+                if _is_similar_long_memory(
+                    title, summary,
+                    str(row["title"] or ""),
+                    str(row["summary"] or ""),
+                ):
+                    is_duplicate = True
+                    break
+
+            if is_duplicate:
+                duplicate_skipped += 1
+                skipped += 1
+                continue
+
             cur.execute(
                 """
                 INSERT INTO chat_agent_long_memory_candidates (
@@ -649,14 +711,16 @@ def save_long_memory_candidates(
     saved_count = len(saved_ids)
 
     logger.info(
-        "codex_chat_memory long_memory_saved saved={} skipped={} source_model={} status=approved",
+        "codex_chat_memory long_memory_saved saved={} skipped={} duplicate_skipped={} source_model={} status=approved",
         saved_count,
         skipped,
+        duplicate_skipped,
         source_model or "",
     )
 
     return {
         "saved": saved_count,
         "skipped": skipped,
+        "duplicate_skipped": duplicate_skipped,
         "candidate_ids": saved_ids,
     }

@@ -425,6 +425,16 @@ def parse_long_memory_candidate_json(text: str) -> dict:
     return {"candidates": candidates}
 
 
+def _codex_result_to_llm_result(codex_ask: object, plugin_config: ConfigModel) -> dict:
+    return {
+        "ok": bool(getattr(codex_ask, "ok", False)),
+        "text": str(getattr(codex_ask, "text", "") or ""),
+        "error": str(getattr(codex_ask, "error", "") or ""),
+        "provider": "codex",
+        "model": str(getattr(plugin_config, "codex_chat_model", "") or ""),
+    }
+
+
 async def generate_long_memory_candidates_preview(
     plugin_config: ConfigModel,
     group_id: str,
@@ -515,22 +525,10 @@ async def generate_long_memory_candidates_preview(
                     user_id or "",
                 )
                 codex_ask = await ask_codex(plugin_config, prompt)
-                llm_result = {
-                    "ok": codex_ask.ok,
-                    "text": codex_ask.text or "",
-                    "error": codex_ask.error or "",
-                    "provider": "codex",
-                    "model": str(getattr(plugin_config, "codex_chat_model", "") or ""),
-                }
+                llm_result = _codex_result_to_llm_result(codex_ask, plugin_config)
         else:
             codex_ask = await ask_codex(plugin_config, prompt)
-            llm_result = {
-                "ok": codex_ask.ok,
-                "text": codex_ask.text or "",
-                "error": codex_ask.error or "",
-                "provider": "codex",
-                "model": str(getattr(plugin_config, "codex_chat_model", "") or ""),
-            }
+            llm_result = _codex_result_to_llm_result(codex_ask, plugin_config)
     except Exception as e:
         logger.warning(
             "codex_chat_memory candidates_preview exception group_id={} user_id={} error={}",

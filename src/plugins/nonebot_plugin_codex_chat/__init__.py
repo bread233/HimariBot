@@ -16,6 +16,7 @@ from .memory import (
     register_memory_collector,
     register_memory_commands,
     register_memory_episode_worker,
+    register_memory_long_consolidation_worker,
     build_long_memory_recall,
     build_memory_recall,
 )
@@ -34,6 +35,7 @@ _proactive_interval = UserCooldown(plugin_config.codex_chat_proactive_min_interv
 register_memory_collector()
 register_memory_commands()
 register_memory_episode_worker()
+register_memory_long_consolidation_worker()
 
 codex_chat = on_message(priority=plugin_config.codex_chat_command_priority, block=False)
 driver = get_driver()
