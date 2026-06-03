@@ -7,6 +7,7 @@ from nonebot import logger
 from ..config import ConfigModel
 from ..codex_provider import ask_codex
 from .query import get_recent_group_episodes, get_recent_user_episodes
+from .storage import save_long_memory_candidates
 
 
 _VALID_SCOPE_TYPES = frozenset({
@@ -414,4 +415,65 @@ async def generate_long_memory_candidates_preview(
         "candidates": candidates,
         "raw_text": result.text or "",
         "episode_counts": {"group": group_count, "user": user_count},
+    }
+
+
+async def generate_and_save_long_memory_candidates(
+    plugin_config: ConfigModel,
+    group_id: str,
+    user_id: str | None = None,
+    limit: int = 20,
+) -> dict:
+    preview = await generate_long_memory_candidates_preview(
+        plugin_config=plugin_config,
+        group_id=group_id,
+        user_id=user_id,
+        limit=limit,
+    )
+
+    if not preview.get("ok") or preview.get("skipped"):
+        preview["saved"] = 0
+        preview["candidate_ids"] = []
+        return preview
+
+    candidates = preview.get("candidates", [])
+    if not candidates:
+        preview["saved"] = 0
+        preview["candidate_ids"] = []
+        return preview
+
+    source_model = str(getattr(plugin_config, "codex_chat_model", "") or "")
+
+    try:
+        save_result = save_long_memory_candidates(
+            candidates,
+            source_model=source_model,
+            source="episode_consolidation",
+        )
+    except Exception as e:
+        logger.warning(
+            "codex_chat_memory candidates_save_failed group_id={} user_id={} error={}",
+            group_id,
+            user_id or "",
+            str(e),
+            exc_info=True,
+        )
+        return {
+            "ok": False,
+            "reason": "save_failed",
+            "error": str(e),
+            "group_id": group_id,
+            "user_id": user_id or "",
+            "candidates": candidates,
+            "raw_text": preview.get("raw_text", ""),
+            "episode_counts": preview.get("episode_counts", {"group": 0, "user": 0}),
+            "saved": 0,
+            "candidate_ids": [],
+        }
+
+    return {
+        **preview,
+        "saved": save_result["saved"],
+        "skipped_save": save_result["skipped"],
+        "candidate_ids": save_result["candidate_ids"],
     }

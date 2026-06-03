@@ -543,3 +543,120 @@ def save_episode_result(memcell_id: int, result: dict, model_name: str) -> dict:
         "memcell_id": memcell_id,
         "group_id": group_id,
     }
+
+
+_VALID_SCOPE_TYPES = frozenset({
+    "group", "user", "relation", "fact", "style", "preference",
+})
+
+_VALID_MEMORY_TYPES = frozenset({
+    "preference", "style", "relationship", "fact", "topic", "habit", "alias", "warning",
+})
+
+
+def save_long_memory_candidates(
+    candidates: list[dict],
+    *,
+    source_model: str = "",
+    source: str = "episode_consolidation",
+) -> dict:
+    if not isinstance(candidates, list):
+        return {"saved": 0, "skipped": 0, "candidate_ids": []}
+
+    now = int(time.time())
+    saved_ids: list[int] = []
+    skipped = 0
+
+    with get_conn() as conn:
+        cur = conn.cursor()
+
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                skipped += 1
+                continue
+
+            scope_type = str(candidate.get("scope_type", "") or "")
+            if scope_type not in _VALID_SCOPE_TYPES:
+                skipped += 1
+                continue
+
+            memory_type = str(candidate.get("memory_type", "") or "")
+            if memory_type not in _VALID_MEMORY_TYPES:
+                skipped += 1
+                continue
+
+            summary = str(candidate.get("summary", "") or "")
+            if not summary.strip():
+                skipped += 1
+                continue
+
+            title = str(candidate.get("title", "") or "")
+            group_id = str(candidate.get("group_id", "") or "")
+            user_id = str(candidate.get("user_id", "") or "")
+            target_user_id = str(candidate.get("target_user_id", "") or "")
+            notes = str(candidate.get("notes", "") or "")
+
+            keywords = _as_list(candidate.get("keywords"))
+            evidence_memcell_ids = _as_list(candidate.get("evidence_memcell_ids"))
+            evidence_episode_ids = _as_list(candidate.get("evidence_episode_ids"))
+
+            keywords_json = json.dumps(keywords, ensure_ascii=False)
+            evidence_memcell_ids_json = json.dumps(evidence_memcell_ids, ensure_ascii=False)
+            evidence_episode_ids_json = json.dumps(evidence_episode_ids, ensure_ascii=False)
+
+            importance = _as_int(candidate.get("importance"))
+            importance = max(0, min(importance, 10))
+
+            confidence = _as_float(candidate.get("confidence"))
+            confidence = max(0.0, min(confidence, 1.0))
+
+            cur.execute(
+                """
+                INSERT INTO chat_agent_long_memory_candidates (
+                    scope_type, group_id, user_id, target_user_id,
+                    memory_type, title, summary, keywords_json,
+                    evidence_memcell_ids_json, evidence_episode_ids_json,
+                    importance, confidence, status, source, source_model,
+                    created_at, updated_at, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    scope_type,
+                    group_id,
+                    user_id,
+                    target_user_id,
+                    memory_type,
+                    title,
+                    summary,
+                    keywords_json,
+                    evidence_memcell_ids_json,
+                    evidence_episode_ids_json,
+                    importance,
+                    confidence,
+                    "pending",
+                    source,
+                    source_model,
+                    now,
+                    now,
+                    notes,
+                ),
+            )
+
+            saved_ids.append(int(cur.lastrowid))
+
+        conn.commit()
+
+    saved_count = len(saved_ids)
+
+    logger.info(
+        "codex_chat_memory candidates_saved saved={} skipped={} source_model={}",
+        saved_count,
+        skipped,
+        source_model or "",
+    )
+
+    return {
+        "saved": saved_count,
+        "skipped": skipped,
+        "candidate_ids": saved_ids,
+    }
