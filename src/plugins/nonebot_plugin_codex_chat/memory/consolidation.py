@@ -663,11 +663,13 @@ async def generate_and_save_long_memory_candidates(
             "episode_counts": preview.get("episode_counts", {"group": 0, "user": 0}),
             "saved": 0,
             "candidate_ids": [],
+            "duplicate_skipped": 0,
         }
 
     return {
         **preview,
         "saved": save_result["saved"],
         "skipped_save": save_result["skipped"],
+        "duplicate_skipped": save_result.get("duplicate_skipped", 0),
         "candidate_ids": save_result["candidate_ids"],
     }
