@@ -107,6 +107,13 @@ class ConfigModel(BaseModel):
     codex_chat_memory_long_consolidation_ollama_think: bool = False
     codex_chat_memory_long_consolidation_fallback_to_codex: bool = False
 
+    # Long memory 自动沉淀配置（默认关闭）
+    codex_chat_memory_long_consolidation_auto_enabled: bool = False
+    codex_chat_memory_long_consolidation_auto_interval_seconds: int = 3600
+    codex_chat_memory_long_consolidation_auto_limit_per_tick: int = 1
+    codex_chat_memory_long_consolidation_auto_episode_limit: int = 10
+    codex_chat_memory_long_consolidation_auto_min_interval_seconds: int = 21600
+
     class Config:
         extra = "ignore"
 
