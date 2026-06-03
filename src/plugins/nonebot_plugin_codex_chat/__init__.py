@@ -133,6 +133,7 @@ def _build_memory_recall_context(event: MessageEvent, plugin_config: ConfigModel
 
     group_id = _get_event_group_id(event)
     if not group_id:
+        logger.debug("codex_chat_memory recall_context skipped reason=no_group_id")
         return ""
 
     user_id = str(event.get_user_id() or "")
@@ -181,15 +182,23 @@ def _build_memory_recall_context(event: MessageEvent, plugin_config: ConfigModel
         return ""
 
     if not recall_text:
+        logger.info(
+            "codex_chat_memory recall_context skipped reason=empty group_id={} user_id={} min_importance={} min_confidence={}",
+            group_id,
+            user_id or "",
+            min_importance,
+            min_confidence,
+        )
         return ""
 
     logger.info(
-        "codex_chat_memory recall_context injected group_id={} user_id={} len={} min_importance={} min_confidence={}",
+        "codex_chat_memory recall_context injected group_id={} user_id={} len={} min_importance={} min_confidence={} max_chars={}",
         group_id,
         user_id or "",
         len(recall_text),
         min_importance,
         min_confidence,
+        max_chars,
     )
 
     return (
@@ -479,12 +488,21 @@ async def _(bot: Bot, event: MessageEvent, state: T_State, msg=EventMessage()):
         f"context_sources={context_sources} context_len={context_len}"
     )
     persona = _load_persona(plugin_config.codex_chat_persona_path)
+    context_len_before_recall = len(context_prompt or "")
     memory_recall_context = _build_memory_recall_context(event, plugin_config)
     if memory_recall_context:
         if context_prompt:
             context_prompt = f"{context_prompt}\n\n{memory_recall_context}"
         else:
             context_prompt = memory_recall_context
+        context_len_after_recall = len(context_prompt or "")
+        logger.info(
+            "codex_chat_memory recall_context merged group_id={} recall_len={} context_len_before={} context_len_after={}",
+            _get_event_group_id(event) or "",
+            len(memory_recall_context),
+            context_len_before_recall,
+            context_len_after_recall,
+        )
     final_prompt = _build_prompt(persona, prompt, context_prompt)
     async with _codex_lock:
         result = await ask_codex(plugin_config, final_prompt)
