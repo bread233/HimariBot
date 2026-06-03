@@ -5,6 +5,7 @@ from .recall import build_memory_recall
 from .consolidation import (
     build_long_memory_candidate_prompt,
     parse_long_memory_candidate_json,
+    generate_long_memory_candidates_preview,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "build_memory_recall",
     "build_long_memory_candidate_prompt",
     "parse_long_memory_candidate_json",
+    "generate_long_memory_candidates_preview",
 ]

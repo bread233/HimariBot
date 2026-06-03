@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import json
-import re
+
+from nonebot import logger
+
+from ..config import ConfigModel
+from ..codex_provider import ask_codex
+from .query import get_recent_group_episodes, get_recent_user_episodes
 
 
 _VALID_SCOPE_TYPES = frozenset({
@@ -272,3 +277,141 @@ def parse_long_memory_candidate_json(text: str) -> dict:
         candidates.append(candidate)
 
     return {"candidates": candidates}
+
+
+async def generate_long_memory_candidates_preview(
+    plugin_config: ConfigModel,
+    group_id: str,
+    user_id: str | None = None,
+    limit: int = 20,
+) -> dict:
+    if not group_id:
+        return {
+            "ok": False,
+            "skipped": False,
+            "reason": "missing_group_id",
+            "group_id": "",
+            "user_id": user_id or "",
+            "candidates": [],
+            "raw_text": "",
+            "episode_counts": {"group": 0, "user": 0},
+        }
+
+    limit = _clamp_int(limit, 1, 50, default=20)
+
+    try:
+        group_episodes = get_recent_group_episodes(group_id=group_id, limit=limit)
+        user_episodes = get_recent_user_episodes(
+            group_id=group_id,
+            user_id=user_id,
+            limit=limit,
+        )
+    except Exception:
+        logger.warning(
+            "codex_chat_memory candidates_preview query_failed group_id={} user_id={}",
+            group_id,
+            user_id or "",
+            exc_info=True,
+        )
+        return {
+            "ok": False,
+            "skipped": False,
+            "reason": "query_failed",
+            "group_id": group_id,
+            "user_id": user_id or "",
+            "candidates": [],
+            "raw_text": "",
+            "episode_counts": {"group": 0, "user": 0},
+        }
+
+    group_count = len(group_episodes)
+    user_count = len(user_episodes)
+
+    if group_count == 0 and user_count == 0:
+        logger.info(
+            "codex_chat_memory candidates_preview skipped reason=no_episodes group_id={} user_id={}",
+            group_id,
+            user_id or "",
+        )
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": "no_episodes",
+            "group_id": group_id,
+            "user_id": user_id or "",
+            "candidates": [],
+            "raw_text": "",
+            "episode_counts": {"group": group_count, "user": user_count},
+        }
+
+    prompt = build_long_memory_candidate_prompt(
+        group_episodes=group_episodes,
+        user_episodes=user_episodes,
+        group_id=group_id,
+        user_id=user_id,
+        max_episodes=limit,
+    )
+
+    try:
+        result = await ask_codex(plugin_config, prompt)
+    except Exception as e:
+        logger.warning(
+            "codex_chat_memory candidates_preview exception group_id={} user_id={} error={}",
+            group_id,
+            user_id or "",
+            str(e),
+            exc_info=True,
+        )
+        return {
+            "ok": False,
+            "skipped": False,
+            "reason": "exception",
+            "error": str(e),
+            "group_id": group_id,
+            "user_id": user_id or "",
+            "candidates": [],
+            "raw_text": "",
+            "episode_counts": {"group": group_count, "user": user_count},
+        }
+
+    if not result.ok:
+        logger.info(
+            "codex_chat_memory candidates_preview llm_failed group_id={} user_id={} error={}",
+            group_id,
+            user_id or "",
+            result.error or "",
+        )
+        return {
+            "ok": False,
+            "skipped": False,
+            "reason": "llm_failed",
+            "error": result.error or "",
+            "group_id": group_id,
+            "user_id": user_id or "",
+            "candidates": [],
+            "raw_text": result.text or "",
+            "episode_counts": {"group": group_count, "user": user_count},
+        }
+
+    parsed = parse_long_memory_candidate_json(result.text or "")
+    candidates = parsed.get("candidates", [])
+
+    logger.info(
+        "codex_chat_memory candidates_preview ok group_id={} user_id={} group_count={} user_count={} candidate_count={}",
+        group_id,
+        user_id or "",
+        group_count,
+        user_count,
+        len(candidates),
+    )
+
+    return {
+        "ok": True,
+        "skipped": False,
+        "reason": "",
+        "group_id": group_id,
+        "user_id": user_id or "",
+        "candidates": candidates,
+        "raw_text": result.text or "",
+        "episode_counts": {"group": group_count, "user": user_count},
+    }
