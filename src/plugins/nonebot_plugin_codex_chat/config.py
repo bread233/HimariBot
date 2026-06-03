@@ -88,6 +88,9 @@ class ConfigModel(BaseModel):
     codex_chat_memory_recall_enabled: bool = False
     codex_chat_memory_recall_limit: int = 5
     codex_chat_memory_recall_include_user: bool = True
+    codex_chat_memory_recall_min_importance: int = 0
+    codex_chat_memory_recall_min_confidence: float = 0.0
+    codex_chat_memory_recall_max_chars: int = 1200
 
     class Config:
         extra = "ignore"

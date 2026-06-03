@@ -5,6 +5,8 @@ from .query import get_recent_group_episodes, get_recent_user_episodes
 
 
 _MAX_CHARS = 1200
+_MIN_MAX_CHARS = 200
+_MAX_MAX_CHARS = 3000
 
 
 def _truncate(text: str, max_chars: int) -> str:
@@ -13,17 +15,49 @@ def _truncate(text: str, max_chars: int) -> str:
     return text[:max_chars] + "…"
 
 
+def _as_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _as_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
 def build_memory_recall(
     group_id: str | None = None,
     user_id: str | None = None,
     limit: int = 5,
+    min_importance: int = 0,
+    min_confidence: float = 0.0,
+    max_chars: int = _MAX_CHARS,
 ) -> str:
     lines: list[str] = []
+
+    min_importance = _as_int(min_importance, default=0)
+    min_confidence = _as_float(min_confidence, default=0.0)
+    max_chars_raw = _as_int(max_chars, default=_MAX_CHARS)
+    if max_chars_raw < _MIN_MAX_CHARS:
+        max_chars = _MIN_MAX_CHARS
+    elif max_chars_raw > _MAX_MAX_CHARS:
+        max_chars = _MAX_MAX_CHARS
+    else:
+        max_chars = max_chars_raw
 
     if group_id:
         group_episodes = get_recent_group_episodes(group_id=group_id, limit=limit)
 
         for ep in group_episodes:
+            if _as_int(ep.get("importance"), default=0) < min_importance:
+                continue
+            if _as_float(ep.get("confidence"), default=0.0) < min_confidence:
+                continue
+
             summary = str(ep.get("summary", ""))
             topic = str(ep.get("topic", ""))
             keywords_raw = ep.get("keywords_json") or "[]"
@@ -48,6 +82,11 @@ def build_memory_recall(
         )
 
         for ep in user_episodes:
+            if _as_int(ep.get("importance"), default=0) < min_importance:
+                continue
+            if _as_float(ep.get("confidence"), default=0.0) < min_confidence:
+                continue
+
             summary = str(ep.get("summary", ""))
             attitude = str(ep.get("attitude", ""))
             pref_raw = ep.get("preference_candidates_json") or "[]"
@@ -67,4 +106,4 @@ def build_memory_recall(
             lines.append(" ".join(line_parts))
 
     recall_text = "\n".join(lines)
-    return _truncate(recall_text, _MAX_CHARS)
+    return _truncate(recall_text, max_chars)

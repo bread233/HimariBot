@@ -146,11 +146,35 @@ def _build_memory_recall_context(event: MessageEvent, plugin_config: ConfigModel
         limit = 5
     limit = max(1, min(limit, 10))
 
+    min_importance = plugin_config.codex_chat_memory_recall_min_importance
+    try:
+        min_importance = int(min_importance)
+    except Exception:
+        min_importance = 0
+    min_importance = max(0, min(min_importance, 10))
+
+    min_confidence = plugin_config.codex_chat_memory_recall_min_confidence
+    try:
+        min_confidence = float(min_confidence)
+    except Exception:
+        min_confidence = 0.0
+    min_confidence = max(0.0, min(min_confidence, 1.0))
+
+    max_chars = plugin_config.codex_chat_memory_recall_max_chars
+    try:
+        max_chars = int(max_chars)
+    except Exception:
+        max_chars = 1200
+    max_chars = max(200, min(max_chars, 3000))
+
     try:
         recall_text = build_memory_recall(
             group_id=group_id,
             user_id=user_id or None,
             limit=limit,
+            min_importance=min_importance,
+            min_confidence=min_confidence,
+            max_chars=max_chars,
         ).strip()
     except Exception:
         logger.warning("codex_chat_memory recall_context_failed", exc_info=True)
@@ -160,10 +184,12 @@ def _build_memory_recall_context(event: MessageEvent, plugin_config: ConfigModel
         return ""
 
     logger.info(
-        "codex_chat_memory recall_context injected group_id={} user_id={} len={}",
+        "codex_chat_memory recall_context injected group_id={} user_id={} len={} min_importance={} min_confidence={}",
         group_id,
         user_id or "",
         len(recall_text),
+        min_importance,
+        min_confidence,
     )
 
     return (
