@@ -21,6 +21,8 @@ class MaibotInboundMessage:
     group_id: str | None
     group_name: str | None
     plain_text: str
+    components: list[Any] | None = None
+    raw_segments: list[dict[str, Any]] | None = None
     raw_event: Any | None = None
 
 
@@ -94,7 +96,11 @@ async def handle_inbound_message(
         ),
         additional_config={},
     )
-    session_message.raw_message = MessageSequence([TextComponent(text=inbound.plain_text)])
+    if inbound.components:
+        raw_message = MessageSequence(inbound.components)
+    else:
+        raw_message = MessageSequence([TextComponent(text=inbound.plain_text)])
+    session_message.raw_message = raw_message
     session_message.processed_plain_text = inbound.plain_text
     session_message.initialized = True
 

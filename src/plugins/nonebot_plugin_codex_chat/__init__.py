@@ -26,8 +26,32 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
         group_id = getattr(event, "group_id", None)
         if plugin_config.allowed_groups_list and int(group_id or 0) not in plugin_config.allowed_groups_list:
             return
-    prompt = str(message).strip()
-    if not prompt:
+
+    fallback_plain_text = str(message).strip()
+    converted = None
+    try:
+        from .onebot_media import convert_onebot_segments_to_maibot_components
+
+        raw_message = getattr(message, "message", None) or message
+        converted = await convert_onebot_segments_to_maibot_components(
+            raw_message,
+            group_id=str(getattr(event, "group_id", "") or "").strip() or None,
+            user_id=str(getattr(event, "user_id", "") or "").strip() or None,
+            message_id=str(getattr(event, "message_id", "") or "").strip() or f"codex_chat_{getattr(event, 'message_id', '')}",
+            download_media=True,
+        )
+    except Exception as exc:
+        logger.exception(f"codex_chat_convert_segments_failed error={exc}")
+
+    plain_text = fallback_plain_text
+    components = None
+    raw_segments = None
+    if converted is not None:
+        plain_text = str(converted.plain_text or "").strip() or fallback_plain_text
+        components = converted.components
+        raw_segments = converted.raw_segments
+
+    if not plain_text and not components:
         return
 
     sender = getattr(event, "sender", None)
@@ -39,7 +63,9 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
         user_cardname=str(getattr(sender, "card", "") or "").strip() or None,
         group_id=str(getattr(event, "group_id", "") or "").strip() or None,
         group_name=str(getattr(event, "group_name", "") or "").strip() or None,
-        plain_text=prompt,
+        plain_text=plain_text,
+        components=components,
+        raw_segments=raw_segments,
         raw_event=event,
     )
     result = await handle_inbound_message(inbound)
