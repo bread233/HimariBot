@@ -2,8 +2,8 @@ from nonebot import get_driver, logger, on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent
 from nonebot.params import EventMessage
 
-from .codex_provider import ask_codex
 from .config import get_config
+from .maibot_core.bridge import MaibotInboundMessage, handle_inbound_message
 
 __plugin_meta__ = {
     "name": "codex_chat",
@@ -20,7 +20,6 @@ logger.info("codex_chat minimal bootstrap loaded")
 
 @_codex_chat.handle()
 async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
-    del bot
     if not plugin_config.codex_chat_enable:
         return
     if isinstance(event, GroupMessageEvent):
@@ -30,8 +29,29 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
     prompt = str(message).strip()
     if not prompt:
         return
-    codex_result = await ask_codex(plugin_config, prompt)
-    if not codex_result.ok:
-        logger.warning("codex_chat failed reason=%s", codex_result.reason)
+
+    sender = getattr(event, "sender", None)
+    inbound = MaibotInboundMessage(
+        platform="onebot.v11",
+        message_id=str(getattr(event, "message_id", "") or "").strip() or f"codex_chat_{getattr(event, 'message_id', '')}",
+        user_id=str(getattr(event, "user_id", "") or "").strip(),
+        user_nickname=str(getattr(sender, "nickname", "") or "").strip() or str(getattr(sender, "card", "") or "").strip() or "用户",
+        user_cardname=str(getattr(sender, "card", "") or "").strip() or None,
+        group_id=str(getattr(event, "group_id", "") or "").strip() or None,
+        group_name=str(getattr(event, "group_name", "") or "").strip() or None,
+        plain_text=prompt,
+        raw_event=event,
+    )
+    result = await handle_inbound_message(inbound)
+    if not result.should_reply or not result.replies:
         return
-    await _codex_chat.finish(codex_result.text)
+
+    for index, reply in enumerate(result.replies):
+        if not reply.text or not str(reply.text).strip():
+            logger.debug(f"codex_chat_send_from_maibot skip_empty index={index}")
+            continue
+        try:
+            await bot.send(event, reply.text)
+            logger.info(f"codex_chat_send_from_maibot sent index={index}")
+        except Exception as exc:
+            logger.exception(f"codex_chat_send_from_maibot failed index={index} error={exc}")
