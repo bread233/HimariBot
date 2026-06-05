@@ -17,7 +17,7 @@ from .query import (
     get_recent_memcells,
     get_user_messages,
 )
-from .recall import build_long_memory_recall, build_memory_recall
+from .recall import build_long_memory_recall, build_memory_recall, build_query_memory_recall
 from .consolidation import (
     generate_long_memory_candidates_preview,
     generate_and_save_long_memory_candidates,
@@ -100,6 +100,13 @@ def _normalize_subcommand(command: str) -> str:
         "长期记忆": "long_recall",
         "long-memory": "long_recall",
         "long_memory": "long_recall",
+        "search-memory": "search_memory",
+        "search_memory": "search_memory",
+        "memory-search": "search_memory",
+        "memory_search": "search_memory",
+        "搜记忆": "search_memory",
+        "记忆搜索": "search_memory",
+        "rag": "search_memory",
     }
     return mapping.get(command.strip().lower(), "")
 
@@ -378,6 +385,7 @@ def _parse_group_user_limit_args(
     default_limit: int = 20,
     max_limit: int = 50,
 ) -> tuple[str | None, str | None, int]:
+
     positional_args: list[str] = []
     limit = default_limit
 
@@ -476,6 +484,43 @@ def _build_greg(event: MessageEvent) -> str | None:
     return str(raw) if raw is not None else None
 
 
+def _parse_search_memory_args(
+    args: list[str],
+    current_group_id: str | None = None,
+) -> tuple[str | None, str, int]:
+    limit = 10
+    positional_args: list[str] = []
+
+    i = 0
+    while i < len(args):
+        if args[i] == "--limit" and i + 1 < len(args):
+            try:
+                limit = int(args[i + 1])
+            except ValueError:
+                pass
+            i += 2
+        elif args[i].startswith("--limit="):
+            try:
+                limit = int(args[i][len("--limit="):])
+            except ValueError:
+                pass
+            i += 1
+        else:
+            positional_args.append(args[i])
+            i += 1
+
+    group_id = current_group_id
+    if positional_args:
+        first = positional_args[0]
+        if first.isdigit() and len(first) >= 5:
+            group_id = first
+            positional_args = positional_args[1:]
+
+    query = " ".join(part for part in positional_args if part).strip()
+    limit = max(1, min(limit, 20))
+    return group_id, query, limit
+
+
 @_memory_cmd.handle()
 async def _handle_memory_command(
     event: MessageEvent,
@@ -535,6 +580,31 @@ async def _handle_memory_command(
                         f"limit={lim}\n\n"
                         f"{recall_text}"
                     )
+        elif subcommand == "search_memory":
+            current_gid = _build_greg(event)
+            gid, query, lim = _parse_search_memory_args(rest, current_gid)
+            if not gid:
+                reply = "缺少 group_id"
+            elif not query:
+                reply = "用法：/codex_memory search-memory [group_id] <query...> [--limit N]"
+            else:
+                recall_text = build_query_memory_recall(
+                    group_id=gid,
+                    query=query,
+                    limit=lim,
+                    max_scan=200,
+                    max_chars=1200,
+                )
+                if not recall_text.strip():
+                    reply = "暂无相关长期记忆"
+                else:
+                    reply = (
+                        f"长期记忆检索\n"
+                        f"group_id={gid}\n"
+                        f"query={query}\n"
+                        f"limit={lim}\n\n"
+                        f"{recall_text}"
+                    )
         elif subcommand == "consolidate_preview":
             current_gid = _build_greg(event)
             gid, uid, lim = _parse_group_user_limit_args(rest, current_gid)
@@ -568,6 +638,7 @@ async def _handle_memory_command(
                 "/codex_memory episodes [group_id] [limit]\n"
                 "/codex_memory recall [group_id] [user_id] [--limit N]\n"
                 "/codex_memory long-recall [group_id] [user_id] [--limit N]\n"
+                "/codex_memory search-memory [group_id] <query...> [--limit N]\n"
                 "/codex_memory consolidate-preview [group_id] [user_id] [--limit N]\n"
                 "/codex_memory consolidate-save [group_id] [user_id] [--limit N]"
             )

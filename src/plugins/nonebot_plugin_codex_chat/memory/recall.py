@@ -1,13 +1,30 @@
 from __future__ import annotations
 
 import json
+import re
+from typing import Any
 
-from .query import get_recent_group_episodes, get_recent_long_memory_candidates, get_recent_user_episodes
-
+from .query import (
+    get_approved_long_memory_candidates_for_group,
+    get_recent_group_episodes,
+    get_recent_long_memory_candidates,
+    get_recent_user_episodes,
+)
 
 _MAX_CHARS = 1200
 _MIN_MAX_CHARS = 200
 _MAX_MAX_CHARS = 3000
+_QUERY_STOPWORDS = {
+    "什么",
+    "怎么",
+    "如何",
+    "是否",
+    "这个",
+    "那个",
+    "群里",
+    "一下",
+    "请问",
+}
 
 
 def _truncate(text: str, max_chars: int) -> str:
@@ -28,6 +45,105 @@ def _as_float(value, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def _normalize_query_text(value: object) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    return re.sub(r"\s+", " ", text)
+
+
+def _parse_json_list(value: object) -> list:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                return parsed
+        except Exception:
+            pass
+    return []
+
+
+def _tokenize_memory_query(query: str) -> list[str]:
+    normalized = _normalize_query_text(query)
+    if not normalized:
+        return []
+
+    tokens: list[str] = []
+    seen: set[str] = set()
+
+    def add_token(token: str) -> None:
+        token = token.strip().lower()
+        if not token or token in _QUERY_STOPWORDS:
+            return
+        if token in seen:
+            return
+        seen.add(token)
+        tokens.append(token)
+
+    for part in re.findall(r"[a-z0-9_]+|[\u4e00-\u9fff]+", normalized):
+        if re.fullmatch(r"[a-z0-9_]+", part):
+            add_token(part)
+            continue
+        if len(part) <= 2:
+            add_token(part)
+            continue
+        if len(part) <= 6:
+            add_token(part)
+        for size in range(2, min(6, len(part)) + 1):
+            for i in range(0, len(part) - size + 1):
+                add_token(part[i : i + size])
+
+    return tokens[:30]
+
+
+def _score_text_field(text: str, tokens: list[str]) -> float:
+    if not text:
+        return 0.0
+    score = 0.0
+    lowered = text.lower()
+    for token in tokens:
+        if token and token in lowered:
+            score += 1.0
+    return score
+
+
+def _score_long_memory_for_query(candidate: dict[str, Any], query: str, tokens: list[str]) -> float:
+    normalized_query = _normalize_query_text(query)
+    if not normalized_query:
+        return 0.0
+
+    title = str(candidate.get("title") or "").strip()
+    summary = str(candidate.get("summary") or "").strip()
+    notes = str(candidate.get("notes") or "").strip()
+    user_id = str(candidate.get("user_id") or "").strip().lower()
+    target_user_id = str(candidate.get("target_user_id") or "").strip().lower()
+    keywords = [str(item).strip().lower() for item in _parse_json_list(candidate.get("keywords_json")) if str(item).strip()]
+
+    score = 0.0
+    score += _score_text_field(title, tokens) * 4.0
+    score += _score_text_field(summary, tokens) * 3.0
+    score += _score_text_field(notes, tokens) * 1.0
+    score += sum(5.0 for token in tokens if token and any(token in kw for kw in keywords))
+    score += sum(8.0 for token in tokens if token and token == user_id)
+    score += sum(8.0 for token in tokens if token and token == target_user_id)
+
+    if normalized_query and (
+        normalized_query in _normalize_query_text(title)
+        or normalized_query in _normalize_query_text(summary)
+        or any(normalized_query in kw for kw in keywords)
+    ):
+        score += 6.0
+
+    if score <= 0.0:
+        return 0.0
+
+    score += _as_int(candidate.get("importance"), default=0) * 0.1
+    score += _as_float(candidate.get("confidence"), default=0.0) * 0.5
+    return score
 
 
 def build_memory_recall(
@@ -108,19 +224,6 @@ def build_memory_recall(
 
     recall_text = "\n".join(lines)
     return _truncate(recall_text, max_chars)
-
-
-def _parse_json_list(value: object) -> list:
-    if isinstance(value, list):
-        return value
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-            if isinstance(parsed, list):
-                return parsed
-        except Exception:
-            pass
-    return []
 
 
 def build_long_memory_recall(
@@ -205,3 +308,77 @@ def build_long_memory_recall(
 
     recall_text = "\n\n".join(lines)
     return _truncate(recall_text, max_chars)
+
+
+def build_query_memory_recall(
+    group_id: str,
+    query: str,
+    *,
+    limit: int = 10,
+    max_scan: int = 200,
+    min_score: float = 1.0,
+    max_chars: int = 1200,
+) -> str:
+    group_id = str(group_id or "").strip()
+    query = str(query or "").strip()
+    if not group_id or not query:
+        return ""
+
+    limit = max(1, min(_as_int(limit, default=10), 20))
+    max_scan = max(20, min(_as_int(max_scan, default=200), 200))
+    max_chars = max(200, min(_as_int(max_chars, default=1200), 3000))
+    min_score = max(0.0, _as_float(min_score, default=1.0))
+
+    candidates = get_approved_long_memory_candidates_for_group(group_id, limit=max_scan)
+    tokens = _tokenize_memory_query(query)
+    if not tokens:
+        return ""
+
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for candidate in candidates:
+        score = _score_long_memory_for_query(candidate, query, tokens)
+        if score < min_score:
+            continue
+        scored.append((score, candidate))
+
+    if not scored:
+        return ""
+
+    scored.sort(
+        key=lambda item: (
+            -item[0],
+            -_as_int(item[1].get("importance"), default=0),
+            -_as_float(item[1].get("confidence"), default=0.0),
+            -_as_int(item[1].get("updated_at"), default=0),
+            -_as_int(item[1].get("id"), default=0),
+        )
+    )
+
+    lines: list[str] = []
+    for idx, (score, candidate) in enumerate(scored[:limit], 1):
+        scope_type = candidate.get("scope_type") or "?"
+        memory_type = candidate.get("memory_type") or "?"
+        importance = candidate.get("importance", 0)
+        confidence = candidate.get("confidence", 0.0)
+        title = str(candidate.get("title") or "").strip()
+        summary = str(candidate.get("summary") or "").strip()
+        keywords = _parse_json_list(candidate.get("keywords_json"))
+        user_id = str(candidate.get("user_id") or "").strip()
+        target_user_id = str(candidate.get("target_user_id") or "").strip()
+
+        lines.append(
+            f"[{idx}] score={score:.2f} {scope_type}/{memory_type} "
+            f"importance={importance} confidence={confidence}"
+        )
+        if title:
+            lines.append(f"title={title}")
+        if summary:
+            lines.append(f"summary={summary}")
+        if keywords:
+            lines.append(f"keywords={'、'.join(str(k) for k in keywords[:8])}")
+        if user_id:
+            lines.append(f"user_id={user_id}")
+        if target_user_id:
+            lines.append(f"target_user_id={target_user_id}")
+
+    return _truncate("\n".join(lines), max_chars)
