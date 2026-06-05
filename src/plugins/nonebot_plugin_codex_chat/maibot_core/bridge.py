@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from .bootstrap import bootstrap_src_alias
 from src.outbound import OutboundCapture
+from src.chat.message_receive.chat_manager import chat_manager
 
 bootstrap_src_alias()
 
@@ -74,7 +76,7 @@ async def handle_inbound_message(
 
     session_message = SessionMessage(
         message_id=inbound.message_id,
-        timestamp=None,
+        timestamp=datetime.now(),
         platform=inbound.platform,
     )
     session_message.platform = inbound.platform
@@ -95,6 +97,13 @@ async def handle_inbound_message(
     session_message.raw_message = MessageSequence([TextComponent(text=inbound.plain_text)])
     session_message.processed_plain_text = inbound.plain_text
     session_message.initialized = True
+
+    session = await chat_manager.get_or_create_session(
+        inbound.platform,
+        inbound.user_id,
+        inbound.group_id,
+    )
+    session_message.session_id = session.session_id
 
     try:
         with OutboundCapture() as capture:
