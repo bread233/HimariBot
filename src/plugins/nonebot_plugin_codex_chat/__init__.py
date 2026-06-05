@@ -212,6 +212,29 @@ def _build_memory_recall_context(event: MessageEvent, plugin_config: ConfigModel
     )
 
 
+def _has_query_memory_signal(prompt: str, at_user_ids: list[str]) -> bool:
+    if at_user_ids:
+        return True
+    text = str(prompt or "").strip().lower()
+    if not text:
+        return False
+
+    keywords = [
+        "谁", "这个人", "那个人", "他", "她", "ta", "性格", "风格", "说话", "语气", "习惯", "人设", "印象",
+        "喜欢", "偏好", "讨厌", "关系", "熟", "认识", "经常", "平时", "常常",
+        "记得", "之前", "以前", "上次", "最近", "聊过", "提过", "说过",
+        "群里", "话题", "常聊", "打卡", "地点", "新作", "魔裁", "总结",
+    ]
+    if any(k in text for k in keywords):
+        return True
+
+    question_marks = any(ch in text for ch in ("?", "？", "吗", "么", "嘛", "呢"))
+    generic = any(k in text for k in ("什么", "怎么样", "如何", "怎么", "为啥", "为什么"))
+    if question_marks and generic:
+        return True
+    return False
+
+
 def _extract_at_user_ids(event: MessageEvent) -> list[str]:
     try:
         messages = []
@@ -248,6 +271,7 @@ def _build_query_memory_recall_context(
     event: MessageEvent,
     plugin_config: ConfigModel,
     prompt: str,
+    existing_context_len: int = 0,
 ) -> str:
     if not plugin_config.codex_chat_memory_query_recall_enabled:
         return ""
@@ -266,10 +290,46 @@ def _build_query_memory_recall_context(
         return ""
 
     at_user_ids = _extract_at_user_ids(event)
-    query_parts = [query]
-    if at_user_ids:
-        query_parts.extend(at_user_ids)
-    recall_query = " ".join(part for part in query_parts if part).strip()
+
+    min_query_chars = plugin_config.codex_chat_memory_query_recall_min_query_chars
+    try:
+        min_query_chars = int(min_query_chars)
+    except Exception:
+        min_query_chars = 4
+    min_query_chars = max(0, min(min_query_chars, 50))
+    if len(query) < min_query_chars and not at_user_ids:
+        logger.debug(
+            "codex_chat_memory query_recall_context skipped reason=query_too_short group_id={} query_len={} min_query_chars={}",
+            group_id,
+            len(query),
+            min_query_chars,
+        )
+        return ""
+
+    require_signal = bool(plugin_config.codex_chat_memory_query_recall_require_signal)
+    if require_signal and not _has_query_memory_signal(query, at_user_ids):
+        logger.debug(
+            "codex_chat_memory query_recall_context skipped reason=no_signal group_id={} query_len={} at_count={}",
+            group_id,
+            len(query),
+            len(at_user_ids),
+        )
+        return ""
+
+    skip_context_over_chars = plugin_config.codex_chat_memory_query_recall_skip_context_over_chars
+    try:
+        skip_context_over_chars = int(skip_context_over_chars)
+    except Exception:
+        skip_context_over_chars = 2800
+    skip_context_over_chars = max(0, min(skip_context_over_chars, 10000))
+    if skip_context_over_chars > 0 and existing_context_len >= skip_context_over_chars:
+        logger.info(
+            "codex_chat_memory query_recall_context skipped reason=context_over_budget group_id={} context_len={} budget={}",
+            group_id,
+            existing_context_len,
+            skip_context_over_chars,
+        )
+        return ""
 
     limit = plugin_config.codex_chat_memory_query_recall_limit
     try:
@@ -299,6 +359,14 @@ def _build_query_memory_recall_context(
         max_chars = 1200
     max_chars = max(200, min(max_chars, 3000))
 
+    at_strict = bool(plugin_config.codex_chat_memory_query_recall_at_strict)
+    require_target_match = bool(at_user_ids and at_strict)
+
+    query_parts = [query]
+    if at_user_ids:
+        query_parts.extend(at_user_ids)
+    recall_query = " ".join(part for part in query_parts if part).strip()
+
     try:
         query_recall_text = build_query_memory_recall(
             group_id=group_id,
@@ -307,6 +375,8 @@ def _build_query_memory_recall_context(
             max_scan=max_scan,
             min_score=min_score,
             max_chars=max_chars,
+            target_user_ids=at_user_ids,
+            require_target_match=require_target_match,
         ).strip()
     except Exception:
         logger.warning("codex_chat_memory query_recall_context_failed", exc_info=True)
@@ -314,28 +384,35 @@ def _build_query_memory_recall_context(
 
     if not query_recall_text:
         logger.info(
-            "codex_chat_memory query_recall_context skipped reason=empty group_id={} query_len={} min_score={}",
+            "codex_chat_memory query_recall_context skipped reason=empty group_id={} query_len={} at_count={} require_target_match={} min_score={}",
             group_id,
             len(query),
+            len(at_user_ids),
+            require_target_match,
             min_score,
         )
         return ""
 
     logger.info(
-        "codex_chat_memory query_recall_context injected group_id={} query_len={} at_count={} len={} limit={} max_scan={} min_score={} max_chars={}",
+        "codex_chat_memory query_recall_context injected group_id={} query_len={} at_count={} target_strict={} len={} limit={} max_scan={} min_score={} max_chars={} context_len_before={}",
         group_id,
         len(query),
         len(at_user_ids),
+        require_target_match,
         len(query_recall_text),
         limit,
         max_scan,
         min_score,
         max_chars,
+        existing_context_len,
     )
 
     return (
         "【与当前问题相关的长期记忆】\n"
-        "以下内容是根据当前问题从长期记忆中检索出的相关信息，可能不完整；回答时优先参考，但不要编造未出现的信息。\n"
+        "以下内容是根据当前问题从长期记忆中检索出的相关信息。"
+        "如果问题是在询问某个被 @ 的用户，只能把匹配该用户 user_id/target_user_id 的记忆当作该用户特征；"
+        "不要把群整体记忆套用到某个具体用户身上。"
+        "若没有该用户专属记忆，应说明不太确定。\n"
         f"{query_recall_text}"
     )
 
@@ -736,7 +813,12 @@ async def _(bot: Bot, event: MessageEvent, state: T_State, msg=EventMessage()):
             context_len_after_long_recall,
         )
 
-    query_memory_recall_context = _build_query_memory_recall_context(event, plugin_config, prompt)
+    query_memory_recall_context = _build_query_memory_recall_context(
+        event,
+        plugin_config,
+        prompt,
+        existing_context_len=len(context_prompt or ""),
+    )
     if query_memory_recall_context:
         context_len_before_query_recall = len(context_prompt or "")
         if context_prompt:
