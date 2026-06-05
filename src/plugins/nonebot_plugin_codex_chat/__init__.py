@@ -235,6 +235,23 @@ def _has_query_memory_signal(prompt: str, at_user_ids: list[str]) -> bool:
     return False
 
 
+def _looks_like_person_style_query(prompt: str) -> bool:
+    text = str(prompt or "").strip().lower()
+    if not text:
+        return False
+
+    if any(k in text for k in ("群里", "大家", "整体", "这个群")):
+        return False
+
+    style_keywords = ("风格", "说话", "语气", "性格", "印象", "平时", "习惯", "人设", "什么样", "怎么样")
+    if not any(k in text for k in style_keywords):
+        return False
+
+    if any(k in text for k in ("是什么", "什么样", "怎么样", "如何", "平时", "说话", "风格")):
+        return True
+    return False
+
+
 def _extract_at_user_ids(event: MessageEvent) -> list[str]:
     try:
         messages = []
@@ -290,6 +307,9 @@ def _build_query_memory_recall_context(
         return ""
 
     at_user_ids = _extract_at_user_ids(event)
+    person_style_query = _looks_like_person_style_query(query)
+    person_guard_enabled = bool(plugin_config.codex_chat_memory_person_query_guard_enabled)
+    require_at_for_style = bool(plugin_config.codex_chat_memory_person_query_require_at_for_style)
 
     min_query_chars = plugin_config.codex_chat_memory_query_recall_min_query_chars
     try:
@@ -313,6 +333,14 @@ def _build_query_memory_recall_context(
             group_id,
             len(query),
             len(at_user_ids),
+        )
+        return ""
+
+    if person_guard_enabled and require_at_for_style and person_style_query and not at_user_ids:
+        logger.info(
+            "codex_chat_memory query_recall_context skipped reason=person_query_without_target_at group_id={} query_len={}",
+            group_id,
+            len(query),
         )
         return ""
 
@@ -794,25 +822,39 @@ async def _(bot: Bot, event: MessageEvent, state: T_State, msg=EventMessage()):
             context_len_after_recall,
         )
 
-    long_memory_recall_context = _build_long_memory_recall_context(event, plugin_config)
-    if long_memory_recall_context:
-        context_len_before_long_recall = len(context_prompt or "")
+    at_user_ids_for_guard = _extract_at_user_ids(event)
+    person_style_query_for_guard = _looks_like_person_style_query(prompt)
+    skip_generic_long_recall_for_person_query = (
+        plugin_config.codex_chat_memory_person_query_guard_enabled
+        and plugin_config.codex_chat_memory_person_query_require_at_for_style
+        and person_style_query_for_guard
+        and not at_user_ids_for_guard
+    )
 
-        if context_prompt:
-            context_prompt = f"{context_prompt}\n\n{long_memory_recall_context}"
-        else:
-            context_prompt = long_memory_recall_context
-
-        context_len_after_long_recall = len(context_prompt or "")
-
+    if skip_generic_long_recall_for_person_query:
         logger.info(
-            "codex_chat_memory long_recall_context merged group_id={} recall_len={} context_len_before={} context_len_after={}",
+            "codex_chat_memory long_recall_context skipped reason=person_query_without_target_at group_id={} query_len={}",
             _get_event_group_id(event) or "",
-            len(long_memory_recall_context),
-            context_len_before_long_recall,
-            context_len_after_long_recall,
+            len(str(prompt or "")),
         )
+    else:
+        long_memory_recall_context = _build_long_memory_recall_context(event, plugin_config)
+        if long_memory_recall_context:
+            context_len_before_long_recall = len(context_prompt or "")
+            if context_prompt:
+                context_prompt = f"{context_prompt}\n\n{long_memory_recall_context}"
+            else:
+                context_prompt = long_memory_recall_context
 
+            context_len_after_long_recall = len(context_prompt or "")
+
+            logger.info(
+                "codex_chat_memory long_recall_context merged group_id={} recall_len={} context_len_before={} context_len_after={}",
+                _get_event_group_id(event) or "",
+                len(long_memory_recall_context),
+                context_len_before_long_recall,
+                context_len_after_long_recall,
+            )
     query_memory_recall_context = _build_query_memory_recall_context(
         event,
         plugin_config,

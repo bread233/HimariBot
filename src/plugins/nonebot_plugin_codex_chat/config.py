@@ -110,6 +110,8 @@ class ConfigModel(BaseModel):
     codex_chat_memory_query_recall_min_query_chars: int = 4
     codex_chat_memory_query_recall_skip_context_over_chars: int = 2800
     codex_chat_memory_query_recall_at_strict: bool = True
+    codex_chat_memory_person_query_guard_enabled: bool = True
+    codex_chat_memory_person_query_require_at_for_style: bool = True
 
     # Long memory consolidation provider 配置
     codex_chat_memory_long_consolidation_provider: str = "codex"
