@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .bootstrap import bootstrap_src_alias
-from .outbound import OutboundCapture
+from src.outbound import OutboundCapture
 
 bootstrap_src_alias()
 
@@ -63,16 +63,20 @@ async def handle_inbound_message(
 ) -> MaibotHandleResult:
     """将外部消息送入 maibot_core 入站链路。"""
 
-    from .chat.message_receive.message import SessionMessage
-    from .common.data_models.mai_message_data_model import GroupInfo, MessageInfo, UserInfo
-    from .common.data_models.message_component_data_model import MessageSequence, TextComponent
+    from src.chat.message_receive.message import SessionMessage
+    from src.common.data_models.mai_message_data_model import GroupInfo, MessageInfo, UserInfo
+    from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
 
     if receiver is None:
         from .chat.heart_flow.heartflow_message_processor import HeartFCMessageReceiver
 
         receiver = HeartFCMessageReceiver()
 
-    session_message = SessionMessage()
+    session_message = SessionMessage(
+        message_id=inbound.message_id,
+        timestamp=None,
+        platform=inbound.platform,
+    )
     session_message.platform = inbound.platform
     session_message.message_id = inbound.message_id
     session_message.message_info = MessageInfo(
