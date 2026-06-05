@@ -67,6 +67,31 @@ def _parse_json_list(value: object) -> list:
     return []
 
 
+def _normalize_user_id_set(values: object) -> set[str]:
+    if values is None:
+        return set()
+    if isinstance(values, str):
+        values = [values]
+    elif not isinstance(values, (list, tuple, set)):
+        values = [values]
+
+    out: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text.lower() == "all":
+            continue
+        out.add(text)
+    return out
+
+
+def _candidate_matches_target_user(candidate: dict[str, Any], target_user_ids: set[str]) -> bool:
+    if not target_user_ids:
+        return False
+    user_id = str(candidate.get("user_id") or "").strip()
+    target_user_id = str(candidate.get("target_user_id") or "").strip()
+    return user_id in target_user_ids or target_user_id in target_user_ids
+
+
 def _tokenize_memory_query(query: str) -> list[str]:
     normalized = _normalize_query_text(query)
     if not normalized:
@@ -318,6 +343,8 @@ def build_query_memory_recall(
     max_scan: int = 200,
     min_score: float = 1.0,
     max_chars: int = 1200,
+    target_user_ids: list[str] | None = None,
+    require_target_match: bool = False,
 ) -> str:
     group_id = str(group_id or "").strip()
     query = str(query or "").strip()
@@ -334,9 +361,16 @@ def build_query_memory_recall(
     if not tokens:
         return ""
 
+    target_ids = _normalize_user_id_set(target_user_ids)
     scored: list[tuple[float, dict[str, Any]]] = []
     for candidate in candidates:
+        target_matched = _candidate_matches_target_user(candidate, target_ids)
+        if require_target_match and target_ids and not target_matched:
+            continue
+
         score = _score_long_memory_for_query(candidate, query, tokens)
+        if target_matched:
+            score += 50.0
         if score < min_score:
             continue
         scored.append((score, candidate))

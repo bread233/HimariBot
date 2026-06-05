@@ -105,6 +105,11 @@ class ConfigModel(BaseModel):
     codex_chat_memory_query_recall_max_scan: int = 200
     codex_chat_memory_query_recall_min_score: float = 1.0
     codex_chat_memory_query_recall_max_chars: int = 1200
+    # Query-aware memory recall 质量控制
+    codex_chat_memory_query_recall_require_signal: bool = True
+    codex_chat_memory_query_recall_min_query_chars: int = 4
+    codex_chat_memory_query_recall_skip_context_over_chars: int = 2800
+    codex_chat_memory_query_recall_at_strict: bool = True
 
     # Long memory consolidation provider 配置
     codex_chat_memory_long_consolidation_provider: str = "codex"
