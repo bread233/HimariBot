@@ -281,8 +281,41 @@ class LLMServiceClient:
             ensure_ascii=False,
             sort_keys=True,
         )
-        logger.warning("maibot image LLM is not wired to codex adapter yet; returning empty result")
-        result = LLMResponseResult(response="", model_name=active_options.model_name or "codexcli")
+        try:
+            from src.plugins.nonebot_plugin_codex_chat.maibot_core.codex_vision_adapter import describe_image
+
+            vision_result = await describe_image(
+                image_path=None,
+                image_bytes=None,
+                mime_type=image_format or None,
+                prompt=prompt,
+                context={
+                    "request_type": self.request_type,
+                    "task_name": self.task_name,
+                    "prompt_text": prompt_text,
+                    "image_base64_sha256": image_digest,
+                    "image_base64_size": len(image_base64),
+                    "model_name": active_options.model_name,
+                },
+            )
+        except Exception as exc:
+            logger.warning(f"codex vision adapter failed unexpectedly: {exc}")
+            vision_result = None
+
+        if vision_result is None:
+            model_name = active_options.model_name or "codexcli"
+            result = LLMResponseResult(response="", model_name=model_name)
+        else:
+            if not vision_result.ok and vision_result.error:
+                logger.debug(
+                    "codex vision adapter returned non-ok result: %s source=%s",
+                    vision_result.error,
+                    vision_result.source,
+                )
+            result = LLMResponseResult(
+                response=vision_result.text or "",
+                model_name=active_options.model_name or vision_result.source or "codexcli",
+            )
         self._record_cache_stats(result, prompt_text=prompt_text)
         return result
 
