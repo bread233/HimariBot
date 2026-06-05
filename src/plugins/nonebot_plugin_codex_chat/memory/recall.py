@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from .query import (
@@ -10,6 +13,101 @@ from .query import (
     get_recent_long_memory_candidates,
     get_recent_user_episodes,
 )
+
+_MEMORY_ALIASES_PATH = Path("data/nonebot_chat_agent/memory_aliases.json")
+logger = logging.getLogger(__name__)
+
+
+def is_ascii_alias(alias: str) -> bool:
+    alias = str(alias or "").strip()
+    return bool(alias) and all(ch.isascii() and (ch.isalnum() or ch == "_") for ch in alias)
+
+
+def match_alias_in_text(alias: str, text: str) -> bool:
+    alias = str(alias or "").strip()
+    text = str(text or "")
+    if not alias or not text:
+        return False
+    if is_ascii_alias(alias):
+        pattern = rf"(?<![A-Za-z0-9_]){re.escape(alias)}(?![A-Za-z0-9_])"
+        return re.search(pattern, text) is not None
+    return alias in text
+
+
+@lru_cache(maxsize=1)
+def _load_memory_aliases() -> dict[str, dict[str, str]]:
+    """Load group-scoped manual aliases from JSON.
+
+    Expected structure:
+    {
+      "groups": {
+        "861300681": {
+          "aliases": {
+            "hibiki": "123456789"
+          }
+        }
+      }
+    }
+    """
+    path = _MEMORY_ALIASES_PATH
+    if not path.exists():
+        logger.info("memory_aliases.json not found at %s", path)
+        return {}
+
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.warning("failed to load memory_aliases.json from %s", path, exc_info=True)
+        return {}
+
+    if not isinstance(raw, dict):
+        logger.warning("memory_aliases.json root is not a dict, treating as empty")
+        return {}
+
+    groups = raw.get("groups")
+    if not isinstance(groups, dict):
+        logger.warning("memory_aliases.json missing groups map, treating as empty")
+        return {}
+
+    result: dict[str, dict[str, str]] = {}
+    for group_id_raw, group_data in groups.items():
+        group_id = str(group_id_raw or "").strip()
+        if not group_id or not isinstance(group_data, dict):
+            continue
+        aliases = group_data.get("aliases")
+        if not isinstance(aliases, dict):
+            continue
+
+        parsed: dict[str, str] = {}
+        for alias_raw, user_id_raw in aliases.items():
+            alias = str(alias_raw or "").strip()
+            user_id = str(user_id_raw or "").strip()
+            if alias and user_id:
+                parsed[alias] = user_id
+        if parsed:
+            result[group_id] = parsed
+    return result
+
+
+def resolve_manual_text_aliases(group_id: str, text: str) -> list[dict[str, str]]:
+    group_id = str(group_id or "").strip()
+    text = str(text or "")
+    if not group_id or not text:
+        return []
+
+    group_aliases = _load_memory_aliases().get(group_id)
+    if not group_aliases:
+        return []
+
+    hits: list[dict[str, str]] = []
+    seen_aliases: set[str] = set()
+    for alias, user_id in group_aliases.items():
+        if alias in seen_aliases:
+            continue
+        if match_alias_in_text(alias, text):
+            seen_aliases.add(alias)
+            hits.append({"alias": alias, "user_id": user_id, "match_type": "ascii" if is_ascii_alias(alias) else "zh"})
+    return hits
 
 _MAX_CHARS = 1200
 _MIN_MAX_CHARS = 200

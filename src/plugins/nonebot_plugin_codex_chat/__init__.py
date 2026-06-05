@@ -20,6 +20,7 @@ from .memory import (
     build_long_memory_recall,
     build_memory_recall,
     build_query_memory_recall,
+    resolve_manual_text_aliases,
 )
 from .log_sanitize import sanitize_for_log
 
@@ -311,6 +312,20 @@ def _build_query_memory_recall_context(
     person_guard_enabled = bool(plugin_config.codex_chat_memory_person_query_guard_enabled)
     require_at_for_style = bool(plugin_config.codex_chat_memory_person_query_require_at_for_style)
 
+    alias_hits = resolve_manual_text_aliases(group_id, query)
+    alias_user_ids = [hit.get("user_id", "") for hit in alias_hits if hit.get("user_id")]
+    if alias_hits:
+        for hit in alias_hits:
+            logger.info(
+                "memory_alias_resolve hit group_id={} alias={} user_id={} match_type={}",
+                group_id,
+                hit.get("alias", ""),
+                hit.get("user_id", ""),
+                hit.get("match_type", ""),
+            )
+    else:
+        logger.debug("memory_alias_resolve miss group_id={}", group_id)
+
     min_query_chars = plugin_config.codex_chat_memory_query_recall_min_query_chars
     try:
         min_query_chars = int(min_query_chars)
@@ -336,7 +351,7 @@ def _build_query_memory_recall_context(
         )
         return ""
 
-    if person_guard_enabled and require_at_for_style and person_style_query and not at_user_ids:
+    if person_guard_enabled and require_at_for_style and person_style_query and not (at_user_ids or alias_user_ids):
         logger.info(
             "codex_chat_memory query_recall_context skipped reason=person_query_without_target_at group_id={} query_len={}",
             group_id,
@@ -388,11 +403,13 @@ def _build_query_memory_recall_context(
     max_chars = max(200, min(max_chars, 3000))
 
     at_strict = bool(plugin_config.codex_chat_memory_query_recall_at_strict)
-    require_target_match = bool(at_user_ids and at_strict)
+    require_target_match = bool((at_user_ids or alias_user_ids) and at_strict)
 
     query_parts = [query]
     if at_user_ids:
         query_parts.extend(at_user_ids)
+    if alias_user_ids:
+        query_parts.extend(alias_user_ids)
     recall_query = " ".join(part for part in query_parts if part).strip()
 
     try:
@@ -403,7 +420,7 @@ def _build_query_memory_recall_context(
             max_scan=max_scan,
             min_score=min_score,
             max_chars=max_chars,
-            target_user_ids=at_user_ids,
+            target_user_ids=at_user_ids + alias_user_ids,
             require_target_match=require_target_match,
         ).strip()
     except Exception:
