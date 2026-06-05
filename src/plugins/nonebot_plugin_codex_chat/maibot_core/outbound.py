@@ -48,6 +48,10 @@ def capture_outbound_message(
     segments: list[dict] | None = None,
     source: str = "maibot_capture",
 ) -> bool:
+    text = str(text or "").strip()
+    if not text:
+        return False
+
     buffer = _current_outbound_buffer.get()
     if buffer is None:
         return False

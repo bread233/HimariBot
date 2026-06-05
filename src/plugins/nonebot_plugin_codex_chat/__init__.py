@@ -46,12 +46,17 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
     if not result.should_reply or not result.replies:
         return
 
+    sent_count = 0
     for index, reply in enumerate(result.replies):
         if not reply.text or not str(reply.text).strip():
             logger.debug(f"codex_chat_send_from_maibot skip_empty index={index}")
             continue
         try:
             await bot.send(event, reply.text)
+            sent_count += 1
             logger.info(f"codex_chat_send_from_maibot sent index={index}")
         except Exception as exc:
             logger.exception(f"codex_chat_send_from_maibot failed index={index} error={exc}")
+    logger.info(
+        f"codex_chat_send_from_maibot done sent_count={sent_count} replies={len(result.replies)}"
+    )
