@@ -99,6 +99,13 @@ class ConfigModel(BaseModel):
     codex_chat_memory_long_recall_min_confidence: float = 0.0
     codex_chat_memory_long_recall_max_chars: int = 1200
 
+    # Query-aware memory recall 注入配置（默认关闭）
+    codex_chat_memory_query_recall_enabled: bool = False
+    codex_chat_memory_query_recall_limit: int = 5
+    codex_chat_memory_query_recall_max_scan: int = 200
+    codex_chat_memory_query_recall_min_score: float = 1.0
+    codex_chat_memory_query_recall_max_chars: int = 1200
+
     # Long memory consolidation provider 配置
     codex_chat_memory_long_consolidation_provider: str = "codex"
     codex_chat_memory_long_consolidation_ollama_base_url: str = "http://172.17.0.1:11435"

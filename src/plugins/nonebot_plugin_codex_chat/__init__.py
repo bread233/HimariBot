@@ -19,6 +19,7 @@ from .memory import (
     register_memory_long_consolidation_worker,
     build_long_memory_recall,
     build_memory_recall,
+    build_query_memory_recall,
 )
 from .log_sanitize import sanitize_for_log
 
@@ -208,6 +209,134 @@ def _build_memory_recall_context(event: MessageEvent, plugin_config: ConfigModel
         "【可参考的历史记忆】\n"
         "以下内容来自近期群聊摘要，可能不完整；只作为辅助参考，不确定时不要编造。\n"
         f"{recall_text}"
+    )
+
+
+def _extract_at_user_ids(event: MessageEvent) -> list[str]:
+    try:
+        messages = []
+        original_message = getattr(event, "original_message", None)
+        message = getattr(event, "message", None)
+        if original_message is not None:
+            messages.append(original_message)
+        if message is not None and message is not original_message:
+            messages.append(message)
+
+        self_id = str(getattr(event, "self_id", "") or "").strip()
+        seen: set[str] = set()
+        out: list[str] = []
+
+        for msg in messages:
+            for seg in msg:
+                if getattr(seg, "type", "") != "at":
+                    continue
+                qq = str((getattr(seg, "data", {}) or {}).get("qq") or "").strip()
+                if not qq or qq.lower() == "all":
+                    continue
+                if self_id and qq == self_id:
+                    continue
+                if qq in seen:
+                    continue
+                seen.add(qq)
+                out.append(qq)
+        return out
+    except Exception:
+        return []
+
+
+def _build_query_memory_recall_context(
+    event: MessageEvent,
+    plugin_config: ConfigModel,
+    prompt: str,
+) -> str:
+    if not plugin_config.codex_chat_memory_query_recall_enabled:
+        return ""
+
+    group_id = _get_event_group_id(event)
+    if not group_id:
+        logger.debug("codex_chat_memory query_recall_context skipped reason=no_group_id")
+        return ""
+
+    query = str(prompt or "").strip()
+    if not query:
+        logger.debug(
+            "codex_chat_memory query_recall_context skipped reason=empty_query group_id={}",
+            group_id,
+        )
+        return ""
+
+    at_user_ids = _extract_at_user_ids(event)
+    query_parts = [query]
+    if at_user_ids:
+        query_parts.extend(at_user_ids)
+    recall_query = " ".join(part for part in query_parts if part).strip()
+
+    limit = plugin_config.codex_chat_memory_query_recall_limit
+    try:
+        limit = int(limit)
+    except Exception:
+        limit = 5
+    limit = max(1, min(limit, 10))
+
+    max_scan = plugin_config.codex_chat_memory_query_recall_max_scan
+    try:
+        max_scan = int(max_scan)
+    except Exception:
+        max_scan = 200
+    max_scan = max(20, min(max_scan, 200))
+
+    min_score = plugin_config.codex_chat_memory_query_recall_min_score
+    try:
+        min_score = float(min_score)
+    except Exception:
+        min_score = 1.0
+    min_score = max(0.0, min(min_score, 100.0))
+
+    max_chars = plugin_config.codex_chat_memory_query_recall_max_chars
+    try:
+        max_chars = int(max_chars)
+    except Exception:
+        max_chars = 1200
+    max_chars = max(200, min(max_chars, 3000))
+
+    try:
+        query_recall_text = build_query_memory_recall(
+            group_id=group_id,
+            query=recall_query,
+            limit=limit,
+            max_scan=max_scan,
+            min_score=min_score,
+            max_chars=max_chars,
+        ).strip()
+    except Exception:
+        logger.warning("codex_chat_memory query_recall_context_failed", exc_info=True)
+        return ""
+
+    if not query_recall_text:
+        logger.info(
+            "codex_chat_memory query_recall_context skipped reason=empty group_id={} query_len={} min_score={}",
+            group_id,
+            len(query),
+            min_score,
+        )
+        return ""
+
+    logger.info(
+        "codex_chat_memory query_recall_context injected group_id={} query_len={} at_count={} len={} limit={} max_scan={} min_score={} max_chars={}",
+        group_id,
+        len(query),
+        len(at_user_ids),
+        len(query_recall_text),
+        limit,
+        max_scan,
+        min_score,
+        max_chars,
+    )
+
+    return (
+        "【与当前问题相关的长期记忆】\n"
+        "以下内容是根据当前问题从长期记忆中检索出的相关信息，可能不完整；回答时优先参考，但不要编造未出现的信息。\n"
+        f"{query_recall_text}"
     )
 
 
@@ -605,6 +734,22 @@ async def _(bot: Bot, event: MessageEvent, state: T_State, msg=EventMessage()):
             len(long_memory_recall_context),
             context_len_before_long_recall,
             context_len_after_long_recall,
+        )
+
+    query_memory_recall_context = _build_query_memory_recall_context(event, plugin_config, prompt)
+    if query_memory_recall_context:
+        context_len_before_query_recall = len(context_prompt or "")
+        if context_prompt:
+            context_prompt = f"{context_prompt}\n\n{query_memory_recall_context}"
+        else:
+            context_prompt = query_memory_recall_context
+        context_len_after_query_recall = len(context_prompt or "")
+        logger.info(
+            "codex_chat_memory query_recall_context merged group_id={} recall_len={} context_len_before={} context_len_after={}",
+            _get_event_group_id(event) or "",
+            len(query_memory_recall_context),
+            context_len_before_query_recall,
+            context_len_after_query_recall,
         )
 
     final_prompt = _build_prompt(persona, prompt, context_prompt)
