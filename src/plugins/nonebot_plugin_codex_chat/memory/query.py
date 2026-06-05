@@ -384,6 +384,39 @@ def get_recent_long_memory_candidates(
     return [dict(row) for row in rows]
 
 
+def get_approved_long_memory_candidates_for_group(
+    group_id: str,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    if not _db_exists():
+        return []
+
+    group_id = str(group_id or "").strip()
+    if not group_id:
+        return []
+
+    limit = _clamp_limit(limit, default=200, max_limit=200)
+
+    with _open_readonly_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, scope_type, group_id, user_id, target_user_id,
+                   memory_type, title, summary, keywords_json,
+                   evidence_memcell_ids_json, evidence_episode_ids_json,
+                   importance, confidence, status, source, source_model,
+                   created_at, updated_at, notes
+            FROM chat_agent_long_memory_candidates
+            WHERE group_id = ?
+              AND status = 'approved'
+            ORDER BY updated_at DESC, id DESC
+            LIMIT ?
+            """,
+            (group_id, limit),
+        ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
 def get_long_memory_candidate(candidate_id: int) -> dict[str, Any] | None:
     if not _db_exists():
         return None
