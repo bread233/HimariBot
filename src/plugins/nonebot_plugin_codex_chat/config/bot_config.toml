@@ -2,11 +2,11 @@
 version = "8.12.26"
 
 [bot]
-platform = "" # 平台
-qq_account = "" # QQ账号
-platforms = [] # 其他平台
+platform = "qq" # 平台
+qq_account = "3339668079" # QQ账号
+platforms = ["onebot.v11"] # 其他平台
 nickname = "上原绯玛丽"
-alias_names = ["肥玛丽", "绯玛丽", "hmr"] # 别名列表
+alias_names = ["肥玛丽", "绯玛丽", "hmr", "himari"] # 别名列表
 
 [personality]
 personality = "你是一个女高中生，现在正在上网和群友聊天。" # 人格，建议200字以内，描述人格特质和身份特征；可以写完整设定。要求第二人称
