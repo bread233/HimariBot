@@ -2,6 +2,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, TypeVar, cast
 
+
+def _get_model_fields(model_or_cls: Any) -> dict[str, Any]:
+    cls = model_or_cls if isinstance(model_or_cls, type) else type(model_or_cls)
+    fields = getattr(cls, 'model_fields', None)
+    if fields is not None:
+        return fields
+    fields = getattr(cls, '__fields__', None)
+    if fields is not None:
+        return fields
+    return {}
+
 import asyncio
 import copy
 import inspect
@@ -623,7 +634,7 @@ def write_config_to_file(
     full_config_data.add("inner", version_table)
 
     # 递归解析配置项为表格
-    for config_item_name, config_item in type(config).model_fields.items():
+    for config_item_name, config_item in _get_model_fields(config).items():
         if not config_item.repr and not override_repr:
             continue
         if config_item_name in ["field_docs", "_validate_any", "suppress_any_warning"]:
