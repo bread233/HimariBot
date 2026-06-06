@@ -179,7 +179,7 @@ class LLMServiceClient:
         try:
             from ..codex_llm_adapter import generate_text
 
-            text = await generate_text(
+            adapter_result = await generate_text(
                 prompt,
                 system_prompt=None,
                 request_type=self.request_type,
@@ -190,7 +190,11 @@ class LLMServiceClient:
                     "max_tokens": active_options.max_tokens,
                 },
             )
-            result = LLMResponseResult(response=text, model_name=active_options.model_name or "codexcli")
+            result = LLMResponseResult(
+                response=adapter_result.text,
+                model_name=active_options.model_name or "codexcli",
+                tool_calls=adapter_result.tool_calls,
+            )
         except Exception as exc:
             logger.exception(
                 f"maibot_codex_llm failed error={type(exc).__name__}: {exc}\n{traceback.format_exc()}"
@@ -223,7 +227,7 @@ class LLMServiceClient:
         try:
             from ..codex_llm_adapter import generate_text
 
-            text = await generate_text(
+            adapter_result = await generate_text(
                 prompt_text,
                 system_prompt=None,
                 request_type=self.request_type,
@@ -235,7 +239,11 @@ class LLMServiceClient:
                     "mode": "message_factory",
                 },
             )
-            result = LLMResponseResult(response=text, model_name=active_options.model_name or "codexcli")
+            result = LLMResponseResult(
+                response=adapter_result.text,
+                model_name=active_options.model_name or "codexcli",
+                tool_calls=adapter_result.tool_calls,
+            )
         except Exception as exc:
             logger.exception(
                 f"maibot_codex_llm failed error={type(exc).__name__}: {exc}\n{traceback.format_exc()}"
