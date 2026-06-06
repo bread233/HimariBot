@@ -17,7 +17,7 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, root_validator, validator
 
 from src.common.logger import get_logger
 
@@ -165,7 +165,9 @@ class VersionComparator:
 class _StrictManifestModel(BaseModel):
     """Manifest 解析使用的严格基类模型。"""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+    class Config:
+        extra = "forbid"
+        allow_mutation = False
 
 
 class ManifestAuthor(_StrictManifestModel):
@@ -174,7 +176,7 @@ class ManifestAuthor(_StrictManifestModel):
     name: str = Field(description="作者名称")
     url: str = Field(description="作者主页地址")
 
-    @field_validator("name")
+    @validator("name")
     @classmethod
     def _validate_name(cls, value: str) -> str:
         """校验作者名称。
@@ -192,7 +194,7 @@ class ManifestAuthor(_StrictManifestModel):
             raise ValueError("不能为空")
         return value
 
-    @field_validator("url")
+    @validator("url")
     @classmethod
     def _validate_url(cls, value: str) -> str:
         """校验作者主页地址。
@@ -221,7 +223,7 @@ class ManifestUrls(_StrictManifestModel):
     documentation: Optional[str] = Field(default=None, description="插件文档地址")
     issues: Optional[str] = Field(default=None, description="插件问题反馈地址")
 
-    @field_validator("repository")
+    @validator("repository")
     @classmethod
     def _validate_repository(cls, value: str) -> str:
         """校验仓库地址。
@@ -241,7 +243,7 @@ class ManifestUrls(_StrictManifestModel):
             raise ValueError("必须为 http:// 或 https:// 开头的 URL")
         return value
 
-    @field_validator("homepage", "documentation", "issues")
+    @validator("homepage", "documentation", "issues")
     @classmethod
     def _validate_optional_url(cls, value: Optional[str]) -> Optional[str]:
         """校验可选链接字段。
@@ -270,7 +272,7 @@ class ManifestVersionRange(_StrictManifestModel):
     min_version: str = Field(description="最小版本，闭区间")
     max_version: str = Field(description="最大版本，闭区间")
 
-    @field_validator("min_version", "max_version")
+    @validator("min_version", "max_version")
     @classmethod
     def _validate_version(cls, value: str) -> str:
         """校验版本号格式。
@@ -288,19 +290,24 @@ class ManifestVersionRange(_StrictManifestModel):
             raise ValueError("必须为严格三段式版本号，例如 1.0.0")
         return value
 
-    @model_validator(mode="after")
-    def _validate_range(self) -> "ManifestVersionRange":
+    @root_validator
+    def _validate_range(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         """校验版本区间上下界关系。
 
+        Args:
+            values: 已完成字段校验的模型值字典。
+
         Returns:
-            ManifestVersionRange: 当前对象本身。
+            Dict[str, Any]: 原样返回的模型值字典。
 
         Raises:
             ValueError: 当最小版本大于最大版本时抛出。
         """
-        if VersionComparator.compare(self.min_version, self.max_version) > 0:
+        min_version = values.get("min_version")
+        max_version = values.get("max_version")
+        if VersionComparator.compare(min_version, max_version) > 0:
             raise ValueError("min_version 不能大于 max_version")
-        return self
+        return values
 
 
 class ManifestI18n(_StrictManifestModel):
@@ -310,7 +317,7 @@ class ManifestI18n(_StrictManifestModel):
     locales_path: Optional[str] = Field(default=None, description="语言资源目录")
     supported_locales: List[str] = Field(default_factory=list, description="支持的语言列表")
 
-    @field_validator("default_locale")
+    @validator("default_locale")
     @classmethod
     def _validate_default_locale(cls, value: str) -> str:
         """校验默认语言。
@@ -328,7 +335,7 @@ class ManifestI18n(_StrictManifestModel):
             raise ValueError("不能为空")
         return value
 
-    @field_validator("locales_path")
+    @validator("locales_path")
     @classmethod
     def _validate_locales_path(cls, value: Optional[str]) -> Optional[str]:
         """校验语言资源目录。
@@ -348,7 +355,7 @@ class ManifestI18n(_StrictManifestModel):
             raise ValueError("不能为空字符串")
         return value
 
-    @field_validator("supported_locales")
+    @validator("supported_locales")
     @classmethod
     def _validate_supported_locales(cls, value: List[str]) -> List[str]:
         """校验支持语言列表。
@@ -371,19 +378,24 @@ class ManifestI18n(_StrictManifestModel):
                 normalized_locales.append(normalized_locale)
         return normalized_locales
 
-    @model_validator(mode="after")
-    def _validate_default_locale_membership(self) -> "ManifestI18n":
+    @root_validator
+    def _validate_default_locale_membership(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         """校验默认语言是否位于支持列表中。
 
+        Args:
+            values: 已完成字段校验的模型值字典。
+
         Returns:
-            ManifestI18n: 当前对象本身。
+            Dict[str, Any]: 原样返回的模型值字典。
 
         Raises:
             ValueError: 当 ``supported_locales`` 非空但未包含 ``default_locale`` 时抛出。
         """
-        if self.supported_locales and self.default_locale not in self.supported_locales:
+        default_locale = values.get("default_locale")
+        supported_locales = values.get("supported_locales") or []
+        if supported_locales and default_locale not in supported_locales:
             raise ValueError("default_locale 必须包含在 supported_locales 中")
-        return self
+        return values
 
 
 class PluginDependencyDefinition(_StrictManifestModel):
@@ -393,7 +405,7 @@ class PluginDependencyDefinition(_StrictManifestModel):
     id: str = Field(description="依赖插件 ID")
     version_spec: str = Field(description="版本约束表达式")
 
-    @field_validator("id")
+    @validator("id")
     @classmethod
     def _validate_id(cls, value: str) -> str:
         """校验依赖插件 ID。
@@ -411,7 +423,7 @@ class PluginDependencyDefinition(_StrictManifestModel):
             raise ValueError("必须使用字母/数字/下划线，并以点号或横线分隔，例如 github.author.plugin")
         return value
 
-    @field_validator("version_spec")
+    @validator("version_spec")
     @classmethod
     def _validate_version_spec(cls, value: str) -> str:
         """校验插件依赖版本约束。
@@ -441,7 +453,7 @@ class PythonPackageDependencyDefinition(_StrictManifestModel):
     name: str = Field(description="Python 包名")
     version_spec: str = Field(description="版本约束表达式")
 
-    @field_validator("name")
+    @validator("name")
     @classmethod
     def _validate_name(cls, value: str) -> str:
         """校验 Python 包名。
@@ -459,7 +471,7 @@ class PythonPackageDependencyDefinition(_StrictManifestModel):
             raise ValueError("包名只能包含字母、数字、点号、下划线和横线")
         return value
 
-    @field_validator("version_spec")
+    @validator("version_spec")
     @classmethod
     def _validate_version_spec(cls, value: str) -> str:
         """校验 Python 包版本约束。
@@ -494,7 +506,7 @@ class LLMProviderManifestDeclaration(_StrictManifestModel):
     version: str = Field(default="1.0.0", description="Provider 实现版本")
     """Provider 实现版本。"""
 
-    @field_validator("client_type")
+    @validator("client_type")
     @classmethod
     def _validate_client_type(cls, value: str) -> str:
         """校验客户端类型标识。
@@ -528,7 +540,7 @@ class ManifestDisplayIcon(_StrictManifestModel):
     fallback: Optional[str] = Field(default=None, description="图标加载失败时使用的 lucide 图标名")
     background: Optional[str] = Field(default=None, description="图标背景色，格式为 #RRGGBB")
 
-    @field_validator("value")
+    @validator("value")
     @classmethod
     def _validate_value(cls, value: str) -> str:
         """校验图标值不能为空。"""
@@ -537,7 +549,7 @@ class ManifestDisplayIcon(_StrictManifestModel):
             raise ValueError("图标值不能为空")
         return normalized_value
 
-    @field_validator("fallback")
+    @validator("fallback")
     @classmethod
     def _validate_fallback(cls, value: Optional[str]) -> Optional[str]:
         """校验 fallback 图标名。"""
@@ -550,7 +562,7 @@ class ManifestDisplayIcon(_StrictManifestModel):
             raise ValueError("fallback 只能包含字母、数字、下划线和横线")
         return normalized_value
 
-    @field_validator("background")
+    @validator("background")
     @classmethod
     def _validate_background(cls, value: Optional[str]) -> Optional[str]:
         """校验图标背景色。"""
@@ -561,24 +573,26 @@ class ManifestDisplayIcon(_StrictManifestModel):
             raise ValueError("background 必须为 #RRGGBB 格式")
         return normalized_value
 
-    @model_validator(mode="after")
-    def _validate_icon_value_by_type(self) -> "ManifestDisplayIcon":
+    @root_validator
+    def _validate_icon_value_by_type(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         """按图标类型校验 value。"""
-        if self.type == "lucide":
-            if not _ICON_NAME_PATTERN.fullmatch(self.value):
+        icon_type = values.get("type")
+        icon_value = values.get("value")
+        if icon_type == "lucide":
+            if not _ICON_NAME_PATTERN.fullmatch(icon_value):
                 raise ValueError("lucide 图标名只能包含字母、数字、下划线和横线")
-            return self
+            return values
 
-        if self.type == "local":
-            icon_path = Path(self.value)
+        if icon_type == "local":
+            icon_path = Path(icon_value)
             if icon_path.is_absolute() or any(part == ".." for part in icon_path.parts):
                 raise ValueError("local 图标路径必须是插件目录内的相对路径")
-            if "\x00" in self.value or self.value.startswith(("/", "\\")):
+            if "\x00" in icon_value or icon_value.startswith(("/", "\\")):
                 raise ValueError("local 图标路径包含非法字符")
             if icon_path.suffix.lower() not in _LOCAL_ICON_SUFFIXES:
                 raise ValueError("local 图标仅支持 jpg、jpeg、png、svg、webp")
 
-        return self
+        return values
 
 
 class ManifestDisplay(_StrictManifestModel):
@@ -610,7 +624,7 @@ class PluginManifest(_StrictManifestModel):
     plugin_type: str = Field(default="extension", description="插件类型")
     display: Optional[ManifestDisplay] = Field(default=None, description="插件展示元信息")
 
-    @field_validator("version")
+    @validator("version")
     @classmethod
     def _validate_version(cls, value: str) -> str:
         """校验插件版本号格式。
@@ -628,14 +642,14 @@ class PluginManifest(_StrictManifestModel):
             raise ValueError("必须为严格三段式版本号，例如 1.0.0")
         return value
 
-    @field_validator("name", "description", "license", "id")
+    @validator("name", "description", "license", "id")
     @classmethod
-    def _validate_required_string(cls, value: str, info: Any) -> str:
+    def _validate_required_string(cls, value: str, field: Any) -> str:
         """校验必填字符串字段。
 
         Args:
             value: 原始字段值。
-            info: Pydantic 字段上下文。
+            field: Pydantic 字段上下文（Pydantic v1 ``ModelField``，v2 ``FieldInfo``）。
 
         Returns:
             str: 合法的字段值。
@@ -645,11 +659,12 @@ class PluginManifest(_StrictManifestModel):
         """
         if not value:
             raise ValueError("不能为空")
-        if info.field_name == "id" and not _PLUGIN_ID_PATTERN.fullmatch(value):
+        field_name = getattr(field, "name", None) or getattr(field, "field_name", None)
+        if field_name == "id" and not _PLUGIN_ID_PATTERN.fullmatch(value):
             raise ValueError("必须使用字母/数字/下划线，并以点号或横线分隔，例如 github.author.plugin")
         return value
 
-    @field_validator("capabilities")
+    @validator("capabilities")
     @classmethod
     def _validate_capabilities(cls, value: List[str]) -> List[str]:
         """校验能力声明列表。
@@ -672,22 +687,27 @@ class PluginManifest(_StrictManifestModel):
                 normalized_capabilities.append(normalized_capability)
         return normalized_capabilities
 
-    @model_validator(mode="after")
-    def _validate_dependencies(self) -> "PluginManifest":
+    @root_validator
+    def _validate_dependencies(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         """校验依赖声明集合。
 
+        Args:
+            values: 已完成字段校验的模型值字典。
+
         Returns:
-            PluginManifest: 当前对象本身。
+            Dict[str, Any]: 原样返回的模型值字典。
 
         Raises:
             ValueError: 当依赖项重复或插件依赖自身时抛出。
         """
+        plugin_id = values.get("id")
+        dependencies = values.get("dependencies") or []
         plugin_dependency_ids: set[str] = set()
         python_package_names: set[str] = set()
 
-        for dependency in self.dependencies:
+        for dependency in dependencies:
             if isinstance(dependency, PluginDependencyDefinition):
-                if dependency.id == self.id:
+                if dependency.id == plugin_id:
                     raise ValueError("dependencies 中的插件依赖不能依赖自身")
                 if dependency.id in plugin_dependency_ids:
                     raise ValueError(f"存在重复的插件依赖声明: {dependency.id}")
@@ -699,24 +719,28 @@ class PluginManifest(_StrictManifestModel):
                 raise ValueError(f"存在重复的 Python 包依赖声明: {dependency.name}")
             python_package_names.add(normalized_package_name)
 
-        return self
+        return values
 
-    @model_validator(mode="after")
-    def _validate_llm_providers(self) -> "PluginManifest":
+    @root_validator
+    def _validate_llm_providers(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         """校验 LLM Provider 静态声明集合。
 
+        Args:
+            values: 已完成字段校验的模型值字典。
+
         Returns:
-            PluginManifest: 当前对象本身。
+            Dict[str, Any]: 原样返回的模型值字典。
 
         Raises:
             ValueError: 当同一 Manifest 内重复声明 client_type 时抛出。
         """
+        llm_providers = values.get("llm_providers") or []
         client_types: Set[str] = set()
-        for provider in self.llm_providers:
+        for provider in llm_providers:
             if provider.client_type in client_types:
                 raise ValueError(f"存在重复的 LLM Provider 声明: {provider.client_type}")
             client_types.add(provider.client_type)
-        return self
+        return values
 
     @property
     def plugin_dependencies(self) -> List[PluginDependencyDefinition]:
