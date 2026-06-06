@@ -5,6 +5,7 @@ from typing import Any, Optional
 import traceback
 
 from src.chat.replyer.replyer_manager import replyer_manager
+from src.cli.maisaka_cli_sender import CLI_PLATFORM_NAME
 from src.common.data_models.reply_generation_data_models import ReplyGenerationResult
 from src.common.logger import get_logger
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
