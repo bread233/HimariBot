@@ -14,12 +14,18 @@ from src.common.logger import get_logger
 
 logger = get_logger("ConfigBase")
 
+_CONFIG_FIELD_SKIP_NAMES = {"model_config", "field_docs"}
 
-def _get_model_fields(model_cls: type[Any]) -> dict[str, Any]:
-    fields = getattr(model_cls, "model_fields", None)
+
+def _get_model_fields(model_or_cls: Any) -> dict[str, Any]:
+    cls = model_or_cls if isinstance(model_or_cls, type) else type(model_or_cls)
+    fields = getattr(cls, "model_fields", None)
     if fields is not None:
         return dict(fields)
-    fields = getattr(model_cls, "__fields__", None)
+    fields = getattr(cls, "__fields__", None)
+    if fields is not None:
+        return dict(fields)
+    fields = getattr(cls, "fields", None)
     if fields is not None:
         return dict(fields)
     return {}
@@ -157,14 +163,15 @@ class ConfigBase(BaseModel, AttrDocBase):
     def from_dict(cls, attribute_data: AttributeData, data: dict[str, Any]):
         """从字典创建配置对象，并收集缺失和多余的属性信息"""
         class_fields = set(_get_model_fields(cls).keys())
-        class_fields.discard("field_docs")  # 忽略 field_docs 字段
+        class_fields -= _CONFIG_FIELD_SKIP_NAMES
         if "_validate_any" in class_fields:
             class_fields.remove("_validate_any")  # 忽略 _validate_any 字段
         if "suppress_any_warning" in class_fields:
-            class_fields.remove("suppress_any_warning")  # 忽略 suppress_any_warning 字
+            class_fields.remove("suppress_any_warning")  # 忽略 suppress_any_warning 字段
         for class_field in class_fields:
             if class_field not in data:
                 attribute_data.missing_attributes.append(class_field)  # 记录缺失的属性
+
         cleaned_data_list: list[str] = []
         for data_field in data:
             if data_field not in class_fields:

@@ -5,13 +5,13 @@ from typing import Any, Callable, Mapping, Sequence, TypeVar, cast
 
 def _get_model_fields(model_or_cls: Any) -> dict[str, Any]:
     cls = model_or_cls if isinstance(model_or_cls, type) else type(model_or_cls)
-    fields = getattr(cls, 'model_fields', None)
+    fields = getattr(cls, "model_fields", None)
     if fields is not None:
         return fields
-    fields = getattr(cls, '__fields__', None)
+    fields = getattr(cls, "__fields__", None)
     if fields is not None:
         return fields
-    fields = getattr(cls, 'fields', None)
+    fields = getattr(cls, "fields", None)
     if fields is not None:
         return fields
     return {}
@@ -90,6 +90,8 @@ CONFIG_VERSION: str = "8.12.26"
 MODEL_CONFIG_VERSION: str = "1.17.3"
 
 logger = get_logger("config")
+
+_CONFIG_FIELD_SKIP_NAMES = {"model_config", "field_docs"}
 
 T = TypeVar("T", bound="ConfigBase")
 ConfigReloadCallback = Callable[[Sequence[str]], object] | Callable[[], object]
@@ -651,9 +653,9 @@ def write_config_to_file(
 
     # 递归解析配置项为表格
     for config_item_name, config_item in _get_model_fields(config).items():
-        if not _get_field_repr(config_item) and not override_repr:
+        if config_item_name in _CONFIG_FIELD_SKIP_NAMES:
             continue
-        if config_item_name in ["field_docs", "_validate_any", "suppress_any_warning"]:
+        if not _get_field_repr(config_item) and not override_repr:
             continue
         config_field = getattr(config, config_item_name)
         if isinstance(config_field, ConfigBase):
@@ -664,11 +666,12 @@ def write_config_to_file(
             aot = tomlkit.aot()
             for item in config_field:
                 if not isinstance(item, ConfigBase):
-                    raise TypeError(t("config.write_unsupported_type"))
+                    continue
                 aot.append(recursive_parse_item_to_table(item, override_repr=override_repr))
-            full_config_data.add(config_item_name, aot)
+            if len(aot) > 0:
+                full_config_data.add(config_item_name, aot)
         else:
-            raise TypeError(t("config.write_unsupported_type"))
+            continue
 
     if isinstance(config, Config):
         try:
