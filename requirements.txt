@@ -1,6 +1,6 @@
 --index-url https://pypi.org/simple
 apscheduler==3.10.1
-aiohttp>=3.8.5,<4.0.0
+aiohttp>=3.14,<4.0
 lxml>=4.9.3
 tinydb==4.7.0
 aiofile==3.8.7
@@ -14,12 +14,12 @@ emoji>=2.8.0,<3.0.0
 aiocache>=0.12.2,<0.13.0
 colorama==0.4.6
 gitdb==4.0.10
-gitpython==3.1.31
+GitPython>=3.1.50,<3.2
 idna==3.4
 loguru>=0.7.0,<0.8.0
-msgspec==0.15.0
-multidict==6.0.4
-pillow>=10.4.0,<11.0.0
+msgspec>=0.18,<0.19
+multidict>=6.7,<7
+Pillow>=12.2,<13
 pygtrie==2.5.0
 python-dotenv==1.0.0
 pytz-deprecation-shim==0.1.0.post0
@@ -32,7 +32,7 @@ typing-extensions>=4.11,<5.0
 tzdata==2023.3
 tzlocal==4.3
 websockets==11.0.3
-yarl==1.9.2
+yarl>=1.24,<2
 numpy<2.0
 crypto>=1.4.1,<2.0.0
 bs4>=0.0.2,<0.0.3
@@ -72,7 +72,6 @@ sketchbook-py>=0.2.1,<0.3.0
 nonebot-plugin-alconna>=0.54,<0.55
 hikari-core>=1.2.0,<2.0.0
 nonebot-plugin-guild-patch>=0.2.3,<0.3.0
-zhenxun-utils>=0.2.2,<0.3.0
 rich>=13.9.4,<14.0.0
 psutil>=7.1.3,<8.0.0
 Flask>=3.1.2,<3.2.0
@@ -82,3 +81,15 @@ Werkzeug>=3.1.4,<3.2.0
 nonebot2[fastapi,httpx]>=2.4.2,<2.5
 nonebot-adapter-onebot
 nonebot-adapter-qq
+
+# Maibot core minimal runtime dependencies
+rapidfuzz
+sqlmodel
+sqlalchemy
+json-repair
+tomlkit
+maim-message
+structlog
+msgpack
+babel
+jieba
