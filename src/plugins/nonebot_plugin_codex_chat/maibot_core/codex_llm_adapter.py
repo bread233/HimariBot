@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+import traceback
 from typing import Any
 
 try:
@@ -18,6 +19,11 @@ logger = get_logger("codex_llm_adapter")
 _PLUGIN_CONFIG_CANDIDATES = (
     "src.plugins.nonebot_plugin_codex_chat.config",
     "nonebot_plugin_codex_chat.config",
+)
+
+_CODEX_PROVIDER_CANDIDATES = (
+    "src.plugins.nonebot_plugin_codex_chat.codex_provider",
+    "nonebot_plugin_codex_chat.codex_provider",
 )
 
 
@@ -56,6 +62,40 @@ def _get_plugin_config():
     )
 
 
+def _get_codex_provider_module():
+    """惰性解析 codex_provider 模块。
+
+    优先级：
+    1. ``sys.modules`` 中已注册的候选模块
+    2. ``importlib.import_module`` 尝试加载
+
+    Returns:
+        types.ModuleType: codex_provider 模块对象。
+
+    Raises:
+        RuntimeError: 当所有候选模块都不可用时抛出。
+    """
+    errors: list[str] = []
+
+    for module_name in _CODEX_PROVIDER_CANDIDATES:
+        module = sys.modules.get(module_name)
+        if module is not None and hasattr(module, "ask_codex"):
+            return module
+
+    for module_name in _CODEX_PROVIDER_CANDIDATES:
+        try:
+            module = importlib.import_module(module_name)
+            if hasattr(module, "ask_codex"):
+                return module
+        except Exception as exc:
+            errors.append(f"{module_name}: {type(exc).__name__}: {exc}")
+
+    raise RuntimeError(
+        "Unable to load codex_provider from candidates: "
+        + " | ".join(errors)
+    )
+
+
 async def generate_text(
     prompt: str,
     *,
@@ -69,9 +109,12 @@ async def generate_text(
     logger.info(f"maibot_codex_llm request_type={request_type}")
 
     try:
-        from ..codex_provider import ask_codex
+        provider = _get_codex_provider_module()
+        ask_codex = provider.ask_codex
     except Exception as exc:
-        logger.exception(f"maibot_codex_llm failed error={exc}")
+        logger.exception(
+            f"maibot_codex_llm failed error={type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+        )
         return ""
 
     payload_parts: list[str] = []
