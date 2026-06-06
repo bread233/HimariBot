@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+import time
+import traceback
+from typing import Any, Awaitable, Callable, Optional
+
 from nonebot import get_driver, logger, on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent
 from nonebot.params import EventMessage
@@ -18,6 +24,210 @@ _superusers = {str(x) for x in (getattr(driver.config, "superusers", set()) or s
 logger.info("codex_chat minimal bootstrap loaded")
 
 
+_HOST_TARGET_TTL_SECONDS = 600
+_host_target_registry: dict[str, tuple[Bot, dict[str, Any]]] = {}
+
+
+def _remember_target(event: MessageEvent, bot: Bot) -> None:
+    """记录最近一次入站事件对应的 NoneBot Bot 与目标。"""
+
+    if isinstance(event, GroupMessageEvent):
+        group_id = str(getattr(event, "group_id", "") or "").strip()
+        if not group_id:
+            return
+        key = f"onebot.v11:group:{group_id}"
+        info: dict[str, Any] = {
+            "is_group": True,
+            "target_id": group_id,
+            "ts": time.time(),
+        }
+    else:
+        user_id = str(getattr(event, "user_id", "") or "").strip()
+        if not user_id:
+            return
+        key = f"onebot.v11:private:{user_id}"
+        info = {
+            "is_group": False,
+            "target_id": user_id,
+            "ts": time.time(),
+        }
+    _host_target_registry[key] = (bot, info)
+    now = time.time()
+    expired_keys = [k for k, (_, v) in _host_target_registry.items() if now - float(v.get("ts", 0)) > _HOST_TARGET_TTL_SECONDS]
+    for k in expired_keys:
+        _host_target_registry.pop(k, None)
+
+
+def _resolve_target_for_message(message: Any) -> Optional[tuple[Bot, dict[str, Any]]]:
+    """根据 SessionMessage 推断应使用的 NoneBot Bot 与目标。"""
+
+    if message is None:
+        return None
+    platform = str(getattr(message, "platform", "") or "").strip()
+    if platform and platform != "onebot.v11":
+        return None
+
+    group_info = None
+    user_info = None
+    message_info = getattr(message, "message_info", None)
+    if message_info is not None:
+        group_info = getattr(message_info, "group_info", None)
+        user_info = getattr(message_info, "user_info", None)
+
+    if group_info is not None:
+        group_id = str(getattr(group_info, "group_id", "") or "").strip()
+        if group_id:
+            key = f"onebot.v11:group:{group_id}"
+            record = _host_target_registry.get(key)
+            if record is not None:
+                return record
+
+    if user_info is not None:
+        user_id = str(getattr(user_info, "user_id", "") or "").strip()
+        if user_id:
+            key = f"onebot.v11:private:{user_id}"
+            record = _host_target_registry.get(key)
+            if record is not None:
+                return record
+
+    for key, record in _host_target_registry.items():
+        if key.startswith("onebot.v11:"):
+            return record
+    return None
+
+
+def _build_onebot_message_text(message: Any) -> tuple[Optional[str], list[str]]:
+    """从 SessionMessage 提取纯文本及非文本组件类型列表。"""
+
+    plain_text = str(getattr(message, "processed_plain_text", "") or "").strip()
+    non_text_kinds: list[str] = []
+    raw_message = getattr(message, "raw_message", None)
+    components = getattr(raw_message, "components", None) if raw_message is not None else None
+    if components:
+        for component in components:
+            format_name = getattr(component, "format_name", None)
+            kind = format_name() if callable(format_name) else (format_name or type(component).__name__)
+            if kind != "text":
+                non_text_kinds.append(str(kind))
+    if plain_text:
+        return plain_text, non_text_kinds
+    if non_text_kinds:
+        return None, non_text_kinds
+    return None, []
+
+
+async def _codex_chat_host_send_interceptor(message: Any) -> Optional[Any]:
+    """宿主层接管 Maibot 出站消息并通过 NoneBot Bot 真实发送。"""
+
+    target = _resolve_target_for_message(message)
+    if target is None:
+        return None
+    bot, info = target
+
+    text, non_text_kinds = _build_onebot_message_text(message)
+    if not text:
+        if non_text_kinds:
+            logger.info(
+                f"codex_chat_host_send_skip message_id={getattr(message, 'message_id', '')} "
+                f"reason=non_text_only kinds={','.join(non_text_kinds)}"
+            )
+        return None
+
+    is_group = bool(info.get("is_group"))
+    target_id = str(info.get("target_id", "") or "").strip()
+    if not target_id:
+        return None
+
+    message_id = str(getattr(message, "message_id", "") or "").strip()
+    logger.info(
+        f"codex_chat_host_send_intercept platform=onebot.v11 "
+        f"is_group={is_group} target_id={target_id} "
+        f"text_chars={len(text)} maibot_message_id={message_id} "
+        f"non_text_kinds={','.join(non_text_kinds) if non_text_kinds else '-'}"
+    )
+
+    try:
+        from nonebot.adapters.onebot.v11 import Message
+    except Exception as exc:
+        logger.error(
+            f"codex_chat_host_send_failed stage=import_message error={type(exc).__name__}: {exc}"
+        )
+        return None
+
+    try:
+        if is_group:
+            api_response = await bot.call_api(
+                "send_group_msg",
+                group_id=int(target_id),
+                message=Message(text),
+            )
+        else:
+            api_response = await bot.call_api(
+                "send_private_msg",
+                user_id=int(target_id),
+                message=Message(text),
+            )
+    except Exception as exc:
+        logger.error(
+            f"codex_chat_host_send_failed message_id={message_id} "
+            f"target_id={target_id} is_group={is_group} "
+            f"error={type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+        )
+        return None
+
+    onebot_message_id = ""
+    if isinstance(api_response, dict):
+        onebot_message_id = str(api_response.get("message_id", "") or "").strip()
+    if not onebot_message_id:
+        logger.warning(
+            f"codex_chat_host_send_no_message_id message_id={message_id} "
+            f"target_id={target_id} is_group={is_group} response={api_response!r}"
+        )
+        return None
+
+    synthetic_message: Any
+    try:
+        from copy import deepcopy
+        synthetic_message = deepcopy(message)
+    except Exception:
+        synthetic_message = message
+    try:
+        synthetic_message.message_id = onebot_message_id
+    except Exception:
+        pass
+
+    logger.info(
+        f"codex_chat_host_send_success message_id={onebot_message_id} "
+        f"target_id={target_id} is_group={is_group} text_chars={len(text)}"
+    )
+    return synthetic_message
+
+
+def _register_host_send_interceptor() -> None:
+    """向 maibot_core 注册宿主层出站拦截器。"""
+
+    try:
+        from .maibot_core.services.send_service import set_host_send_interceptor
+    except Exception as exc:
+        logger.warning(
+            f"codex_chat_host_send_interceptor_import_failed error={type(exc).__name__}: {exc}"
+        )
+        return
+    try:
+        previous = set_host_send_interceptor(_codex_chat_host_send_interceptor)
+        logger.info(
+            "codex_chat_host_send_interceptor_registered "
+            f"replaced_previous={previous is not None}"
+        )
+    except Exception as exc:
+        logger.warning(
+            f"codex_chat_host_send_interceptor_register_failed error={type(exc).__name__}: {exc}"
+        )
+
+
+_register_host_send_interceptor()
+
+
 @_codex_chat.handle()
 async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
     if not plugin_config.codex_chat_enable:
@@ -26,6 +236,8 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
         group_id = getattr(event, "group_id", None)
         if plugin_config.allowed_groups_list and int(group_id or 0) not in plugin_config.allowed_groups_list:
             return
+
+    _remember_target(event, bot)
 
     fallback_plain_text = str(message).strip()
     converted = None
