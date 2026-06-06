@@ -13,6 +13,36 @@ if TYPE_CHECKING:
     from .config_base import AttributeData
 
 
+_CONFIG_FIELD_SKIP_NAMES = {"model_config", "field_docs"}
+
+
+def _get_model_fields(model_or_cls: Any):
+    cls = model_or_cls if isinstance(model_or_cls, type) else type(model_or_cls)
+    fields = getattr(cls, "model_fields", None)
+    if fields is not None:
+        return fields
+    fields = getattr(cls, "__fields__", None)
+    if fields is not None:
+        return fields
+    fields = getattr(cls, "fields", None)
+    if fields is not None:
+        return fields
+    return {}
+
+
+def _get_field_repr(field: Any) -> bool:
+    value = getattr(field, "repr", None)
+    if value is not None:
+        return bool(value)
+
+    field_info = getattr(field, "field_info", None)
+    value = getattr(field_info, "repr", None)
+    if value is not None:
+        return bool(value)
+
+    return True
+
+
 def recursive_parse_item_to_table(
     config: ConfigBase, is_inline_table: bool = False, override_repr: bool = False
 ) -> items.Table | items.InlineTable:
@@ -21,12 +51,12 @@ def recursive_parse_item_to_table(
     config_table = tomlkit.table()
     if is_inline_table:
         config_table = tomlkit.inline_table()
-    for config_item_name, config_item_info in type(config).model_fields.items():
-        if not config_item_info.repr and not override_repr:
+    for config_item_name, config_item_info in _get_model_fields(config).items():
+        if config_item_name in _CONFIG_FIELD_SKIP_NAMES:
+            continue
+        if not _get_field_repr(config_item_info) and not override_repr:
             continue
         value = getattr(config, config_item_name)
-        if config_item_name in ["field_docs", "_validate_any", "suppress_any_warning"]:
-            continue
         if value is None:
             continue
         if isinstance(value, ConfigBase):
