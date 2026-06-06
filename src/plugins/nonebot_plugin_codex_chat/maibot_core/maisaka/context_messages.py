@@ -15,6 +15,7 @@ from PIL import Image as PILImage
 from ..chat.message_receive.message import SessionMessage
 from ..common.data_models.message_component_data_model import (
 
+    AtComponent,
     DictComponent,
     EmojiComponent,
     ForwardNodeComponent,
