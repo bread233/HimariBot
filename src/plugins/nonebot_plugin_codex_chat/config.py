@@ -1,9 +1,29 @@
 from __future__ import annotations
 
+from pathlib import Path
+import shutil
+
 from nonebot import get_plugin_config
 from pydantic import BaseModel, Field
 
-from .maibot_core.config.config import ensure_runtime_config_files
+
+_PACKAGE_CONFIG_DIR: Path = Path(__file__).resolve().parent / "config"
+_RUNTIME_CONFIG_DIR: Path = Path.cwd() / "data" / "nonebot_chat_agent" / "config"
+
+
+def _ensure_runtime_config_files() -> None:
+    try:
+        _RUNTIME_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        if not _PACKAGE_CONFIG_DIR.exists():
+            return
+        for template in _PACKAGE_CONFIG_DIR.glob("*.toml"):
+            target = _RUNTIME_CONFIG_DIR / template.name
+            if not target.exists():
+                shutil.copy2(template, target)
+    except Exception:
+        # 插件配置加载阶段不要因为复制失败阻塞整个插件导入
+        # maibot_core 后续完整初始化时仍会处理配置错误
+        return
 
 
 class ConfigModel(BaseModel):
@@ -52,5 +72,5 @@ class ConfigModel(BaseModel):
 
 
 def get_config() -> ConfigModel:
-    ensure_runtime_config_files()
+    _ensure_runtime_config_files()
     return get_plugin_config(ConfigModel)
