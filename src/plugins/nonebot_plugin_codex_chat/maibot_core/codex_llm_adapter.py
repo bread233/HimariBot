@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import re
 import sys
 import traceback
@@ -93,6 +94,39 @@ _TIMING_GATE_STRONG_CONTINUE_PATTERNS: tuple[str, ...] = (
     r"连续追问",
 )
 
+# fix24: Planner ACTION + ARGS 协议白名单
+# 仅白名单内的 ACTION 会被路由到对应工具；不在白名单内的（包括当前未启用的 send_emoji / send_image）
+# 一律按 invalid_action 丢弃。``none`` 用于"不调用任何工具"；``finish`` 用于"结束本轮"。
+_ALLOWED_PLANNER_ACTION_TOOLS: frozenset[str] = frozenset(
+    {
+        "reply",
+        "finish",
+        "view_complex_message",
+        "query_jargon",
+        "query_memory",
+        "query_person_profile",
+        "tool_search",
+        "none",
+    }
+)
+
+# 显式拒绝：当前方案 B 不开放这两个工具
+_DISALLOWED_PLANNER_ACTION_TOOLS: frozenset[str] = frozenset(
+    {"send_emoji", "send_image"}
+)
+
+# ACTION 行匹配：``ACTION: <identifier>``（大小写不敏感，允许反引号包裹）
+_PLANNER_ACTION_LINE_PATTERN = re.compile(
+    r"^\s*ACTION\s*:\s*([A-Za-z_][A-Za-z0-9_]*)\s*$",
+    re.IGNORECASE,
+)
+
+# ARGS 行匹配：``ARGS: {<json>}``（贪婪至行尾，必须是 JSON object）
+_PLANNER_ARGS_LINE_PATTERN = re.compile(
+    r"^\s*ARGS\s*:\s*(\{.*\})\s*$",
+    re.IGNORECASE,
+)
+
 _PLANNER_REPLY_POSITIVE_PATTERNS: tuple[str, ...] = (
     r"应回复",
     r"应该回复",
@@ -130,6 +164,12 @@ _PLANNER_REPLY_POSITIVE_PATTERNS: tuple[str, ...] = (
     r"我是绯玛丽",
     r"刚刚在看消息",
     r"刚上线",
+    # fix24: 新 prompt 中明确指示 model 使用的关键词
+    r"直接回一句",
+    r"短回复",
+    r"接住互动",
+    r"接住对话",
+    r"应接住对话",
 )
 
 _PLANNER_REPLY_NEGATIVE_PATTERNS: tuple[str, ...] = (
@@ -227,13 +267,21 @@ def _normalize_planner_output(text: str, *, extra: dict | None) -> list[Any]:
     仅在 ``request_type == "maisaka_planner"`` 时由 ``generate_text`` 调用；
     其他请求类型不会进入本函数，行为完全不受影响。
 
+    fix24 协议升级：优先解析 ``ACTION:`` + ``ARGS:``；若模型未给出合法 ACTION，
+    再回退到中文 positive/negative 关键词（仅当 ``anchor_message_id`` 非空时）。
+
     判定规则：
     - 必须从 ``extra["anchor_message_id"]`` 取到非空锚点消息 ID，否则返回空列表；
-    - 命中任意否定关键词（"不应回复 / 不要回复 / 等待新消息" 等）则返回空列表；
-    - 命中任意肯定关键词（"应回复 / 优先回复 / 调用 reply / 在呢，咋啦" 等）
-      且未命中否定关键词时，构造 ``ToolCall(func_name="reply", args={"msg_id": anchor_message_id})``；
-    - 同时命中肯定与否定视为冲突，返回空列表；
-    - 含糊文本（无任何命中）返回空列表，沿用原行为。
+    - ACTION 协议命中白名单 -> 按 ``_build_planner_tool_call`` 构造对应工具调用；
+      - ``action == "none"`` -> ``[]``（明确不调用）
+      - ``reply`` / ``view_complex_message`` -> 自动注入 ``msg_id``；
+      - ``query_jargon`` / ``query_memory`` / ``query_person_profile`` / ``tool_search``
+        校验最小参数，缺则丢弃并写日志；
+      - ``finish`` -> 直接构造 ``finish`` 工具调用。
+    - ACTION 命中黑名单（``send_emoji`` / ``send_image``）或未知工具名 -> ``[]``；
+    - ACTION + ARGS JSON 解析失败（非 dict）-> ``[]``；
+    - 没有 ACTION 行 -> 进入旧中文 fallback；
+    - 旧 fallback：否定关键词命中 -> ``[]``；肯定关键词命中 -> ``reply``。
     """
 
     if not text or _ToolCall is None:
@@ -244,20 +292,34 @@ def _normalize_planner_output(text: str, *, extra: dict | None) -> list[Any]:
         raw_anchor = extra.get("anchor_message_id")
         if raw_anchor is not None:
             anchor_message_id = str(raw_anchor).strip()
-    if not anchor_message_id:
-        return []
 
-    action = _extract_planner_action(text)
-    if action == "reply":
-        return [
-            _ToolCall(
-                call_id=f"codex_planner_reply_{uuid.uuid4().hex[:12]}",
-                func_name="reply",
-                args={"msg_id": anchor_message_id},
-                extra_content=None,
+    action, parsed_args, error = _extract_planner_action_and_args(text)
+    if action is not None:
+        if error is not None:
+            logger.info(
+                "codex_planner_action_rejected action=%s reason=%s",
+                action,
+                error,
             )
-        ]
-    if action in ("none", "finish"):
+            return []
+        args_keys = sorted(parsed_args.keys()) if isinstance(parsed_args, dict) else []
+        logger.info(
+            "codex_planner_action_accepted action=%s anchor_present=%s "
+            "args_valid=%s args_keys=%s",
+            action,
+            bool(anchor_message_id),
+            True,
+            args_keys,
+        )
+        if not anchor_message_id and action in ("reply", "view_complex_message"):
+            logger.warning(
+                "codex_planner_action_dropped action=%s reason=no_anchor_message_id",
+                action,
+            )
+            return []
+        return _build_planner_tool_call(action, parsed_args, anchor_message_id)
+
+    if not anchor_message_id:
         return []
 
     lowered = text.lower()
@@ -311,6 +373,240 @@ def _extract_planner_action(text: str) -> str | None:
     if match is None:
         return None
     return match.group(1).lower()
+
+
+def _extract_planner_action_and_args(
+    text: str,
+) -> tuple[str | None, dict[str, Any] | None, str | None]:
+    """从 Planner 文本中解析 ``ACTION:`` + ``ARGS:`` 协议。
+
+    协议位置不限，但 prompt 要求"最后两行必须是 ACTION / ARGS"；
+    本函数从下到上扫描，定位最后一个非空 ``ACTION:`` 行，再向下取最近一个
+    非空 ``ARGS:`` 行。
+
+    Returns:
+        ``(action, args, error)``：
+        - action: 标准化小写 ACTION 名；当且仅当未找到 ``ACTION:`` 行时为 ``None``。
+        - args: 解析后的 JSON object（``dict``）；缺省/无 ARGS 行时为 ``{}``；
+          解析失败或非 dict 时为 ``None``。
+        - error: 错误标识；``"invalid_action"`` / ``"invalid_args"`` / ``None``。
+    """
+
+    if not text:
+        return None, None, None
+
+    lines = text.splitlines()
+    action_line_idx = -1
+    action: str | None = None
+    for idx, raw in enumerate(lines):
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        cleaned = stripped.strip("`").strip()
+        m = _PLANNER_ACTION_LINE_PATTERN.match(cleaned)
+        if m is None:
+            continue
+        action_line_idx = idx
+        action = m.group(1).lower()
+
+    if action is None or action_line_idx < 0:
+        return None, None, None
+
+    if action in _DISALLOWED_PLANNER_ACTION_TOOLS:
+        return action, None, "invalid_action"
+    if action not in _ALLOWED_PLANNER_ACTION_TOOLS:
+        return action, None, "invalid_action"
+
+    for raw in lines[action_line_idx + 1:]:
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        cleaned = stripped.strip("`").strip()
+        m = _PLANNER_ARGS_LINE_PATTERN.match(cleaned)
+        if m is None:
+            break
+        try:
+            parsed = json.loads(m.group(1))
+        except Exception:
+            return action, None, "invalid_args"
+        if not isinstance(parsed, dict):
+            return action, None, "invalid_args"
+        return action, parsed, None
+
+    return action, {}, None
+
+
+def _build_planner_tool_call(
+    action: str,
+    args: dict[str, Any] | None,
+    anchor_message_id: str,
+) -> list[Any]:
+    """根据 ACTION + ARGS 构造 ToolCall。失败时返回 ``[]`` 并写日志。
+
+    - ``action == "none"`` -> ``[]``（明确不调用任何工具）
+    - ``action == "reply"`` -> 必须有 ``anchor_message_id``；自动注入 ``msg_id`` 和
+      ``set_quote=True``（除非调用方已经显式给出 ``set_quote``）。
+    - ``action == "view_complex_message"`` -> 必须有 ``anchor_message_id``；
+      自动注入 ``msg_id``。
+    - ``action == "query_jargon"`` -> 必须有非空 ``words`` 列表；``str`` 会被归一为单元素列表。
+    - ``action == "query_memory"`` -> 必须满足 ``query``（非空 str）或
+      ``time_start`` + ``time_end`` 同时存在。
+    - ``action == "query_person_profile"`` -> 必须有 ``person_id`` 或 ``person_name``。
+    - ``action == "tool_search"`` -> 必须有非空 ``query`` 字符串。
+    - ``action == "finish"`` -> 直接构造 ``finish`` 工具调用，args 透传。
+    """
+
+    if _ToolCall is None:
+        return []
+
+    if action == "none":
+        return []
+
+    if action == "reply":
+        if not anchor_message_id:
+            logger.warning(
+                "codex_planner_action_dropped action=reply reason=no_anchor_message_id"
+            )
+            return []
+        merged: dict[str, Any] = dict(args or {})
+        merged["msg_id"] = anchor_message_id
+        merged.setdefault("set_quote", True)
+        return [
+            _ToolCall(
+                call_id=f"codex_planner_reply_{uuid.uuid4().hex[:12]}",
+                func_name="reply",
+                args=merged,
+                extra_content=None,
+            )
+        ]
+
+    if action == "finish":
+        return [
+            _ToolCall(
+                call_id=f"codex_planner_finish_{uuid.uuid4().hex[:12]}",
+                func_name="finish",
+                args=dict(args or {}),
+                extra_content=None,
+            )
+        ]
+
+    if action == "view_complex_message":
+        if not anchor_message_id:
+            logger.warning(
+                "codex_planner_action_dropped action=view_complex_message "
+                "reason=no_anchor_message_id"
+            )
+            return []
+        merged = dict(args or {})
+        merged.setdefault("msg_id", anchor_message_id)
+        return [
+            _ToolCall(
+                call_id=f"codex_planner_view_{uuid.uuid4().hex[:12]}",
+                func_name="view_complex_message",
+                args=merged,
+                extra_content=None,
+            )
+        ]
+
+    if action == "query_jargon":
+        merged = dict(args or {})
+        words = merged.get("words")
+        if isinstance(words, str) and words.strip():
+            merged["words"] = [words.strip()]
+            words = merged["words"]
+        if not isinstance(words, list) or not words:
+            logger.warning(
+                "codex_planner_action_dropped action=query_jargon reason=invalid_words"
+            )
+            return []
+        normalized: list[str] = []
+        for item in words:
+            if isinstance(item, str) and item.strip():
+                normalized.append(item.strip())
+        if not normalized:
+            logger.warning(
+                "codex_planner_action_dropped action=query_jargon reason=empty_words"
+            )
+            return []
+        merged["words"] = normalized
+        return [
+            _ToolCall(
+                call_id=f"codex_planner_jargon_{uuid.uuid4().hex[:12]}",
+                func_name="query_jargon",
+                args=merged,
+                extra_content=None,
+            )
+        ]
+
+    if action == "query_memory":
+        merged = dict(args or {})
+        query = merged.get("query")
+        time_start = merged.get("time_start")
+        time_end = merged.get("time_end")
+        has_query = isinstance(query, str) and query.strip() != ""
+        has_time_range = (
+            isinstance(time_start, str)
+            and time_start.strip() != ""
+            and isinstance(time_end, str)
+            and time_end.strip() != ""
+        )
+        if not (has_query or has_time_range):
+            logger.warning(
+                "codex_planner_action_dropped action=query_memory "
+                "reason=missing_query_or_time_range"
+            )
+            return []
+        if has_query and isinstance(query, str):
+            merged["query"] = query.strip()
+        return [
+            _ToolCall(
+                call_id=f"codex_planner_memory_{uuid.uuid4().hex[:12]}",
+                func_name="query_memory",
+                args=merged,
+                extra_content=None,
+            )
+        ]
+
+    if action == "query_person_profile":
+        merged = dict(args or {})
+        person_id = merged.get("person_id")
+        person_name = merged.get("person_name")
+        valid_id = isinstance(person_id, str) and person_id.strip() != ""
+        valid_name = isinstance(person_name, str) and person_name.strip() != ""
+        if not (valid_id or valid_name):
+            logger.warning(
+                "codex_planner_action_dropped action=query_person_profile "
+                "reason=missing_person_id_or_name"
+            )
+            return []
+        return [
+            _ToolCall(
+                call_id=f"codex_planner_profile_{uuid.uuid4().hex[:12]}",
+                func_name="query_person_profile",
+                args=merged,
+                extra_content=None,
+            )
+        ]
+
+    if action == "tool_search":
+        merged = dict(args or {})
+        query = merged.get("query")
+        if not (isinstance(query, str) and query.strip()):
+            logger.warning(
+                "codex_planner_action_dropped action=tool_search reason=missing_query"
+            )
+            return []
+        merged["query"] = query.strip()
+        return [
+            _ToolCall(
+                call_id=f"codex_planner_search_{uuid.uuid4().hex[:12]}",
+                func_name="tool_search",
+                args=merged,
+                extra_content=None,
+            )
+        ]
+
+    return []
 
 
 def _get_plugin_config():

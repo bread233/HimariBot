@@ -204,25 +204,66 @@ async def _codex_chat_host_send_interceptor(message: Any) -> Optional[Any]:
 
 
 def _register_host_send_interceptor() -> None:
-    """向 maibot_core 注册宿主层出站拦截器。"""
+    """向 maibot_core 注册宿主层出站拦截器。
+
+    由于 ``bootstrap_src_alias`` 会把 ``maibot_core`` 树作为虚拟 ``src`` 包
+    重新挂载，运行时存在两个不同的 ``send_service`` 模块对象：
+
+    * ``nonebot_plugin_codex_chat.maibot_core.services.send_service``（宿主侧导入路径）
+    * ``src.services.send_service``（Maibot 内部 ``from src...`` 路径）
+
+    ``_host_send_interceptor`` 是模块级全局变量，两个模块对象各自持有
+    一份，互不可见。本函数在两个模块对象上分别注册拦截器，并在日志中
+    标注 ``module=``，以便在生产环境确认哪条路径生效。
+    """
 
     try:
-        from .maibot_core.services.send_service import set_host_send_interceptor
+        from .maibot_core.services import send_service as _pkg_send_service
     except Exception as exc:
         logger.warning(
-            f"codex_chat_host_send_interceptor_import_failed error={type(exc).__name__}: {exc}"
+            f"codex_chat_host_send_interceptor_pkg_import_failed error={type(exc).__name__}: {exc}"
         )
         return
+
     try:
-        previous = set_host_send_interceptor(_codex_chat_host_send_interceptor)
-        logger.info(
-            "codex_chat_host_send_interceptor_registered "
-            f"replaced_previous={previous is not None}"
-        )
+        from .maibot_core.bootstrap import bootstrap_src_alias
+        bootstrap_src_alias()
     except Exception as exc:
         logger.warning(
-            f"codex_chat_host_send_interceptor_register_failed error={type(exc).__name__}: {exc}"
+            f"codex_chat_host_send_interceptor_bootstrap_failed error={type(exc).__name__}: {exc}"
         )
+
+    _src_send_service = None
+    try:
+        import src.services.send_service as _src_send_service
+    except Exception:
+        _src_send_service = None
+
+    modules_to_register = [
+        (
+            "nonebot_plugin_codex_chat.maibot_core.services.send_service",
+            _pkg_send_service,
+        )
+    ]
+    if _src_send_service is not None and _src_send_service is not _pkg_send_service:
+        modules_to_register.append(("src.services.send_service", _src_send_service))
+    elif _src_send_service is not None and _src_send_service is _pkg_send_service:
+        logger.debug(
+            "codex_chat_host_send_interceptor_pkg_src_same_module skip_dual"
+        )
+
+    for module_name, module in modules_to_register:
+        try:
+            previous = module.set_host_send_interceptor(_codex_chat_host_send_interceptor)
+            logger.info(
+                f"codex_chat_host_send_interceptor_registered module={module_name} "
+                f"previous={previous is not None}"
+            )
+        except Exception as exc:
+            logger.warning(
+                f"codex_chat_host_send_interceptor_register_failed "
+                f"module={module_name} error={type(exc).__name__}: {exc}"
+            )
 
 
 _register_host_send_interceptor()
