@@ -969,6 +969,7 @@ class MaisakaChatLoopService:
                 response_format=response_format,
                 interrupt_flag=self._interrupt_flag,
             ),
+            anchor_message_id=self._extract_anchor_message_id(chat_history),
         )
         llm_duration_ms = round((time.perf_counter() - llm_started_at) * 1000, 2)
         self._log_prompt_cache_usage(
@@ -1291,5 +1292,29 @@ class MaisakaChatLoopService:
             return resolve_enable_visual_planner()
         if request_kind in {"expression_selector", "reply_effect_judge"}:
             return False
+
+    @staticmethod
+    def _extract_anchor_message_id(chat_history: List[LLMContextMessage]) -> Optional[str]:
+        """从聊天历史中反向扫描最近一条带有非空 message_id 的消息 ID。
+
+        用途：在 Planner 阶段透传 ``anchor_message_id`` 给 LLM 适配器，
+        以便 Codex 纯文本 LLM 在合成 ``reply`` 工具调用时能填充 ``msg_id``。
+        取不到任何 ``message_id`` 时返回 ``None``，由调用方按"无锚点"处理。
+
+        Args:
+            chat_history: 当前轮传入的 Maisaka 上下文消息列表。
+
+        Returns:
+            Optional[str]: 锚点消息 ID；无候选时为 ``None``。
+        """
+
+        for context_message in reversed(chat_history or []):
+            raw_message_id = getattr(context_message, "message_id", None)
+            if not raw_message_id or not isinstance(raw_message_id, str):
+                continue
+            normalized = raw_message_id.strip()
+            if normalized:
+                return normalized
+        return None
         return True
 

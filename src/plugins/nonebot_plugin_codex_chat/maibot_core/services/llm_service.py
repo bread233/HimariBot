@@ -5,7 +5,7 @@
 """
 
 import traceback
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import hashlib
 import inspect
@@ -158,6 +158,8 @@ class LLMServiceClient:
         self,
         prompt: str,
         options: LLMGenerationOptions | None = None,
+        *,
+        anchor_message_id: Optional[str] = None,
     ) -> LLMResponseResult:
         """生成单轮文本响应。
 
@@ -166,6 +168,7 @@ class LLMServiceClient:
         Args:
             prompt: 文本提示词。
             options: 文本生成选项。
+            anchor_message_id: 当前轮锚点消息 ID，仅作为非敏感透传字段。
 
         Returns:
             LLMResponseResult: 统一文本生成结果。
@@ -176,6 +179,14 @@ class LLMServiceClient:
             tool_options=active_options.tool_options,
             response_format=active_options.response_format,
         )
+        extra = {
+            "task_name": self.task_name,
+            "model_name": active_options.model_name,
+            "temperature": active_options.temperature,
+            "max_tokens": active_options.max_tokens,
+        }
+        if anchor_message_id:
+            extra["anchor_message_id"] = str(anchor_message_id).strip()
         try:
             from ..codex_llm_adapter import generate_text
 
@@ -183,12 +194,7 @@ class LLMServiceClient:
                 prompt,
                 system_prompt=None,
                 request_type=self.request_type,
-                extra={
-                    "task_name": self.task_name,
-                    "model_name": active_options.model_name,
-                    "temperature": active_options.temperature,
-                    "max_tokens": active_options.max_tokens,
-                },
+                extra=extra,
             )
             result = LLMResponseResult(
                 response=adapter_result.text,
@@ -207,6 +213,8 @@ class LLMServiceClient:
         self,
         message_factory: MessageFactory,
         options: LLMGenerationOptions | None = None,
+        *,
+        anchor_message_id: Optional[str] = None,
     ) -> LLMResponseResult:
         """基于消息工厂生成响应。"""
         active_options = self._normalize_generation_options(options)
@@ -224,6 +232,15 @@ class LLMServiceClient:
             tool_options=active_options.tool_options,
             response_format=active_options.response_format,
         )
+        extra = {
+            "task_name": self.task_name,
+            "model_name": active_options.model_name,
+            "temperature": active_options.temperature,
+            "max_tokens": active_options.max_tokens,
+            "mode": "message_factory",
+        }
+        if anchor_message_id:
+            extra["anchor_message_id"] = str(anchor_message_id).strip()
         try:
             from ..codex_llm_adapter import generate_text
 
@@ -231,13 +248,7 @@ class LLMServiceClient:
                 prompt_text,
                 system_prompt=None,
                 request_type=self.request_type,
-                extra={
-                    "task_name": self.task_name,
-                    "model_name": active_options.model_name,
-                    "temperature": active_options.temperature,
-                    "max_tokens": active_options.max_tokens,
-                    "mode": "message_factory",
-                },
+                extra=extra,
             )
             result = LLMResponseResult(
                 response=adapter_result.text,
