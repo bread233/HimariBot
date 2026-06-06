@@ -70,6 +70,29 @@ _TIMING_GATE_WAIT_PATTERNS: tuple[str, ...] = (
     r"继续等待",
 )
 
+_TIMING_GATE_STRONG_CONTINUE_PATTERNS: tuple[str, ...] = (
+    r"选\W*continue",
+    r"选择\W*continue",
+    r"调用\W*continue",
+    r"`continue`",
+    r"不该继续等待",
+    r"不应继续等待",
+    r"不适合继续等待",
+    r"不能继续等待",
+    r"不该继续沉默",
+    r"不适合继续沉默",
+    r"不能继续沉默",
+    r"需要接话",
+    r"需要回应",
+    r"需要回复",
+    r"在等回应",
+    r"对方在等回应",
+    r"等一个直接回应",
+    r"直接被点名",
+    r"直接点名互动",
+    r"连续追问",
+)
+
 _PLANNER_REPLY_POSITIVE_PATTERNS: tuple[str, ...] = (
     r"应回复",
     r"应该回复",
@@ -84,6 +107,29 @@ _PLANNER_REPLY_POSITIVE_PATTERNS: tuple[str, ...] = (
     r"一句就够",
     r"在呢，[\u548b\u54c9]啦",
     r"我在，怎么了",
+    r"建议回复",
+    r"推荐回复",
+    r"建议下一步.*回复",
+    r"推荐内容",
+    r"推荐回复内容",
+    r"立刻回复",
+    r"立刻回复一次",
+    r"立刻发一条.*回复",
+    r"发一条.*可见回复",
+    r"很短的可见回复",
+    r"短的可见回复",
+    r"直接回应",
+    r"等一个直接回应",
+    r"不适合继续沉默",
+    r"不该继续沉默",
+    r"最合适的动作是发.*回复",
+    r"最优先的是发.*回复",
+    r"先解释刚.*没回",
+    r"先解释刚.*没接话",
+    r"顺手确认身份",
+    r"我是绯玛丽",
+    r"刚刚在看消息",
+    r"刚上线",
 )
 
 _PLANNER_REPLY_NEGATIVE_PATTERNS: tuple[str, ...] = (
@@ -97,6 +143,10 @@ _PLANNER_REPLY_NEGATIVE_PATTERNS: tuple[str, ...] = (
     r"调用\s*no_action",
     r"调用\s*finish",
     r"调用\s*wait",
+    r"不发可见回复",
+    r"不发送可见回复",
+    r"保持安静",
+    r"不回复",
 )
 
 
@@ -134,18 +184,28 @@ def _normalize_timing_gate_output(text: str) -> list[Any]:
     仅在 ``request_type == "maisaka_timing_gate"`` 时由 ``generate_text`` 调用；
     其他请求类型不会进入本函数，行为完全不受影响。
 
-    判定规则：
-    - 三个动作的关键词集合互相独立；
-    - 仅当唯一命中一个动作集合时构造对应的 ``ToolCall``；
-    - 含糊（无命中）或冲突（命中多个）时返回空列表，
-      由上游沿用原始 "无工具 → no_action" 行为；
-    - 不会修改原文本内容。
+    判定优先级：
+    1. 强 continue 语义（"不该继续等待 / 不适合继续沉默 / 需要接话 / 在等回应" 等）
+       一旦命中，立即返回 ``continue``，避免被同句中的 "继续等待 / 保持等待" 误判
+       覆盖；
+    2. 否则进入三个动作（continue / no_action / wait）的互斥判定：
+       仅当唯一命中一个动作集合时构造对应的 ``ToolCall``；
+       含糊（无命中）或冲突（命中多个）时返回空列表，
+       由上游沿用原始 "无工具 → no_action" 行为；
+    3. 不会修改原文本内容。
     """
 
     if not text or _ToolCall is None:
         return []
 
     lowered = text.lower()
+
+    if _match_any_pattern(_TIMING_GATE_STRONG_CONTINUE_PATTERNS, lowered):
+        tool_call = _build_timing_gate_tool_call("continue")
+        if tool_call is None:
+            return []
+        return [tool_call]
+
     matches = {
         "continue": _match_any_pattern(_TIMING_GATE_CONTINUE_PATTERNS, lowered),
         "no_action": _match_any_pattern(_TIMING_GATE_NO_ACTION_PATTERNS, lowered),
