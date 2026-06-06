@@ -515,7 +515,19 @@ class ReceiveExternalMessageResultPayload(BaseModel):
     """本次消息使用的归一路由键"""
 
 
-RegisterPluginPayload.model_rebuild()
+def _rebuild_model(model_cls: type) -> None:
+    rebuild = getattr(model_cls, "model_rebuild", None)
+    if callable(rebuild):
+        rebuild()
+        return
+
+    update_forward_refs = getattr(model_cls, "update_forward_refs", None)
+    if callable(update_forward_refs):
+        update_forward_refs()
+        return
+
+
+_rebuild_model(RegisterPluginPayload)
 
 
 # ====== 日志传输 ======
