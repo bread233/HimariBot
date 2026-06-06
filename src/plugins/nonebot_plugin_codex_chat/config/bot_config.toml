@@ -1,0 +1,368 @@
+[inner]
+version = "8.12.26"
+
+[bot]
+platform = "" # 平台
+qq_account = "" # QQ账号
+platforms = [] # 其他平台
+nickname = "上原绯玛丽"
+alias_names = ["肥玛丽", "绯玛丽"] # 别名列表
+
+[personality]
+personality = "你是一个女高中生，现在正在上网和群友聊天。" # 人格，建议200字以内，描述人格特质和身份特征；可以写完整设定。要求第二人称
+reply_style = "你的风格平淡简短。可以参考贴吧，知乎和微博的回复风格。不浮夸不长篇大论，不要过分修辞和复杂句。尽量回复的简短一些，平淡一些" # 默认表达风格，描述麦麦说话的表达风格，表达习惯，如要修改，可以酌情新增内容，建议1-2行
+multiple_reply_style = ["你的风格平淡但不失讽刺，很简短,很白话。可以参考贴吧，微博的回复风格。", "用1-2个字进行回复", "用1-2个符号进行回复", "言辭凝練古雅，穿插《論語》經句卻不晦澀，以文言短句為基，輔以淺白語意，持長者溫和風範，全用繁體字表達，具先秦儒者談吐韻致。", "带点翻译腔，但不要太长"] # 可选的多种表达风格列表，当配置不为空时可按概率随机替换 reply_style
+multiple_probability = 0 # 每次构建回复时，从 multiple_reply_style 中随机替换 reply_style 的概率（0.0-1.0）
+
+[chat]
+talk_value = 1 # 聊天频率，越小越沉默，范围0-1
+private_talk_value = 1 # 私聊聊天频率，越小越沉默，范围0-1
+mentioned_bot_reply = false # 是否启用提及必回复
+inevitable_at_reply = true # 是否启用at必回复
+max_context_size = 40 # 上下文长度
+max_private_context_size = 60 # 私聊上下文长度
+enable_context_optimization = true # 优化50%左右的Planner上下文消耗，但是可能影响缓存，轻微影响性能表现
+mid_term_memory = true # 上下文裁切时是否使用 utils 模型生成中期聊天摘要，并以可展开复杂消息保留在历史中
+mid_term_memory_lenth = 10 # 最多保留多少条中期聊天摘要消息，超出后移除最早的摘要
+enable_independent_timing_gate = true # 开启后对回复时机判定更精确，可能消耗更多token
+enable_replyer_format_output = false
+# 是否允许 replyer 输出 <text>、<at>、<emoji>、<image> 等格式化片段，
+# 并在发送前解析为真实消息组件，可能会影响回复表现
+
+enable_reply_quote = true # 是否启用回复时附带引用回复
+typing_speed = 1.0 # 模拟打字时间倍乘，0 表示不等待，1 保持默认等待时间，2 表示等待时间变为默认的两倍
+planner_interrupt_max_consecutive_count = 0 # planner如果遇到新消息，重新开始思考的次数
+timing_gate_non_continue_cooldown_seconds = 8 # 这个值决定了Timing Gate判断的最低时间间隔
+group_chat_prompt = "你正在qq群里聊天，下面是群里正在聊的内容，其中包含聊天记录和聊天中的图片和表情包。\n回复尽量简短一些。最好一次对一个话题进行回复，但必须考虑不同群友发言之间的交互，免得啰嗦或者回复内容太乱。请注意把握聊天内容。\n不要总是提及自己的身份背景，根据聊天内容自由发挥，但是要日常不浮夸，不要刻意找话题，。\n不用刻意回复其他人发送的表情包，只要关注表情包表达的含义。你可以适当发送表情包表达情绪。控制回复的频率，不要每个人的消息都回复，优先回复你感兴趣的或者主动提及你的，适当回复其他话题。\n"
+# 群聊通用注意事项
+
+private_chat_prompts = "你正在聊天，下面是正在聊的内容，其中包含聊天记录和聊天中的图片。\n回复尽量简短一些。请注意把握聊天内容。\n请考虑对方的发言频率，想法，思考自己何时回复以及回复内容。\n"
+# 私聊通用注意事项
+
+chat_prompts = []
+enable_talk_value_rules = true # 是否启用动态发言频率规则
+talk_value_rules = [{platform = "", item_id = "", rule_type = "group", time = "00:00-08:59", value = 0.8}, {platform = "", item_id = "", rule_type = "group", time = "09:00-18:59", value = 1.0}]
+# 思考频率规则列表，支持按聊天流/按日内时段配置。
+
+[visual]
+planner_mode = "auto" # 规划器模式，auto根据模型信息自动选择，text为纯文本模式，multimodal为多模态模式
+replyer_mode = "auto" # 回复器模式，auto根据模型信息自动选择，text为纯文本模式，multimodal为多模态模式
+max_image_num = 128 # 多模态请求中最多保留的图片数量；只保留最新图片，超出数量的旧图片会显示为 [图片]。
+wait_image_recognize_max_time = 10 # 非视觉 planner 请求前等待图片识别完成的最长秒数；为 0 时不等待，保持占位请求。
+handle_oversized_images = true # 开启后，接收图片会检查大小并按配置处理过大图片；关闭后跳过检查和处理。
+max_image_size_mb = 30.0 # 接收图片超过该大小时视为过大图片；设为 0 时不限制图片大小。
+oversized_image_handle_method = "compress" # 接收图片超过最大图片大小时的处理方法：compress 为压缩，discard 为丢弃。
+
+[visual.image_cache_cleanup] # 图片缓存自动清理配置。
+enabled = true # 是否启用图片缓存自动清理。
+check_interval_hours = 6.0 # 图片缓存自动清理任务的轮询间隔，单位为小时。
+image_file_retention_days = 14 # 图片文件超过该天数未使用后会被删除，但识别结果会继续保留。
+no_file_result_retention_days = 30 # 图片文件被清理或缺失后，识别结果继续保留的天数。
+
+[expression]
+expression_checked_only = true # 是否仅选择已由用户人工检查的表达方式
+expression_self_reflect = true # 是否在表达学习写入前进行 AI 审核；开启后只有审核通过的表达方式会被写入。
+enable_precise_expression_selection = false # 是否启用精细表达选择；开启后 replyer 会使用子代理从候选表达中挑选更贴合当前语境的表达方式。
+max_expression_learner = 3 # 所有聊天流合计允许同时运行的表达学习批次数；同一聊天流始终只允许一个批次。
+learning_list = [{platform = "", item_id = "", type = "group", use = true, learn = true}]
+# 表达学习配置列表，支持按聊天流配置
+
+expression_groups = []
+# 表达学习互通组
+
+[jargon]
+learning_list = [{platform = "", item_id = "", type = "group", use = true, learn = true}]
+# 黑话学习配置列表，支持按聊天流配置，platform 或 item_id 可使用 * 通配
+
+jargon_groups = []
+# 黑话学习互通组，默认不互通；platform 或 item_id 可使用 * 通配
+
+[a_memorix.integration] # 控制麦麦在聊天中如何使用长期记忆
+enable_memory_query_tool = true # 是否允许麦麦在聊天时查询长期记忆
+memory_query_default_limit = 5 # 每次默认从长期记忆中取回多少条结果
+enable_person_profile_query_tool = true # 是否允许麦麦查询人物画像记忆
+enable_person_profile_injection = true # 是否在 Maisaka Planner 调用前自动注入当前对象相关的人物画像
+person_profile_injection_max_profiles = 3 # 每轮自动注入的人物画像数量上限
+person_fact_writeback_enabled = true # 是否在发送回复后自动提取并写回人物事实到长期记忆
+chat_summary_writeback_enabled = true # 是否在 Maisaka 聊天过程中按消息窗口自动写回聊天摘要到长期记忆
+chat_summary_writeback_message_threshold = 36 # 自动写回聊天摘要的消息窗口阈值
+chat_summary_writeback_context_length = 36 # 自动写回聊天摘要时，从聊天流中回看的消息条数
+feedback_correction_enabled = false # 是否启用反馈驱动的延迟记忆纠错任务
+feedback_correction_window_hours = 12.0 # 反馈窗口时长（小时），以 query_memory 执行时间为起点
+feedback_correction_check_interval_minutes = 30 # 反馈纠错定时任务轮询间隔（分钟）
+feedback_correction_batch_size = 20 # 反馈纠错每轮最大处理任务数
+feedback_correction_auto_apply_threshold = 0.85 # 自动应用纠错动作的最低置信度阈值
+feedback_correction_max_feedback_messages = 30 # 每个纠错任务最多使用的窗口内用户反馈消息数
+feedback_correction_prefilter_enabled = true # 是否启用纠错前置预筛（用于减少不必要的模型调用）
+feedback_correction_paragraph_mark_enabled = true # 是否为受影响 paragraph 写入已纠正旧事实标记
+feedback_correction_paragraph_hard_filter_enabled = true # 是否在用户侧查询中硬过滤带有 stale 标记的 paragraph
+feedback_correction_profile_refresh_enabled = true # 是否在反馈纠错后将受影响人物画像加入刷新队列
+feedback_correction_profile_force_refresh_on_read = true # 人物画像处于脏队列时，读取是否强制刷新而不直接复用旧快照
+feedback_correction_episode_rebuild_enabled = true # 是否在反馈纠错后将受影响 source 加入 episode 重建队列
+feedback_correction_episode_query_block_enabled = true # episode source 处于重建队列时，是否对用户侧查询做屏蔽
+feedback_correction_reconcile_interval_minutes = 5 # 反馈纠错二阶段一致性后台协调任务轮询间隔（分钟）
+feedback_correction_reconcile_batch_size = 20 # 反馈纠错二阶段一致性每轮处理 profile/episode 队列的批大小
+
+[a_memorix.plugin] # 长期记忆系统的总开关
+enabled = false # 是否启用长期记忆系统
+
+[a_memorix.storage] # 存储位置
+data_dir = "data/a-memorix" # 数据目录
+
+[a_memorix.embedding] # 把记忆内容转换为向量时使用的基础设置
+model_name = "auto" # 用于把记忆内容转换成向量的模型，auto 表示自动选择
+dimension = 1024 # 记忆向量的维度，需要与向量化模型保持一致
+batch_size = 32 # 每次向量化请求处理的记忆条数
+max_concurrent = 5 # 同时进行的向量化请求数量
+enable_cache = false # 是否缓存向量化结果
+quantization_type = "int8" # 向量压缩方式，当前仅支持 int8(SQ8)
+
+[a_memorix.embedding.fallback] # Embedding 回退配置
+enabled = true # 是否启用回退机制
+probe_interval_seconds = 180 # 探测间隔秒数
+allow_metadata_only_write = true # 是否允许仅写入元数据
+
+[a_memorix.embedding.paragraph_vector_backfill] # 段落向量回填配置
+enabled = true # 是否启用回填任务
+interval_seconds = 60 # 回填轮询间隔
+batch_size = 64 # 单批回填数量
+max_retry = 5 # 最大重试次数
+
+[a_memorix.retrieval] # 检索配置
+top_k_paragraphs = 20 # 段落候选数
+top_k_relations = 10 # 关系候选数
+top_k_final = 10 # 最终返回条数
+alpha = 0.5 # 关系融合权重
+enable_ppr = true # 是否启用 PPR
+ppr_alpha = 0.85 # PPR alpha
+ppr_timeout_seconds = 1.5 # PPR 超时秒数
+ppr_concurrency_limit = 4 # PPR 并发限制
+enable_parallel = true # 是否启用并行检索
+
+[a_memorix.retrieval.sparse] # 稀疏检索配置
+enabled = true # 是否启用稀疏检索
+backend = "fts5" # 稀疏检索后端
+mode = "auto" # 稀疏检索模式
+tokenizer_mode = "jieba" # 分词模式
+candidate_k = 80 # 段落候选数
+relation_candidate_k = 60 # 关系候选数
+
+[a_memorix.threshold] # 阈值过滤配置
+min_threshold = 0.3 # 最小阈值
+max_threshold = 0.95 # 最大阈值
+percentile = 75 # 动态阈值百分位
+min_results = 3 # 最小保留条数
+enable_auto_adjust = true # 是否启用自动阈值调整
+
+[a_memorix.filter] # 聊天过滤配置
+enabled = true # 是否启用聊天过滤
+mode = "blacklist" # 过滤模式
+chats = [] # 聊天流列表
+
+[a_memorix.episode] # Episode 配置
+enabled = true # 是否启用 Episode
+generation_enabled = true # 是否启用自动生成
+pending_batch_size = 50 # 待处理批大小
+pending_max_retry = 3 # 待处理最大重试次数
+max_paragraphs_per_call = 20 # 单次最大段落数
+max_chars_per_call = 6000 # 单次最大字符数
+source_time_window_hours = 24.0 # 时间窗口小时数
+segmentation_model = "auto" # 分段模型选择
+
+[a_memorix.person_profile] # 人物画像配置
+enabled = true # 是否启用画像
+refresh_interval_minutes = 30 # 刷新间隔分钟数
+active_window_hours = 72.0 # 活跃窗口小时数
+max_refresh_per_cycle = 50 # 单轮最大刷新数
+top_k_evidence = 12 # 证据条数
+evidence_classification_max_tokens = 1200 # 人物画像证据分类最大输出 token 数
+
+[a_memorix.memory] # 记忆演化配置
+enabled = true # 是否启用记忆演化
+half_life_hours = 24.0 # 半衰期小时数
+prune_threshold = 0.1 # 裁剪阈值
+freeze_duration_hours = 24.0 # 冻结时长小时数
+
+[a_memorix.advanced] # 高级运行时配置
+enable_auto_save = true # 是否启用自动保存
+auto_save_interval_minutes = 5 # 自动保存间隔
+debug = false # 是否启用调试
+
+
+[a_memorix.web.tuning] # 调优中心配置
+enabled = true # 是否启用调优中心
+max_queue_size = 8 # 最大队列长度
+poll_interval_ms = 1200 # 轮询间隔毫秒数
+default_intensity = "standard" # 默认调优强度
+default_objective = "precision_priority" # 默认调优目标
+default_top_k_eval = 20 # 默认评估 Top-K
+default_sample_size = 24 # 默认样本数
+
+[a_memorix.web.import] # 导入中心配置
+enabled = true # 是否启用导入中心
+max_queue_size = 20 # 最大队列长度
+max_files_per_task = 200 # 单任务最大文件数
+max_file_size_mb = 20 # 单文件大小上限 MB
+max_paste_chars = 200000 # 粘贴字符数上限
+default_file_concurrency = 2 # 默认文件并发
+default_chunk_concurrency = 4 # 默认分块并发
+
+[a_memorix.web.import.timeout] # 导入中心超时配置
+llm_call_seconds = 240.0 # Web 导入中单次 LLM 抽取调用的超时时间，0 表示不额外限制
+process_poll_seconds = 1.0 # 迁移或转换子进程状态轮询等待时间
+process_terminate_seconds = 5.0 # 取消任务时等待子进程正常终止的时间
+process_kill_seconds = 3.0 # 取消任务时强制结束子进程后的等待时间
+convert_preflight_seconds = 20.0 # LPMM 转换依赖预检的超时时间
+
+[message_receive]
+image_parse_threshold = 5
+# 当消息中图片数量不超过此阈值时，启用图片解析功能，将图片内容解析为文本后再进行处理。
+# 当消息中图片数量超过此阈值时，为了避免过度解析导致的性能问题，将跳过图片解析，直接进行处理。
+
+ban_words = [] # 过滤词列表
+ban_msgs_regex = [] # 过滤正则表达式列表
+
+[voice]
+enable_asr = false # 是否启用语音识别，启用后麦麦可以识别语音消息
+
+[emoji]
+emoji_send_num = 25 # 一次从多少个表情包中选择发送，最大为 64
+max_reg_num = 64 # 表情包最大注册数量
+do_replace = true # 达到最大注册数量时替换旧表情包，关闭则达到最大数量时不会继续收集表情包
+check_interval = 10 # 表情包检查间隔（分钟）
+steal_emoji = true # 是否偷取表情包，让麦麦可以将一些表情包据为己有
+content_filtration = false # 是否启用表情包过滤，只有符合该要求的表情包才会被保存
+
+[keyword_reaction]
+keyword_rules = [] # 关键词规则列表
+regex_rules = [] # 正则表达式规则列表
+
+[response_post_process]
+enable_response_post_process = true # 是否启用回复后处理，包括错别字生成器，回复分割器
+
+[chinese_typo]
+enable = true # 是否启用中文错别字生成器
+error_rate = 0.01 # 单字替换概率
+min_freq = 9 # 最小字频阈值
+tone_error_rate = 0.1 # 声调错误概率
+word_replace_rate = 0.006 # 整词替换概率
+
+[response_splitter]
+enable = true # 是否启用回复分割器
+max_length = 512 # 回复允许的最大长度
+max_sentence_num = 8 # 回复允许的最大句子数
+enable_kaomoji_protection = false # 是否启用颜文字保护
+enable_overflow_return_all = false # 是否在句子数量超出回复允许的最大句子数时一次性返回全部内容
+
+[telemetry]
+enable = true # 是否启用遥测
+
+[log]
+date_style = "m-d H:i:s" # 日期格式
+log_level_style = "lite" # 日志等级显示样式
+color_text = "full" # 控制台日志颜色模式
+log_level = "INFO" # 全局日志级别
+console_log_level = "INFO" # 控制台日志级别
+file_log_level = "DEBUG" # 文件日志级别
+log_file_max_bytes = 5242880 # 单个日志文件最大字节数
+max_log_files = 30 # 最多保留的主日志文件数量
+log_cleanup_days = 30 # 主日志文件保留天数
+llm_request_snapshot_limit = 128 # 失败请求快照最多保留数量
+maisaka_prompt_preview_limit = 256 # 每个会话最多保留的 Maisaka Prompt 预览组数
+maisaka_reply_effect_limit = 256 # 每个会话最多保留的 Maisaka 回复效果记录数
+suppress_libraries = ["faiss", "httpx", "urllib3", "asyncio", "websockets", "httpcore", "requests", "sqlalchemy", "openai", "uvicorn", "jieba"] # 完全屏蔽日志的第三方库列表
+library_log_levels = {aiohttp = "WARNING", PIL = "WARNING"} # 特定第三方库的日志级别
+
+[debug]
+show_maisaka_thinking = true # 是否显示回复器推理
+fold_maisaka_thinking = true # 是否折叠 Maisaka 的 prompt 展示入口
+show_jargon_prompt = false # 是否显示jargon相关提示词
+show_memory_prompt = false # 是否显示记忆检索相关prompt
+enable_reply_effect_tracking = false # 是否开启回复效果评分追踪，默认关闭，需要手动打开
+record_reply_request = false # 是否记录 Replyer 请求体，默认关闭
+record_planner_request = false # 是否记录 Planner 完整请求体和完整回复体，默认关闭
+enable_llm_cache_stats = false # 是否记录 LLM prompt cache 调试统计，默认关闭
+
+[maim_message]
+ws_server_host = "127.0.0.1" # 旧版基于WS的服务器主机地址
+ws_server_port = 8000 # 旧版基于WS的服务器端口号
+auth_token = [] # 认证令牌，用于旧版API验证，为空则不启用验证
+enable_api_server = false # 是否启用额外的新版API Server
+api_server_host = "0.0.0.0" # 新版API Server主机地址
+api_server_port = 8090 # 新版API Server端口号
+api_server_use_wss = false # 新版API Server是否启用WSS
+api_server_cert_file = "" # 新版API Server SSL证书文件路径
+api_server_key_file = "" # 新版API Server SSL密钥文件路径
+api_server_allowed_api_keys = [] # 新版API Server允许的API Key列表，为空则允许所有连接
+
+[webui]
+enabled = true # 是否启用WebUI
+host = "127.0.0.1" # WebUI 绑定主机地址
+port = 8001 # WebUI 绑定端口
+mode = "production" # 运行模式：development(开发) 或 production(生产)
+webui_style = 1 # WebUI界面风格：0为当前风格，1为未来复古
+anti_crawler_mode = "basic" # 防爬虫模式：false(禁用) / strict(严格) / loose(宽松) / basic(基础-只记录不阻止)
+allowed_ips = "127.0.0.1" # IP白名单（逗号分隔，支持精确IP、CIDR格式和通配符）
+trusted_proxies = "" # 信任的代理IP列表（逗号分隔），只有来自这些IP的X-Forwarded-For才被信任
+trust_xff = false # 是否启用X-Forwarded-For代理解析（默认false）
+secure_cookie = false # 是否启用安全Cookie（仅通过HTTPS传输，默认false）
+enforce_public_outbound_url = true # 是否要求 WebUI 出站 URL 解析到公网地址；关闭后允许内网、本机或 TUN 代理地址，用于内网 LLM、反向代理等场景。
+enable_paragraph_content = false # 是否在知识图谱中加载段落完整内容（需要加载embedding store，会占用额外内存）
+
+[database]
+save_binary_data = false
+# 是否将消息中的二进制数据保存为独立文件
+# 若启用，消息中的语音等二进制数据将会保存为独立文件，并在消息中以特殊标记替代。启用会导致数据文件夹体积增大，但可以实现二次识别等功能。
+# 若禁用，则消息中的二进制将会在识别后删除，并在消息中使用识别结果替代，无法二次识别
+# 该配置项仅影响新存储的消息，已有消息不会受到影响
+
+[mcp]
+enable = true # 是否启用 MCP（Model Context Protocol）
+servers = []
+
+[mcp.client] # MCP 客户端宿主能力配置
+client_name = "MaiBot" # MCP 客户端实现名称
+client_version = "1.0.0" # MCP 客户端实现版本
+
+[mcp.client.roots] # Roots 能力配置
+enable = false # 是否向 MCP 服务器暴露 Roots 能力
+items = [] # Roots 列表
+
+[mcp.client.sampling] # Sampling 能力配置
+enable = false # 是否启用 Sampling 能力声明
+task_name = "planner" # 执行 Sampling 请求时使用的主程序模型任务名
+include_context_support = false # 是否声明支持 `includeContext` 非 `none` 语义
+tool_support = false # 是否声明支持在 Sampling 中继续使用工具
+
+[mcp.client.elicitation] # Elicitation 能力配置
+enable = false # 是否启用 Elicitation 能力声明
+allow_form = true # 是否允许表单模式 Elicitation
+allow_url = false # 是否允许 URL 模式 Elicitation
+# MCP 服务器配置列表
+
+[plugin]
+permission = [] # 允许使用内置插件管理命令的用户 ID 列表，格式为 platform:id，例如 qq:123456789
+
+[plugin_runtime]
+enabled = true # 启用插件系统
+health_check_interval_sec = 30.0 # 健康检查间隔（秒）
+max_restart_attempts = 3 # Runner 崩溃后最大自动重启次数
+runner_spawn_timeout_sec = 30.0 # 等待 Runner 子进程启动并注册的超时时间（秒）
+hook_blocking_timeout_sec = 60 # Hook 阻塞步骤的全局超时上限（秒）
+ipc_socket_path = ""
+# 自定义 IPC Socket 路径（仅 Linux/macOS 生效）
+# 留空则自动生成临时路径
+
+[plugin_runtime.render] # 浏览器渲染能力配置
+enabled = true # 是否启用插件运行时浏览器渲染能力
+browser_ws_endpoint = "" # 优先复用的现有 Chromium CDP 地址，可填写 ws/http 端点
+executable_path = "" # 浏览器可执行文件路径，留空时自动探测本机 Chrome/Chromium
+browser_install_root = "data/playwright-browsers" # Playwright 托管浏览器目录，自动下载 Chromium 时会复用该目录
+headless = true # 是否以无头模式启动浏览器
+launch_args = ["--disable-gpu", "--disable-dev-shm-usage", "--disable-setuid-sandbox", "--no-sandbox", "--no-zygote"] # 浏览器启动参数列表
+concurrency_limit = 2 # 同时允许进行的最大渲染任务数
+startup_timeout_sec = 20.0 # 浏览器连接或启动超时时间（秒）
+render_timeout_sec = 15.0 # 单次渲染默认超时时间（秒）
+auto_download_chromium = true # 未检测到可用浏览器时，是否自动下载 Playwright Chromium
+download_connection_timeout_sec = 120.0 # 自动下载 Chromium 时的连接超时时间（秒）
+restart_after_render_count = 200 # 累计渲染指定次数后自动重建本地浏览器，0 表示关闭该策略

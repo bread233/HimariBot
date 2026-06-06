@@ -143,3 +143,17 @@ dmypy.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 #data/
+
+# Repo runtime artifacts / caches
+**/__pycache__/
+logs/
+data/
+src/plugins/nonebot_plugin_codex_chat/data/
+*.db
+*.sqlite
+*.sqlite3
+*token*
+*secret*
+*cookie*
+*.tmp
+*.cache
