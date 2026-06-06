@@ -10,6 +10,7 @@ import asyncio
 import difflib
 import json
 import time
+import traceback
 
 from ..chat.heart_flow.heartFC_utils import CycleDetail
 from ..chat.message_receive.message import SessionMessage
@@ -882,11 +883,14 @@ class MaisakaReasoningEngine:
         except RespNotOkException as exc:
             logger.error(
                 f"{self._runtime.log_prefix} Maisaka 内部循环发生异常: "
-                f"模型响应异常 HTTP {exc.status_code} - {exc}"
+                f"模型响应异常 HTTP {exc.status_code} - {exc}\n{traceback.format_exc()}"
             )
             raise
-        except Exception:
-            logger.exception(f"{self._runtime.log_prefix} Maisaka 内部循环发生异常")
+        except Exception as e:
+            logger.error(
+                f"{self._runtime.log_prefix} Maisaka 内部循环发生异常: "
+                f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
+            )
             raise
 
     async def _handle_silent_turn(
