@@ -245,9 +245,10 @@ async def handle_tool(
                         message_id=sent_message_id,
                     )
                 )
-    except Exception:
-        logger.exception(
-            f"{tool_ctx.runtime.log_prefix} 发送文字消息时发生异常，目标消息编号={target_message_id}"
+    except Exception as exc:
+        logger.error(
+            f"{tool_ctx.runtime.log_prefix} 发送文字消息时发生异常，目标消息编号={target_message_id}: "
+            f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
         )
         return tool_ctx.build_failure_result(
             invocation.tool_name,
