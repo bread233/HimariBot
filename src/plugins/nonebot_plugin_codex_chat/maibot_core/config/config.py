@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, TypeVar, cast
+import shutil
 
 
 def _get_model_fields(model_or_cls: Any) -> dict[str, Any]:
@@ -80,14 +81,33 @@ from src.common.logger import get_logger
 """
 
 PROJECT_ROOT: Path = Path(__file__).parent.parent.parent.absolute().resolve()
-CONFIG_DIR: Path = PROJECT_ROOT / "config"
-BOT_CONFIG_PATH: Path = (CONFIG_DIR / "bot_config.toml").resolve().absolute()
-MODEL_CONFIG_PATH: Path = (CONFIG_DIR / "model_config.toml").resolve().absolute()
+PACKAGE_CONFIG_DIR: Path = (PROJECT_ROOT / "config").resolve().absolute()
+RUNTIME_CONFIG_DIR: Path = (Path.cwd() / "data" / "nonebot_chat_agent" / "config").resolve().absolute()
 LEGACY_ENV_PATH: Path = (PROJECT_ROOT / ".env").resolve().absolute()
-A_MEMORIX_LEGACY_CONFIG_PATH: Path = (CONFIG_DIR / "a_memorix.toml").resolve().absolute()
+A_MEMORIX_LEGACY_CONFIG_PATH: Path = (PACKAGE_CONFIG_DIR / "a_memorix.toml").resolve().absolute()
+
+def get_runtime_config_dir() -> Path:
+    RUNTIME_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    return RUNTIME_CONFIG_DIR
+
+def ensure_runtime_config_files() -> None:
+    runtime_dir = get_runtime_config_dir()
+    for template in PACKAGE_CONFIG_DIR.glob("*.toml"):
+        target = runtime_dir / template.name
+        if not target.exists():
+            shutil.copy2(template, target)
+
+def get_runtime_config_path(filename: str) -> Path:
+    ensure_runtime_config_files()
+    return get_runtime_config_dir() / filename
+
+BOT_CONFIG_PATH: Path = get_runtime_config_path("bot_config.toml")
+MODEL_CONFIG_PATH: Path = get_runtime_config_path("model_config.toml")
+
 MMC_VERSION: str = "1.0.0-rc.4"
 CONFIG_VERSION: str = "8.12.26"
 MODEL_CONFIG_VERSION: str = "1.17.3"
+
 
 logger = get_logger("config")
 
@@ -259,11 +279,11 @@ class ConfigManager:
     VLM_NOT_CONFIGURED_WARNING: str = "未配置视觉识图模型，部分图片理解可能受限，请在webui或model_config中配置"
 
     def __init__(self):
-        self.bot_config_path: Path = BOT_CONFIG_PATH
-        self.model_config_path: Path = MODEL_CONFIG_PATH
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        self.bot_config_path: Path = get_runtime_config_path("bot_config.toml")
+        self.model_config_path: Path = get_runtime_config_path("model_config.toml")
         self.global_config: Config | None = None
         self.model_config: ModelConfig | None = None
+
         self._reload_lock: asyncio.Lock = asyncio.Lock()
         self._reload_callbacks: list[ConfigReloadCallback] = []
         self._file_watcher: FileWatcher | None = None

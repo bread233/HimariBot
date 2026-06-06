@@ -3,6 +3,8 @@ from __future__ import annotations
 from nonebot import get_plugin_config
 from pydantic import BaseModel, Field
 
+from .maibot_core.config.config import ensure_runtime_config_files
+
 
 class ConfigModel(BaseModel):
     codex_chat_enable: bool = Field(default=True)
@@ -50,4 +52,5 @@ class ConfigModel(BaseModel):
 
 
 def get_config() -> ConfigModel:
+    ensure_runtime_config_files()
     return get_plugin_config(ConfigModel)
