@@ -1,6 +1,10 @@
 from abc import ABC, abstractmethod
 
-from typing import Self, TypeVar, Generic, TYPE_CHECKING
+try:
+    from typing import Self
+except ImportError:
+    from typing_extensions import Self
+from typing import TypeVar, Generic, TYPE_CHECKING
 
 import copy
 

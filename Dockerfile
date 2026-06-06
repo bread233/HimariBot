@@ -1,7 +1,7 @@
 ########################
 # 1️⃣ Builder 镜像
 ########################
-FROM python:3.10-slim AS builder
+FROM python:3.12-slim AS builder
 
 ENV PIP_NO_CACHE_DIR=1 \
     PYTHONUNBUFFERED=1 \
@@ -40,7 +40,7 @@ RUN find . -name '*.pyc' -delete \
 ########################
 # 2️⃣ Runtime 镜像
 ########################
-FROM python:3.10-slim
+FROM python:3.12-slim
 
 ENV PIP_NO_CACHE_DIR=1 \
     PYTHONUNBUFFERED=1 \
@@ -95,7 +95,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN locale-gen zh_CN.UTF-8 || true
 
 # 从 builder 拷依赖和代码
-COPY --from=builder /usr/local/lib/python3.10 /usr/local/lib/python3.10
+COPY --from=builder /usr/local/lib/python3.12 /usr/local/lib/python3.12
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /app /app
 
