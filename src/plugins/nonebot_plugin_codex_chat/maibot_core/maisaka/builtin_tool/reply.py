@@ -6,6 +6,10 @@ import traceback
 
 from src.chat.replyer.replyer_manager import replyer_manager
 from src.cli.maisaka_cli_sender import CLI_PLATFORM_NAME
+from src.common.data_models.message_component_data_model import (
+    MessageSequence,
+    TextComponent,
+)
 from src.common.data_models.reply_generation_data_models import ReplyGenerationResult
 from src.common.logger import get_logger
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
@@ -16,6 +20,25 @@ from src.services import send_service
 from .context import BuiltinToolRuntimeContext
 
 logger = get_logger("maisaka_builtin_reply")
+
+HOST_PLATFORM_ONEBOT_V11 = "onebot.v11"
+
+
+def _is_plain_text_sequence(sequence: MessageSequence) -> bool:
+    """判断 message_sequence 是否只包含 TextComponent。"""
+
+    components = getattr(sequence, "components", None) or []
+    if not components:
+        return False
+    return all(isinstance(component, TextComponent) for component in components)
+
+
+def _is_all_plain_text_sequences(sequences: list[MessageSequence]) -> bool:
+    """判断所有 sequence 是否都只包含 TextComponent。"""
+
+    if not sequences:
+        return False
+    return all(_is_plain_text_sequence(sequence) for sequence in sequences)
 
 
 async def _run_expression_selector(tool_ctx: BuiltinToolRuntimeContext, system_prompt: str) -> str:
@@ -196,6 +219,14 @@ async def handle_tool(
     send_results: list[dict[str, Any]] = []
     try:
         sent = False
+        is_onebot_v11_platform = (
+            tool_ctx.runtime.chat_stream.platform == HOST_PLATFORM_ONEBOT_V11
+        )
+        use_host_full_text_fast_path = (
+            is_onebot_v11_platform
+            and bool(reply_text)
+            and _is_all_plain_text_sequences(reply_sequences)
+        )
         if tool_ctx.runtime.chat_stream.platform == CLI_PLATFORM_NAME:
             for index, segment in enumerate(reply_segments):
                 render_cli_message(segment)
@@ -208,6 +239,49 @@ async def handle_tool(
                     )
                 )
             sent = True
+        elif use_host_full_text_fast_path:
+            snippet = reply_text[:80]
+            logger.info(
+                f"maisaka_reply_host_full_text_send platform={HOST_PLATFORM_ONEBOT_V11} "
+                f"text_chars={len(reply_text)} original_segments={len(reply_sequences)} "
+                f"snippet={snippet!r}"
+            )
+            full_text_sequence = MessageSequence([TextComponent(text=reply_text)])
+            sent_message = await send_service._send_to_target_with_message(
+                message_sequence=full_text_sequence,
+                stream_id=tool_ctx.runtime.session_id,
+                processed_plain_text=reply_text,
+                set_reply=effective_set_quote,
+                reply_message=target_message if effective_set_quote else None,
+                selected_expressions=reply_result.selected_expression_ids or None,
+                typing=False,
+                sync_to_maisaka_history=True,
+                maisaka_source_kind="guided_reply",
+            )
+            sent = sent_message is not None
+            if not sent:
+                send_results.append(
+                    _build_send_result(
+                        index=0,
+                        segment=reply_text,
+                        set_quote=effective_set_quote,
+                        success=False,
+                    )
+                )
+            else:
+                combined_reply_text = reply_text
+                sent_message_id = str(getattr(sent_message, "message_id", "") or "").strip()
+                if sent_message_id:
+                    sent_message_ids.append(sent_message_id)
+                send_results.append(
+                    _build_send_result(
+                        index=0,
+                        segment=reply_text,
+                        set_quote=effective_set_quote,
+                        success=True,
+                        message_id=sent_message_id,
+                    )
+                )
         else:
             for index, reply_sequence in enumerate(reply_sequences):
                 segment = reply_segments[index]

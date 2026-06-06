@@ -43,34 +43,34 @@ none
 ARGS 必须是 JSON object，例如：
 
 ACTION: reply
-ARGS: {}
+ARGS: {{}}
 
 ACTION: finish
-ARGS: {}
+ARGS: {{}}
 
 ACTION: none
-ARGS: {}
+ARGS: {{}}
 
 ACTION: query_memory
-ARGS: {"query": "用户是谁"}
+ARGS: {{"query": "用户是谁"}}
 
 ACTION: query_jargon
-ARGS: {"words": ["典", "yyds"]}
+ARGS: {{"words": ["典", "yyds"]}}
 
 ACTION: query_person_profile
-ARGS: {"person_name": "面包"}
+ARGS: {{"person_name": "面包"}}
 
 ACTION: view_complex_message
-ARGS: {}
+ARGS: {{}}
 
 ACTION: tool_search
-ARGS: {"query": "天气"}
+ARGS: {{"query": "天气"}}
 
 工具规则：
-- reply：当你判断应该发出可见文字回复时使用。ARGS 可以写 {}，系统会自动补目标消息 msg_id。
+- reply：当你判断应该发出可见文字回复时使用。ARGS 可以写 {{}}，系统会自动补目标消息 msg_id。
 - finish：当前任务完成，结束本轮内部思考。
 - none：当前不调用任何工具，继续观察或等待。
-- view_complex_message：需要查看复杂消息详情时使用。ARGS 可以写 {}，系统会自动补目标消息 msg_id。
+- view_complex_message：需要查看复杂消息详情时使用。ARGS 可以写 {{}}，系统会自动补目标消息 msg_id。
 - query_jargon：需要查询黑话/梗/术语时使用。ARGS 必须提供 words，格式为字符串数组。
 - query_memory：需要查询长期记忆时使用。ARGS 必须提供 query，或者提供 time_start/time_end。
 - query_person_profile：需要查询人物画像时使用。ARGS 必须提供 person_id 或 person_name。
@@ -90,6 +90,6 @@ ARGS: {"query": "天气"}
 不要输出 ACTION: send_image。
 不要把 ACTION 或 ARGS 写在代码块里。
 最后两行必须只有 ACTION 和 ARGS，不要在 ARGS 后追加解释。
-如果 ARGS 不需要参数，也必须输出 ARGS: {}。
+如果 ARGS 不需要参数，也必须输出 ARGS: {{}}。
 
 现在，请你输出你对{bot_name}发言的分析，你必须先输出文本内容的分析，然后再进行工具调用：
