@@ -247,6 +247,19 @@ def _normalize_planner_output(text: str, *, extra: dict | None) -> list[Any]:
     if not anchor_message_id:
         return []
 
+    action = _extract_planner_action(text)
+    if action == "reply":
+        return [
+            _ToolCall(
+                call_id=f"codex_planner_reply_{uuid.uuid4().hex[:12]}",
+                func_name="reply",
+                args={"msg_id": anchor_message_id},
+                extra_content=None,
+            )
+        ]
+    if action in ("none", "finish"):
+        return []
+
     lowered = text.lower()
     if _match_any_pattern(_PLANNER_REPLY_NEGATIVE_PATTERNS, lowered):
         return []
@@ -262,6 +275,42 @@ def _normalize_planner_output(text: str, *, extra: dict | None) -> list[Any]:
             extra_content=None,
         )
     ]
+
+
+_PLANNER_ACTION_PATTERN = re.compile(
+    r"^\s*ACTION\s*:\s*(reply|none|finish)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _extract_planner_action(text: str) -> str | None:
+    """从 Planner 文本中解析最后一个非空行上的 ``ACTION:`` 协议。
+
+    返回值：
+    - ``"reply"`` / ``"none"`` / ``"finish"``：匹配到的指令（小写）
+    - ``None``：最后非空行不是合法 ``ACTION:`` 行
+
+    实现说明：
+    - 仅检查文本中最后一个非空行（prompt 明确要求"最后一行必须只有 ACTION"）；
+    - 若最后非空行不是 ``ACTION:``，视为模型未遵守协议，返回 None 让上层走 fallback；
+    - 大小写不敏感；
+    - 容错：若整行被反引号包裹（例如 `` `ACTION: reply` ``），先剥离反引号再匹配。
+    """
+
+    if not text:
+        return None
+    last_non_blank: str | None = None
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if stripped:
+            last_non_blank = stripped
+    if last_non_blank is None:
+        return None
+    cleaned = last_non_blank.strip("`").strip()
+    match = _PLANNER_ACTION_PATTERN.match(cleaned)
+    if match is None:
+        return None
+    return match.group(1).lower()
 
 
 def _get_plugin_config():
