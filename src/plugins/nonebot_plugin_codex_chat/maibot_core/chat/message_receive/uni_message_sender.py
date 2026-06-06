@@ -6,7 +6,7 @@ import traceback
 from rich.traceback import install
 
 from .message import SessionMessage
-from ..outbound import capture_outbound_message, has_outbound_capture
+from ...outbound import capture_outbound_message, has_outbound_capture
 from ..utils.utils import calculate_typing_time, truncate_message
 from ...common.data_models.message_component_data_model import ReplyComponent
 from ...common.database.database import get_db_session
