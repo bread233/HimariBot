@@ -1,0 +1,3 @@
+# Dependencies for plugins under src/plugins_disabled.
+# These are not installed by the main runtime Docker image.
+zhenxun-utils>=0.2.2,<0.3.0
