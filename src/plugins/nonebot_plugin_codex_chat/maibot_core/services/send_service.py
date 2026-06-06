@@ -9,7 +9,7 @@
 """
 
 from copy import deepcopy
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import asyncio
 import base64
@@ -198,6 +198,41 @@ def _get_runtime_manager() -> Any:
     from src.plugin_runtime.integration import get_plugin_runtime_manager
 
     return get_plugin_runtime_manager()
+
+
+_HostSendInterceptor = Callable[[SessionMessage], Awaitable[Optional[SessionMessage]]]
+_host_send_interceptor: Optional[_HostSendInterceptor] = None
+
+
+def set_host_send_interceptor(
+    interceptor: Optional[_HostSendInterceptor],
+) -> Optional[_HostSendInterceptor]:
+    """注册或清空宿主层出站发送拦截器。
+
+    该拦截器仅作为进程内扩展点存在：它会在 ``send_service.before_send``
+    Hook 之后、Platform IO 真正发送之前被调用一次，接收待发送的
+    ``SessionMessage``，并允许返回：
+      - ``None``：表示不接管，发送继续走 Platform IO 原路径；
+      - 非空 ``SessionMessage``：宿主已自行发送，发送服务直接把它作为
+        合成的 sent_message 返回给调用方，避免 maim_message 旧链重复发送。
+
+    Args:
+        interceptor: 新的拦截器；传入 ``None`` 即可清空。
+
+    Returns:
+        Optional[_HostSendInterceptor]: 设置前的旧拦截器（如果有）。
+    """
+
+    global _host_send_interceptor
+    previous = _host_send_interceptor
+    _host_send_interceptor = interceptor
+    return previous
+
+
+def clear_host_send_interceptor() -> Optional[_HostSendInterceptor]:
+    """清空当前注册的宿主层出站发送拦截器。"""
+
+    return set_host_send_interceptor(None)
 
 
 def _coerce_bool(value: Any, default: bool) -> bool:
@@ -818,8 +853,37 @@ async def _send_via_platform_io(
         show_log=show_log,
     )
     if before_send_result.aborted:
+        synthetic_payload = before_send_result.kwargs.get("synthetic_sent_message")
+        if isinstance(synthetic_payload, dict):
+            try:
+                synthetic_message = deserialize_session_message(synthetic_payload)
+                logger.info(
+                    f"[SendService] 消息 {message.message_id} 在发送前被 Hook 接管，"
+                    f"使用合成的 sent_message 返回"
+                )
+                return synthetic_message
+            except Exception as exc:
+                logger.warning(
+                    f"[SendService] 解析 before_send.synthetic_sent_message 失败: {exc}，回退到 None"
+                )
         logger.info(f"[SendService] 消息 {message.message_id} 在发送前被 Hook 中止")
         return None
+
+    if _host_send_interceptor is not None:
+        try:
+            host_synthetic = await _host_send_interceptor(message)
+        except Exception as exc:
+            logger.warning(
+                f"[SendService] host_send_interceptor 执行异常: {type(exc).__name__}: {exc}，"
+                f"回退原 Platform IO 路径"
+            )
+            host_synthetic = None
+        if host_synthetic is not None:
+            logger.info(
+                f"[SendService] 消息 {message.message_id} 已被 host_send_interceptor 接管，"
+                f"跳过 Platform IO 真实发送"
+            )
+            return host_synthetic
 
     before_kwargs = before_send_result.kwargs
     typing = _coerce_bool(before_kwargs.get("typing"), typing)
