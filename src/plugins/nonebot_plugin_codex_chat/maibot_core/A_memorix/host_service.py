@@ -49,6 +49,17 @@ def _to_builtin_data(obj: Any) -> Any:
     return obj
 
 
+def _model_dump_compat(model: Any, **kwargs: Any) -> Dict[str, Any]:
+    dump = getattr(model, "model_dump", None)
+    if callable(dump):
+        return dump(**kwargs)
+    dict_fn = getattr(model, "dict", None)
+    if not callable(dict_fn):
+        return {}
+    v1_kwargs = {key: value for key, value in kwargs.items() if key != "mode"}
+    return dict_fn(**v1_kwargs)
+
+
 def _strip_internal_config_fields(obj: Any) -> Any:
     if isinstance(obj, dict):
         return {
@@ -319,7 +330,7 @@ class AMemorixHostService:
 
     @staticmethod
     def _config_model_to_runtime_dict(config_model: AMemorixConfig) -> Dict[str, Any]:
-        payload = config_model.model_dump(mode="json")
+        payload = _model_dump_compat(config_model, mode="json")
         web_config = payload.get("web")
         if isinstance(web_config, dict) and "import_config" in web_config:
             web_config["import"] = web_config.pop("import_config")
