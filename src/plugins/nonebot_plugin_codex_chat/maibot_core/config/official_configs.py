@@ -4331,3 +4331,20 @@ class PluginRuntimeConfig(ConfigBase):
 
     render: PluginRuntimeRenderConfig = Field(default_factory=PluginRuntimeRenderConfig)
     """浏览器渲染能力配置"""
+
+
+
+def _rebuild_config_forward_refs() -> None:
+    namespace = globals()
+    targets = [ChatConfig]
+    for model_cls in targets:
+        update_forward_refs = getattr(model_cls, "update_forward_refs", None)
+        if callable(update_forward_refs):
+            update_forward_refs(**namespace)
+            continue
+        model_rebuild = getattr(model_cls, "model_rebuild", None)
+        if callable(model_rebuild):
+            model_rebuild(_types_namespace=namespace)
+
+
+_rebuild_config_forward_refs()

@@ -15,12 +15,23 @@ from src.common.logger import get_logger
 logger = get_logger("ConfigBase")
 
 
+def _get_model_fields(model_cls: type[Any]) -> dict[str, Any]:
+    fields = getattr(model_cls, "model_fields", None)
+    if fields is not None:
+        return dict(fields)
+    fields = getattr(model_cls, "__fields__", None)
+    if fields is not None:
+        return dict(fields)
+    return {}
+
+
 @dataclass
 class AttributeData:
     missing_attributes: list[str] = field(default_factory=list)
     """缺失的属性列表"""
     redundant_attributes: list[str] = field(default_factory=list)
     """多余的属性列表"""
+
 
 
 class AttrDocBase:
@@ -145,8 +156,8 @@ class ConfigBase(BaseModel, AttrDocBase):
     @classmethod
     def from_dict(cls, attribute_data: AttributeData, data: dict[str, Any]):
         """从字典创建配置对象，并收集缺失和多余的属性信息"""
-        class_fields = set(cls.model_fields.keys())
-        class_fields.remove("field_docs")  # 忽略 field_docs 字段
+        class_fields = set(_get_model_fields(cls).keys())
+        class_fields.discard("field_docs")  # 忽略 field_docs 字段
         if "_validate_any" in class_fields:
             class_fields.remove("_validate_any")  # 忽略 _validate_any 字段
         if "suppress_any_warning" in class_fields:
@@ -162,7 +173,7 @@ class ConfigBase(BaseModel, AttrDocBase):
         for redundant_field in cleaned_data_list:
             data.pop(redundant_field)  # 移除多余的属性
         # 对于是ConfigBase子类的字段，递归调用from_dict
-        class_field_infos = dict(cls.model_fields.items())
+        class_field_infos = dict(_get_model_fields(cls).items())
         for field_data in data:
             if info := class_field_infos.get(field_data):
                 field_type = info.annotation
@@ -270,7 +281,7 @@ class ConfigBase(BaseModel, AttrDocBase):
         - 禁止使用 Union（不包含 Optional）和 tuple（及 Tuple）
         - 禁止嵌套泛型（例如 list[list[int]]）和使用 Any
         """
-        for field_name, field_info in type(self).model_fields.items():
+        for field_name, field_info in _get_model_fields(type(self)).items():
             annotation = field_info.annotation
             origin_type, _ = self._get_real_type(annotation)
             # 处理 Union (含Optional) 类型
