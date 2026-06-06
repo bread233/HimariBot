@@ -3,9 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 try:
-    from ..config import get_config
-except Exception:  # pragma: no cover - import compatibility for local smoke
-    from config import get_config
+    from nonebot_plugin_codex_chat.config import get_config
+except Exception:  # pragma: no cover - local smoke fallback
+    def get_config():
+        raise RuntimeError(
+            "nonebot_plugin_codex_chat.config.get_config is unavailable; "
+            "run inside a loaded nonebot runtime."
+        )
 
 try:
     from .common.logger import get_logger
