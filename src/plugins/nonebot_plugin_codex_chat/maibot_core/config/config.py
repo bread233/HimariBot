@@ -11,7 +11,23 @@ def _get_model_fields(model_or_cls: Any) -> dict[str, Any]:
     fields = getattr(cls, '__fields__', None)
     if fields is not None:
         return fields
+    fields = getattr(cls, 'fields', None)
+    if fields is not None:
+        return fields
     return {}
+
+
+def _get_field_repr(field: Any) -> bool:
+    value = getattr(field, 'repr', None)
+    if value is not None:
+        return bool(value)
+
+    field_info = getattr(field, 'field_info', None)
+    value = getattr(field_info, 'repr', None)
+    if value is not None:
+        return bool(value)
+
+    return True
 
 import asyncio
 import copy
@@ -635,7 +651,7 @@ def write_config_to_file(
 
     # 递归解析配置项为表格
     for config_item_name, config_item in _get_model_fields(config).items():
-        if not config_item.repr and not override_repr:
+        if not _get_field_repr(config_item) and not override_repr:
             continue
         if config_item_name in ["field_docs", "_validate_any", "suppress_any_warning"]:
             continue
