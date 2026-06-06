@@ -21,12 +21,41 @@ logger = get_logger("database")
 
 # 定义数据库文件路径
 ROOT_PATH = Path(__file__).parent.parent.parent.parent.absolute().resolve()
-_DB_DIR = ROOT_PATH / "data"
-_DB_FILE = _DB_DIR / "MaiBot.db"
+_LEGACY_DB_DIR = ROOT_PATH / "data"
+_LEGACY_DB_FILE = _LEGACY_DB_DIR / "MaiBot.db"
 
-# 确保数据库目录存在
-_DB_DIR.mkdir(parents=True, exist_ok=True)
-DATABASE_URL = f"sqlite:///{_DB_FILE}"
+_RUNTIME_DB_DIR = Path.cwd() / "data" / "nonebot_chat_agent" / "maibot"
+_RUNTIME_DB_FILE = _RUNTIME_DB_DIR / "MaiBot.db"
+
+_DATABASE_AUXILIARY_SUFFIXES = ("-wal", "-shm")
+
+
+def _migrate_legacy_database() -> None:
+    """将旧版 in-package 数据库迁移到持久化 data 目录。
+
+    只有新路径不存在且旧路径存在时才复制。
+    复制失败仅 warning，不干扰启动流程。
+    """
+    _RUNTIME_DB_DIR.mkdir(parents=True, exist_ok=True)
+    if _RUNTIME_DB_FILE.exists():
+        return
+    if not _LEGACY_DB_FILE.exists():
+        return
+    try:
+        import shutil
+
+        shutil.copy2(str(_LEGACY_DB_FILE), str(_RUNTIME_DB_FILE))
+        for suffix in _DATABASE_AUXILIARY_SUFFIXES:
+            src = _LEGACY_DB_FILE.parent / (_LEGACY_DB_FILE.name + suffix)
+            if src.exists():
+                shutil.copy2(str(src), str(_RUNTIME_DB_FILE.parent / (_RUNTIME_DB_FILE.name + suffix)))
+        logger.info("已将旧版数据库复制到持久化 data 目录")
+    except Exception as exc:
+        logger.warning(f"复制旧版数据库失败: {exc}")
+
+
+_migrate_legacy_database()
+DATABASE_URL = f"sqlite:///{_RUNTIME_DB_FILE}"
 
 
 @event.listens_for(Engine, "connect")
@@ -75,7 +104,7 @@ def initialize_database() -> None:
     global _db_initialized
     if _db_initialized:
         return
-    _DB_DIR.mkdir(parents=True, exist_ok=True)
+    _RUNTIME_DB_DIR.mkdir(parents=True, exist_ok=True)
     import src.common.database.database_model  # noqa: F401
 
     migration_state = _migration_bootstrapper.prepare_database()

@@ -19,7 +19,7 @@ import mimetypes
 import os
 import time
 
-from src.common.database.database import engine, get_db_session
+from src.common.database.database import engine, get_db_session, _RUNTIME_DB_FILE as _DATABASE_FILE
 from src.common.database.database_model import Images, ImageType
 from src.common.logger import get_logger
 from src.config.config import MMC_VERSION
@@ -35,7 +35,6 @@ _IMAGE_DIR = _DATA_DIR / "images"
 _EMOJI_DIR = _DATA_DIR / "emoji"
 _EMOJI_THUMBNAIL_DIR = _DATA_DIR / "emoji_thumbnails"
 _LOG_DIR = _PROJECT_ROOT / "logs"
-_DATABASE_FILE = _DATA_DIR / "MaiBot.db"
 _DATABASE_AUXILIARY_SUFFIXES = ("-wal", "-shm")
 _RESTART_EXIT_CODE = 42
 _LOCAL_CACHE_STATS_CACHE_TTL_SECONDS = 120
