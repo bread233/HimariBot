@@ -4,6 +4,7 @@
 `src.llm_models` 中的底层请求调度器。
 """
 
+import traceback
 from typing import Any, Dict, List, Tuple
 
 import hashlib
@@ -191,7 +192,9 @@ class LLMServiceClient:
             )
             result = LLMResponseResult(response=text, model_name=active_options.model_name or "codexcli")
         except Exception as exc:
-            logger.exception(f"maibot_codex_llm failed error={exc}")
+            logger.exception(
+                f"maibot_codex_llm failed error={type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+            )
             result = LLMResponseResult(response="", model_name=active_options.model_name or "codexcli")
         self._record_cache_stats(result, prompt_text=prompt_text)
         return result
@@ -234,7 +237,9 @@ class LLMServiceClient:
             )
             result = LLMResponseResult(response=text, model_name=active_options.model_name or "codexcli")
         except Exception as exc:
-            logger.exception(f"maibot_codex_llm failed error={exc}")
+            logger.exception(
+                f"maibot_codex_llm failed error={type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+            )
             result = LLMResponseResult(response="", model_name=active_options.model_name or "codexcli")
         self._record_cache_stats(result, prompt_text=prompt_text)
         return result
