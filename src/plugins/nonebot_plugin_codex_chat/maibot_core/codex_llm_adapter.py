@@ -70,6 +70,35 @@ _TIMING_GATE_WAIT_PATTERNS: tuple[str, ...] = (
     r"继续等待",
 )
 
+_PLANNER_REPLY_POSITIVE_PATTERNS: tuple[str, ...] = (
+    r"应回复",
+    r"应该回复",
+    r"应当回复",
+    r"优先回复",
+    r"先回复",
+    r"做回复",
+    r"调用\s*reply",
+    r"使用\s*reply",
+    r"回复\s*msg_id",
+    r"回\s*`?\s*msg_id",
+    r"一句就够",
+    r"在呢，[\u548b\u54c9]啦",
+    r"我在，怎么了",
+)
+
+_PLANNER_REPLY_NEGATIVE_PATTERNS: tuple[str, ...] = (
+    r"不应回复",
+    r"不要回复",
+    r"无需回复",
+    r"不需要回复",
+    r"不继续发言",
+    r"保持等待",
+    r"等待新消息",
+    r"调用\s*no_action",
+    r"调用\s*finish",
+    r"调用\s*wait",
+)
+
 
 @dataclass(slots=True)
 class CodexGenerateResult:
@@ -130,6 +159,49 @@ def _normalize_timing_gate_output(text: str) -> list[Any]:
     if tool_call is None:
         return []
     return [tool_call]
+
+
+def _normalize_planner_output(text: str, *, extra: dict | None) -> list[Any]:
+    """对 Codex 在 Planner 场景下返回的纯文本做保守规范化。
+
+    仅在 ``request_type == "maisaka_planner"`` 时由 ``generate_text`` 调用；
+    其他请求类型不会进入本函数，行为完全不受影响。
+
+    判定规则：
+    - 必须从 ``extra["anchor_message_id"]`` 取到非空锚点消息 ID，否则返回空列表；
+    - 命中任意否定关键词（"不应回复 / 不要回复 / 等待新消息" 等）则返回空列表；
+    - 命中任意肯定关键词（"应回复 / 优先回复 / 调用 reply / 在呢，咋啦" 等）
+      且未命中否定关键词时，构造 ``ToolCall(func_name="reply", args={"msg_id": anchor_message_id})``；
+    - 同时命中肯定与否定视为冲突，返回空列表；
+    - 含糊文本（无任何命中）返回空列表，沿用原行为。
+    """
+
+    if not text or _ToolCall is None:
+        return []
+
+    anchor_message_id = ""
+    if isinstance(extra, dict):
+        raw_anchor = extra.get("anchor_message_id")
+        if raw_anchor is not None:
+            anchor_message_id = str(raw_anchor).strip()
+    if not anchor_message_id:
+        return []
+
+    lowered = text.lower()
+    if _match_any_pattern(_PLANNER_REPLY_NEGATIVE_PATTERNS, lowered):
+        return []
+
+    if not _match_any_pattern(_PLANNER_REPLY_POSITIVE_PATTERNS, lowered):
+        return []
+
+    return [
+        _ToolCall(
+            call_id=f"codex_planner_reply_{uuid.uuid4().hex[:12]}",
+            func_name="reply",
+            args={"msg_id": anchor_message_id},
+            extra_content=None,
+        )
+    ]
 
 
 def _get_plugin_config():
@@ -256,6 +328,24 @@ async def generate_text(
                 logger.info(
                     f"maibot_codex_llm timing_gate decision=none request_type={request_type} "
                     f"text_chars={len(text)}"
+                )
+        elif request_type == "maisaka_planner":
+            anchor_message_id = ""
+            if isinstance(extra, dict):
+                raw_anchor = extra.get("anchor_message_id")
+                if raw_anchor is not None:
+                    anchor_message_id = str(raw_anchor).strip()
+            tool_calls = _normalize_planner_output(text, extra=extra)
+            anchor_present = bool(anchor_message_id)
+            if tool_calls:
+                logger.info(
+                    f"maibot_codex_llm planner decision=reply "
+                    f"request_type={request_type} text_chars={len(text)} anchor_present={anchor_present}"
+                )
+            else:
+                logger.info(
+                    f"maibot_codex_llm planner decision=none request_type={request_type} "
+                    f"text_chars={len(text)} anchor_present={anchor_present}"
                 )
 
         return CodexGenerateResult(text=text, tool_calls=tool_calls, ok=True)
