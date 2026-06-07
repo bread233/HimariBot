@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from dataclasses import dataclass
 from nonebot import logger
@@ -10,8 +11,22 @@ class CodexResult:
     score: int = 0
     reason: str = ""
 
-async def ask_codex(config, prompt: str) -> CodexResult:
-    logger.info(f"codex_chat request=1 model={config.codex_chat_model} timeout={config.codex_chat_timeout}")
+async def ask_codex(config, prompt: str, image_paths: list[str] | None = None) -> CodexResult:
+    image_args: list[str] = []
+    if image_paths:
+        for p in image_paths:
+            if p:
+                image_args.extend(["--image", str(p)])
+
+    image_log_info = ""
+    if image_paths:
+        basenames = [os.path.basename(str(p)) for p in image_paths if p]
+        image_log_info = f" image_count={len(basenames)} image_basenames={basenames}"
+
+    logger.info(
+        f"codex_chat request=1 model={config.codex_chat_model} "
+        f"timeout={config.codex_chat_timeout}{image_log_info}"
+    )
     started = time.perf_counter()
     try:
         process = await asyncio.create_subprocess_exec(
@@ -28,6 +43,7 @@ async def ask_codex(config, prompt: str) -> CodexResult:
             "-C",
             config.codex_chat_workdir,
             "--skip-git-repo-check",
+            *image_args,
             "-",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
