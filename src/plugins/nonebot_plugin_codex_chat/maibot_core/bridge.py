@@ -62,6 +62,54 @@ def _guess_image_mime(data: bytes) -> str | None:
     return None
 
 
+async def _save_inline_image_description_to_db(
+    binary_hash: str,
+    description: str,
+    *,
+    full_path: str = "",
+) -> bool:
+    """fix34a-1: 用复合条件 (image_hash + image_type=IMAGE) 回写图片描述到 Images 表。
+
+    - 命中 IMAGE 行 → 更新 description / vlm_processed / no_file_flag / last_used_time
+    - 未命中 → 新建 IMAGE 行；同 hash 的 EMOJI 行不会被改
+    - 失败只 logger.warning，绝不抛异常
+    """
+    from sqlmodel import select
+    from src.common.database.database import get_db_session
+    from src.common.database.database_model import Images, ImageType
+    from .common.logger import get_logger
+
+    logger = get_logger("bridge")
+    now = datetime.now()
+    try:
+        with get_db_session() as session:
+            record = session.exec(
+                select(Images).where(
+                    Images.image_hash == binary_hash,
+                    Images.image_type == ImageType.IMAGE,
+                )
+            ).first()
+            if record is not None:
+                record.description = description
+                record.vlm_processed = True
+                record.no_file_flag = False
+                record.last_used_time = now
+            else:
+                session.add(Images(
+                    image_hash=binary_hash, description=description, full_path=full_path,
+                    image_type=ImageType.IMAGE, vlm_processed=True, no_file_flag=False,
+                    query_count=0, last_used_time=now,
+                ))
+            session.flush()
+        return True
+    except Exception as exc:
+        logger.warning(
+            "maibot_bridge_image_db_write_failed hash=%s error=%s",
+            binary_hash[:12], type(exc).__name__,
+        )
+        return False
+
+
 async def _describe_inbound_images(components: list[Any] | None) -> None:
     """对入站 components 中前 N 张未识图 ImageComponent 同步调 Codex 视觉识别。
 
@@ -149,6 +197,7 @@ async def _describe_inbound_images(components: list[Any] | None) -> None:
 
         comp.content = f"[图片：{text}]"
         ok_count += 1
+        await _save_inline_image_description_to_db(comp.binary_hash, text)
         logger.info(
             "maibot_bridge_image_vision_success source=%s chars=%s "
             "mime=%s index=%s bytes=%s",
