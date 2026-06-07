@@ -200,7 +200,7 @@ def _get_runtime_manager() -> Any:
     return get_plugin_runtime_manager()
 
 
-_HostSendInterceptor = Callable[[SessionMessage], Awaitable[Optional[SessionMessage]]]
+_HostSendInterceptor = Callable[..., Awaitable[Optional[SessionMessage] | bool]]
 _host_send_interceptor: Optional[_HostSendInterceptor] = None
 
 
@@ -212,8 +212,9 @@ def set_host_send_interceptor(
     该拦截器仅作为进程内扩展点存在：它会在 ``send_service.before_send``
     Hook 之后、Platform IO 真正发送之前被调用一次，接收待发送的
     ``SessionMessage``，并允许返回：
-      - ``None``：表示不接管，发送继续走 Platform IO 原路径；
-      - 非空 ``SessionMessage``：宿主已自行发送，发送服务直接把它作为
+        - ``None``：表示不接管，发送继续走 Platform IO 原路径；
+        - ``False``：表示宿主明确中止本次发送，发送服务不再走 Platform IO；
+        - 非空 ``SessionMessage``：宿主已自行发送，发送服务直接把它作为
         合成的 sent_message 返回给调用方，避免 maim_message 旧链重复发送。
 
     Args:
@@ -871,13 +872,26 @@ async def _send_via_platform_io(
 
     if _host_send_interceptor is not None:
         try:
-            host_synthetic = await _host_send_interceptor(message)
+            normalized_reply_message_id = "" if reply_message_id is None else str(reply_message_id)
+            host_synthetic = await _host_send_interceptor(
+                message,
+                normalized_reply_message_id,
+                reply_message,
+            )
         except Exception as exc:
             logger.warning(
                 f"[SendService] host_send_interceptor 执行异常: {type(exc).__name__}: {exc}，"
                 f"回退原 Platform IO 路径"
             )
             host_synthetic = None
+
+        if host_synthetic is False:
+            logger.info(
+                f"[SendService] 消息 {message.message_id} 已被 host_send_interceptor 明确中止，"
+                f"跳过 Platform IO 真实发送"
+            )
+            return None
+
         if host_synthetic is not None:
             logger.info(
                 f"[SendService] 消息 {message.message_id} 已被 host_send_interceptor 接管，"

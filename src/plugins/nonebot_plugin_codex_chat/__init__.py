@@ -27,6 +27,7 @@ logger.info("codex_chat minimal bootstrap loaded")
 _HOST_TARGET_TTL_SECONDS = 600
 _host_target_registry: dict[str, tuple[Bot, dict[str, Any]]] = {}
 _onebot_bots_by_self_id: dict[str, Bot] = {}
+_inbound_route_by_message_id: dict[str, dict[str, Any]] = {}
 
 
 def _remember_target(event: MessageEvent, bot: Bot) -> None:
@@ -60,6 +61,80 @@ def _remember_target(event: MessageEvent, bot: Bot) -> None:
     expired_keys = [k for k, (_, v) in _host_target_registry.items() if now - float(v.get("ts", 0)) > _HOST_TARGET_TTL_SECONDS]
     for k in expired_keys:
         _host_target_registry.pop(k, None)
+
+
+def _record_inbound_route(event: MessageEvent, bot: Bot) -> None:
+    """记录入站 event.message_id -> (is_group, target_id, bot_self_id)。
+
+    fix30: 这是 outbound host_send_interceptor 解析发送目标的主索引,
+    通过 reply_message_id / message.reply_to / reply_message.message_id 查回。
+    """
+
+    event_message_id = str(getattr(event, "message_id", "") or "").strip()
+    if not event_message_id:
+        return
+    bot_self_id = str(getattr(bot, "self_id", "") or "").strip()
+    if isinstance(event, GroupMessageEvent):
+        group_id = str(getattr(event, "group_id", "") or "").strip()
+        if not group_id:
+            return
+        is_group = True
+        target_id = group_id
+    else:
+        user_id = str(getattr(event, "user_id", "") or "").strip()
+        if not user_id:
+            return
+        is_group = False
+        target_id = user_id
+    _inbound_route_by_message_id[event_message_id] = {
+        "is_group": is_group,
+        "target_id": target_id,
+        "bot_self_id": bot_self_id,
+        "ts": time.time(),
+    }
+    now = time.time()
+    expired = [
+        k for k, v in _inbound_route_by_message_id.items()
+        if now - float(v.get("ts", 0)) > _HOST_TARGET_TTL_SECONDS
+    ]
+    for k in expired:
+        _inbound_route_by_message_id.pop(k, None)
+
+
+def _lookup_inbound_route(
+    message: Any,
+    reply_message_id: str = "",
+    reply_message: Any = None,
+) -> Optional[dict[str, Any]]:
+    """按优先级查 _inbound_route_by_message_id:
+    1. reply_message_id (显式参数)
+    2. message.reply_to (outbound SessionMessage 上的 reply_to 字段)
+    3. reply_message.message_id (被引用消息对象的 message_id)
+    """
+
+    candidates: list[str] = []
+    if reply_message_id:
+        candidates.append(str(reply_message_id).strip())
+    if message is not None:
+        reply_to = str(getattr(message, "reply_to", "") or "").strip()
+        if reply_to:
+            candidates.append(reply_to)
+    if reply_message is not None:
+        rm_msg_id = str(getattr(reply_message, "message_id", "") or "").strip()
+        if rm_msg_id:
+            candidates.append(rm_msg_id)
+    now = time.time()
+    for mid in candidates:
+        if not mid:
+            continue
+        record = _inbound_route_by_message_id.get(mid)
+        if record is None:
+            continue
+        if now - float(record.get("ts", 0)) > _HOST_TARGET_TTL_SECONDS:
+            _inbound_route_by_message_id.pop(mid, None)
+            continue
+        return record
+    return None
 
 
 def _extract_outbound_target(message: Any) -> Optional[tuple[bool, str, str, str]]:
@@ -142,47 +217,90 @@ def _build_onebot_message_text(message: Any) -> tuple[Optional[str], list[str]]:
     return None, []
 
 
-async def _codex_chat_host_send_interceptor(message: Any) -> Optional[Any]:
+async def _codex_chat_host_send_interceptor(
+    message: Any,
+    reply_message_id: str = "",
+    reply_message: Any = None,
+) -> Optional[Any]:
     """宿主层接管 Maibot 出站消息并通过 NoneBot Bot 真实发送。
 
-    fix29: 目标群/私聊严格从 outbound SessionMessage 自身 message_info 提取,
-    禁止从 registry 拿 group_id/user_id (修复串台 bug)。
+    fix30: 目标完全由 inbound route (event.message_id) 决定 (查 reply_message_id
+    / message.reply_to / reply_message.message_id), 禁止:
+    1. 用 outbound message_info.user_info.user_id 判定私聊目标 (那通常是 bot 自身 ID)
+    2. fallback 到 bot self_id
+    3. registry 中其他 group 的 stale 记录污染当前 message
     """
 
-    extracted = _extract_outbound_target(message)
-    if extracted is None:
+    # 解析 outbound 自带的 group_id (仅用于无 route 时的兜底, 不允许用 user_id 兜底)
+    message_group_id = ""
+    message_user_id_outbound = ""
+    message_info = getattr(message, "message_info", None)
+    if message_info is not None:
+        group_info = getattr(message_info, "group_info", None)
+        user_info = getattr(message_info, "user_info", None)
+        if group_info is not None:
+            message_group_id = str(getattr(group_info, "group_id", "") or "").strip()
+        if user_info is not None:
+            message_user_id_outbound = str(getattr(user_info, "user_id", "") or "").strip()
+
+    # 1. 查 inbound route
+    route = _lookup_inbound_route(message, reply_message_id, reply_message)
+    if route is not None:
+        is_group = bool(route.get("is_group"))
+        target_id = str(route.get("target_id", "") or "").strip()
+        route_bot_self_id = str(route.get("bot_self_id", "") or "").strip()
+        resolved_via = "route"
+    else:
+        # 2. 无 route: 兜底只允许 outbound 自带 group_id
+        if not message_group_id:
+            logger.warning(
+                f"codex_chat_host_send_no_route platform={getattr(message, 'platform', '')} "
+                f"reply_message_id={reply_message_id} "
+                f"message_group_id={message_group_id} "
+                f"message_user_id={message_user_id_outbound} "
+                f"message_id={getattr(message, 'message_id', '')}"
+            )
+            return False
+        is_group = True
+        target_id = message_group_id
+        route_bot_self_id = ""
+        resolved_via = "outbound_group_fallback"
+
+    if not target_id:
         logger.warning(
-            f"codex_chat_host_send_no_target platform={getattr(message, 'platform', '')} "
+            f"codex_chat_host_send_no_target_id is_group={is_group} "
+            f"reply_message_id={reply_message_id} resolved_via={resolved_via} "
             f"message_id={getattr(message, 'message_id', '')}"
         )
-        return None
-    is_group, target_id, message_group_id, message_user_id = extracted
+        return False
 
-    bot = _pick_onebot_bot(message)
+    # 3. 选 bot: 优先 route 自带的 bot_self_id
+    if route_bot_self_id and route_bot_self_id in _onebot_bots_by_self_id:
+        bot = _onebot_bots_by_self_id[route_bot_self_id]
+    else:
+        bot = _pick_onebot_bot(message)
     bot_self_id = str(getattr(bot, "self_id", "") or "").strip() if bot is not None else ""
     if bot is None:
         logger.warning(
             f"codex_chat_host_send_no_bot is_group={is_group} target_id={target_id} "
-            f"message_group_id={message_group_id} message_user_id={message_user_id} "
+            f"message_group_id={message_group_id} "
+            f"route_bot_self_id={route_bot_self_id} "
+            f"reply_message_id={reply_message_id} "
             f"message_id={getattr(message, 'message_id', '')}"
         )
         return None
 
-    if is_group and target_id != message_group_id:
+    # 4. 私聊: target_id == bot.self_id 拒绝
+    if (not is_group) and target_id == bot_self_id:
         logger.warning(
-            f"codex_chat_host_send_target_mismatch expected={message_group_id} "
-            f"resolved={target_id} is_group={is_group} message_user_id={message_user_id} "
-            f"bot_self_id={bot_self_id} message_id={getattr(message, 'message_id', '')}"
+            f"codex_chat_host_send_self_target_rejected is_group={is_group} "
+            f"target_id={target_id} bot_self_id={bot_self_id} "
+            f"reply_message_id={reply_message_id} resolved_via={resolved_via} "
+            f"message_id={getattr(message, 'message_id', '')}"
         )
-        return None
-    if (not is_group) and target_id != message_user_id:
-        logger.warning(
-            f"codex_chat_host_send_target_mismatch expected={message_user_id} "
-            f"resolved={target_id} is_group={is_group} message_group_id={message_group_id} "
-            f"bot_self_id={bot_self_id} message_id={getattr(message, 'message_id', '')}"
-        )
-        return None
+        return False
 
+    # 5. 文本提取
     text, non_text_kinds = _build_onebot_message_text(message)
     if not text:
         if non_text_kinds:
@@ -197,8 +315,10 @@ async def _codex_chat_host_send_interceptor(message: Any) -> Optional[Any]:
     logger.info(
         f"codex_chat_host_send_intercept platform=onebot.v11 "
         f"is_group={is_group} target_id={target_id} "
-        f"message_group_id={message_group_id} message_user_id={message_user_id} "
-        f"registry_key=- bot_self_id={bot_self_id} "
+        f"resolved_via={resolved_via} "
+        f"message_group_id={message_group_id} "
+        f"reply_message_id={reply_message_id} "
+        f"bot_self_id={bot_self_id} "
         f"text_chars={len(text)} snippet={snippet!r} "
         f"non_text_kinds={','.join(non_text_kinds) if non_text_kinds else '-'}"
     )
@@ -336,6 +456,7 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
             return
 
     _remember_target(event, bot)
+    _record_inbound_route(event, bot)
 
     fallback_plain_text = str(message).strip()
     converted = None
