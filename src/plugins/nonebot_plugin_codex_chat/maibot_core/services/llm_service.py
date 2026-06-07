@@ -10,6 +10,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import hashlib
 import inspect
 import json
+import base64
+import binascii
+import re
 
 from src.common.data_models.embedding_service_data_models import EmbeddingResult
 from src.common.data_models.llm_service_data_models import (
@@ -37,6 +40,32 @@ from src.services.service_task_resolver import (
 )
 
 logger = get_logger("llm_service")
+
+_DATA_URL_RE = re.compile(r"^data:(?P<mime>[-\w.+/]+)?(?P<params>(?:;[-\w.+=]+(?:=[-\w.+=]*)?)*)?(;base64)?,(?P<data>.*)$", re.IGNORECASE | re.DOTALL)
+
+
+def _decode_image_payload(image_base64: str | None) -> tuple[bytes | None, str | None, str | None]:
+    if not image_base64:
+        return None, None, "missing_image_data"
+    raw = str(image_base64).strip()
+    if not raw:
+        return None, None, "missing_image_data"
+
+    mime_type: str | None = None
+    payload = raw
+    if raw.startswith("data:"):
+        match = _DATA_URL_RE.match(raw)
+        if not match:
+            return None, None, "invalid_data_url"
+        mime_type = (match.group("mime") or "").strip() or None
+        payload = match.group("data") or ""
+
+    try:
+        decoded = base64.b64decode(payload, validate=True)
+    except (ValueError, binascii.Error):
+        return None, mime_type, "invalid_image_base64"
+
+    return decoded, mime_type, None
 
 
 class LLMServiceClient:
@@ -274,7 +303,7 @@ class LLMServiceClient:
 
         Args:
             prompt: 文本提示词。
-            image_base64: 图像的 Base64 编码字符串。
+            image_base64: 图像的 Base64 编码字符串，兼容 data URL。
             image_format: 图像格式，例如 ``png``、``jpeg``。
             options: 图像理解选项。
 
@@ -282,7 +311,8 @@ class LLMServiceClient:
             LLMResponseResult: 统一文本生成结果。
         """
         active_options = self._normalize_image_options(options)
-        image_digest = hashlib.sha256(image_base64.encode("utf-8")).hexdigest() if image_base64 else ""
+        decoded_image, parsed_mime, decode_error = _decode_image_payload(image_base64)
+        image_digest = hashlib.sha256(decoded_image or b"").hexdigest() if decoded_image else ""
         prompt_text = json.dumps(
             {
                 "messages": [
@@ -292,8 +322,8 @@ class LLMServiceClient:
                             {"type": "text", "text": prompt},
                             {
                                 "type": "image",
-                                "format": image_format,
-                                "size": len(image_base64),
+                                "format": parsed_mime or image_format or None,
+                                "size": len(decoded_image or b""),
                                 "sha256": image_digest,
                             },
                         ],
@@ -310,16 +340,17 @@ class LLMServiceClient:
 
             vision_result = await describe_image(
                 image_path=None,
-                image_bytes=None,
-                mime_type=image_format or None,
+                image_bytes=decoded_image,
+                mime_type=parsed_mime or image_format or None,
                 prompt=prompt,
                 context={
                     "request_type": self.request_type,
                     "task_name": self.task_name,
                     "prompt_text": prompt_text,
                     "image_base64_sha256": image_digest,
-                    "image_base64_size": len(image_base64),
+                    "image_base64_size": len(decoded_image or b""),
                     "model_name": active_options.model_name,
+                    "decode_error": decode_error,
                 },
             )
         except Exception as exc:
