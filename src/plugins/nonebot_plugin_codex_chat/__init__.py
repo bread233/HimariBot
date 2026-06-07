@@ -123,12 +123,17 @@ def _lookup_inbound_route(
         rm_msg_id = str(getattr(reply_message, "message_id", "") or "").strip()
         if rm_msg_id:
             candidates.append(rm_msg_id)
+    now = time.time()
     for mid in candidates:
         if not mid:
             continue
         record = _inbound_route_by_message_id.get(mid)
-        if record is not None:
-            return record
+        if record is None:
+            continue
+        if now - float(record.get("ts", 0)) > _HOST_TARGET_TTL_SECONDS:
+            _inbound_route_by_message_id.pop(mid, None)
+            continue
+        return record
     return None
 
 

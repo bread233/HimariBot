@@ -200,7 +200,7 @@ def _get_runtime_manager() -> Any:
     return get_plugin_runtime_manager()
 
 
-_HostSendInterceptor = Callable[..., Awaitable[Optional[SessionMessage]]]
+_HostSendInterceptor = Callable[..., Awaitable[Optional[SessionMessage] | bool]]
 _host_send_interceptor: Optional[_HostSendInterceptor] = None
 
 
@@ -212,8 +212,9 @@ def set_host_send_interceptor(
     该拦截器仅作为进程内扩展点存在：它会在 ``send_service.before_send``
     Hook 之后、Platform IO 真正发送之前被调用一次，接收待发送的
     ``SessionMessage``，并允许返回：
-      - ``None``：表示不接管，发送继续走 Platform IO 原路径；
-      - 非空 ``SessionMessage``：宿主已自行发送，发送服务直接把它作为
+        - ``None``：表示不接管，发送继续走 Platform IO 原路径；
+        - ``False``：表示宿主明确中止本次发送，发送服务不再走 Platform IO；
+        - 非空 ``SessionMessage``：宿主已自行发送，发送服务直接把它作为
         合成的 sent_message 返回给调用方，避免 maim_message 旧链重复发送。
 
     Args:
