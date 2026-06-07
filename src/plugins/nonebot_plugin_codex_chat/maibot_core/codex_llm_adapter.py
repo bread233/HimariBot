@@ -199,7 +199,7 @@ class CodexGenerateResult:
     ok: bool = True
 
 
-def _build_timing_gate_tool_call(func_name: str) -> Any:
+def _build_timing_gate_tool_call(func_name: str, args: dict[str, Any] | None = None) -> Any:
     """为 Timing Gate 构造一个最小的 ToolCall 对象。"""
 
     if _ToolCall is None:
@@ -207,15 +207,89 @@ def _build_timing_gate_tool_call(func_name: str) -> Any:
     return _ToolCall(
         call_id=f"timing_gate_{uuid.uuid4().hex[:12]}",
         func_name=func_name,
-        args={},
+        args=dict(args) if args else {},
         extra_content=None,
     )
+
+
+_TIMING_GATE_DEFAULT_WAIT_SECONDS = 30
+
+
+def _resolve_timing_gate_wait_seconds(parsed_args: dict[str, Any] | None) -> int:
+    """把 ARGS 里的 ``seconds`` 规范化为 ``int``，缺省或非法值时回退 30，且不低于 0。"""
+
+    fallback = _TIMING_GATE_DEFAULT_WAIT_SECONDS
+    if not isinstance(parsed_args, dict):
+        return fallback
+    raw = parsed_args.get("seconds")
+    if raw is None:
+        return fallback
+    try:
+        seconds = int(raw)
+    except (TypeError, ValueError):
+        return fallback
+    return max(0, seconds)
 
 
 def _match_any_pattern(patterns: tuple[str, ...], lowered_text: str) -> bool:
     """判断 lowered_text 是否命中 patterns 中任意一个子串正则。"""
 
     return any(re.search(pattern, lowered_text) for pattern in patterns)
+
+
+_TIMING_GATE_PROTOCOL_ACTIONS: frozenset[str] = frozenset(
+    {"continue", "no_action", "wait", "none"}
+)
+
+
+def _extract_timing_gate_action_and_args(
+    text: str,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """从 Timing Gate 文本中解析 ``ACTION:`` + ``ARGS:`` 协议。
+
+    与 Planner 共用同一组正则 ``_PLANNER_ACTION_LINE_PATTERN`` /
+    ``_PLANNER_ARGS_LINE_PATTERN``（语法一致）；从下到上扫描，
+    取最后一个非空 ``ACTION:`` 行，再向下取最近一个非空 ``ARGS:`` 行。
+
+    Returns:
+        ``(action, parsed_args)``：
+        - action: 标准化小写 ACTION 名（``none`` 已被映射为 ``no_action``）；
+          当且仅当未找到 ``ACTION:`` 行时为 ``None``（让上层走中文 fallback）。
+        - parsed_args: 解析后的 JSON object（``dict``）；缺省/无 ARGS 行时为
+          ``{}``；JSON 解析失败时退回到 ``{}``（lenient，不让 ARGS 坏掉一次好 ACTION）。
+    """
+
+    if not text:
+        return None, None
+
+    action: str | None = None
+    parsed_args: dict[str, Any] = {}
+    args_seen = False
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        cleaned = stripped.strip("`").strip()
+        if action is None:
+            m = _PLANNER_ACTION_LINE_PATTERN.match(cleaned)
+            if m is not None:
+                raw_action = m.group(1).lower()
+                if raw_action in _TIMING_GATE_PROTOCOL_ACTIONS:
+                    action = "no_action" if raw_action == "none" else raw_action
+                else:
+                    return None, None
+        else:
+            m_args = _PLANNER_ARGS_LINE_PATTERN.match(cleaned)
+            if m_args is not None and not args_seen:
+                args_seen = True
+                try:
+                    decoded = json.loads(m_args.group(1))
+                except (TypeError, ValueError):
+                    decoded = None
+                if isinstance(decoded, dict):
+                    parsed_args = decoded
+
+    return action, parsed_args
 
 
 def _normalize_timing_gate_output(text: str) -> list[Any]:
@@ -225,18 +299,34 @@ def _normalize_timing_gate_output(text: str) -> list[Any]:
     其他请求类型不会进入本函数，行为完全不受影响。
 
     判定优先级：
-    1. 强 continue 语义（"不该继续等待 / 不适合继续沉默 / 需要接话 / 在等回应" 等）
+    1. ``ACTION:`` + ``ARGS:`` 协议：模型若明确给出 ``continue`` / ``no_action``
+       / ``wait``（``none`` 等价于 ``no_action``），立即按协议构造 ``ToolCall``；
+       未知 ACTION 名（既不在白名单也不在中文 fallback）→ ``[]`` 触发上层
+       3 次重试，让 reasoning_engine 重新提示模型走正确协议。
+    2. 强 continue 语义（"不该继续等待 / 不适合继续沉默 / 需要接话 / 在等回应" 等）
        一旦命中，立即返回 ``continue``，避免被同句中的 "继续等待 / 保持等待" 误判
        覆盖；
-    2. 否则进入三个动作（continue / no_action / wait）的互斥判定：
+    3. 否则进入三个动作（continue / no_action / wait）的互斥判定：
        仅当唯一命中一个动作集合时构造对应的 ``ToolCall``；
        含糊（无命中）或冲突（命中多个）时返回空列表，
        由上游沿用原始 "无工具 → no_action" 行为；
-    3. 不会修改原文本内容。
+    4. 不会修改原文本内容。
     """
 
     if not text or _ToolCall is None:
         return []
+
+    protocol_action, protocol_args = _extract_timing_gate_action_and_args(text)
+    if protocol_action is not None:
+        if protocol_action == "wait":
+            wait_seconds = _resolve_timing_gate_wait_seconds(protocol_args)
+            call_args: dict[str, Any] = {"seconds": wait_seconds}
+        else:
+            call_args = dict(protocol_args) if protocol_args else {}
+        tool_call = _build_timing_gate_tool_call(protocol_action, call_args)
+        if tool_call is None:
+            return []
+        return [tool_call]
 
     lowered = text.lower()
 
