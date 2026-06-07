@@ -200,7 +200,7 @@ def _get_runtime_manager() -> Any:
     return get_plugin_runtime_manager()
 
 
-_HostSendInterceptor = Callable[[SessionMessage], Awaitable[Optional[SessionMessage]]]
+_HostSendInterceptor = Callable[..., Awaitable[Optional[SessionMessage]]]
 _host_send_interceptor: Optional[_HostSendInterceptor] = None
 
 
@@ -871,7 +871,12 @@ async def _send_via_platform_io(
 
     if _host_send_interceptor is not None:
         try:
-            host_synthetic = await _host_send_interceptor(message)
+            normalized_reply_message_id = "" if reply_message_id is None else str(reply_message_id)
+            host_synthetic = await _host_send_interceptor(
+                message,
+                normalized_reply_message_id,
+                reply_message,
+            )
         except Exception as exc:
             logger.warning(
                 f"[SendService] host_send_interceptor 执行异常: {type(exc).__name__}: {exc}，"
