@@ -26,6 +26,7 @@ logger.info("codex_chat minimal bootstrap loaded")
 
 _HOST_TARGET_TTL_SECONDS = 600
 _host_target_registry: dict[str, tuple[Bot, dict[str, Any]]] = {}
+_onebot_bots_by_self_id: dict[str, Bot] = {}
 
 
 def _remember_target(event: MessageEvent, bot: Bot) -> None:
@@ -52,14 +53,20 @@ def _remember_target(event: MessageEvent, bot: Bot) -> None:
             "ts": time.time(),
         }
     _host_target_registry[key] = (bot, info)
+    bot_self_id = str(getattr(bot, "self_id", "") or "").strip()
+    if bot_self_id:
+        _onebot_bots_by_self_id[bot_self_id] = bot
     now = time.time()
     expired_keys = [k for k, (_, v) in _host_target_registry.items() if now - float(v.get("ts", 0)) > _HOST_TARGET_TTL_SECONDS]
     for k in expired_keys:
         _host_target_registry.pop(k, None)
 
 
-def _resolve_target_for_message(message: Any) -> Optional[tuple[Bot, dict[str, Any]]]:
-    """根据 SessionMessage 推断应使用的 NoneBot Bot 与目标。"""
+def _extract_outbound_target(message: Any) -> Optional[tuple[bool, str, str, str]]:
+    """从 outbound SessionMessage 自身 message_info 提取 (is_group, target_id, message_group_id, message_user_id)。
+
+    严格禁止从 registry 取 target_id (fix29 修复串台 bug)。
+    """
 
     if message is None:
         return None
@@ -67,32 +74,51 @@ def _resolve_target_for_message(message: Any) -> Optional[tuple[Bot, dict[str, A
     if platform and platform != "onebot.v11":
         return None
 
-    group_info = None
-    user_info = None
+    group_id = ""
+    user_id = ""
     message_info = getattr(message, "message_info", None)
     if message_info is not None:
         group_info = getattr(message_info, "group_info", None)
         user_info = getattr(message_info, "user_info", None)
+        if group_info is not None:
+            group_id = str(getattr(group_info, "group_id", "") or "").strip()
+        if user_info is not None:
+            user_id = str(getattr(user_info, "user_id", "") or "").strip()
 
-    if group_info is not None:
-        group_id = str(getattr(group_info, "group_id", "") or "").strip()
-        if group_id:
-            key = f"onebot.v11:group:{group_id}"
-            record = _host_target_registry.get(key)
-            if record is not None:
-                return record
+    if group_id:
+        return True, group_id, group_id, user_id
+    if user_id:
+        return False, user_id, group_id, user_id
+    return None
 
-    if user_info is not None:
-        user_id = str(getattr(user_info, "user_id", "") or "").strip()
-        if user_id:
-            key = f"onebot.v11:private:{user_id}"
-            record = _host_target_registry.get(key)
-            if record is not None:
-                return record
 
-    for key, record in _host_target_registry.items():
-        if key.startswith("onebot.v11:"):
-            return record
+def _pick_onebot_bot(message: Any) -> Optional[Bot]:
+    """为出站消息挑选 NoneBot Bot。
+
+    严格只使用 _onebot_bots_by_self_id (按 self_id 索引), 不从 registry 群号里取 bot。
+    多 bot 时按 message 自带 self_id (或 additional_config.bot_self_id) 匹配;
+    无法消解时返回 None (不拦截, 不 fallback 到任意 bot)。
+    """
+
+    if not _onebot_bots_by_self_id:
+        return None
+    if len(_onebot_bots_by_self_id) == 1:
+        return next(iter(_onebot_bots_by_self_id.values()))
+
+    target_self_id = ""
+    if message is not None:
+        target_self_id = str(getattr(message, "self_id", "") or "").strip()
+        if not target_self_id:
+            message_info = getattr(message, "message_info", None)
+            if message_info is not None:
+                add_cfg = getattr(message_info, "additional_config", None) or {}
+                target_self_id = str(
+                    add_cfg.get("platform_io_target_self_id")
+                    or add_cfg.get("bot_self_id")
+                    or ""
+                ).strip()
+    if target_self_id and target_self_id in _onebot_bots_by_self_id:
+        return _onebot_bots_by_self_id[target_self_id]
     return None
 
 
@@ -117,12 +143,45 @@ def _build_onebot_message_text(message: Any) -> tuple[Optional[str], list[str]]:
 
 
 async def _codex_chat_host_send_interceptor(message: Any) -> Optional[Any]:
-    """宿主层接管 Maibot 出站消息并通过 NoneBot Bot 真实发送。"""
+    """宿主层接管 Maibot 出站消息并通过 NoneBot Bot 真实发送。
 
-    target = _resolve_target_for_message(message)
-    if target is None:
+    fix29: 目标群/私聊严格从 outbound SessionMessage 自身 message_info 提取,
+    禁止从 registry 拿 group_id/user_id (修复串台 bug)。
+    """
+
+    extracted = _extract_outbound_target(message)
+    if extracted is None:
+        logger.warning(
+            f"codex_chat_host_send_no_target platform={getattr(message, 'platform', '')} "
+            f"message_id={getattr(message, 'message_id', '')}"
+        )
         return None
-    bot, info = target
+    is_group, target_id, message_group_id, message_user_id = extracted
+
+    bot = _pick_onebot_bot(message)
+    bot_self_id = str(getattr(bot, "self_id", "") or "").strip() if bot is not None else ""
+    if bot is None:
+        logger.warning(
+            f"codex_chat_host_send_no_bot is_group={is_group} target_id={target_id} "
+            f"message_group_id={message_group_id} message_user_id={message_user_id} "
+            f"message_id={getattr(message, 'message_id', '')}"
+        )
+        return None
+
+    if is_group and target_id != message_group_id:
+        logger.warning(
+            f"codex_chat_host_send_target_mismatch expected={message_group_id} "
+            f"resolved={target_id} is_group={is_group} message_user_id={message_user_id} "
+            f"bot_self_id={bot_self_id} message_id={getattr(message, 'message_id', '')}"
+        )
+        return None
+    if (not is_group) and target_id != message_user_id:
+        logger.warning(
+            f"codex_chat_host_send_target_mismatch expected={message_user_id} "
+            f"resolved={target_id} is_group={is_group} message_group_id={message_group_id} "
+            f"bot_self_id={bot_self_id} message_id={getattr(message, 'message_id', '')}"
+        )
+        return None
 
     text, non_text_kinds = _build_onebot_message_text(message)
     if not text:
@@ -133,16 +192,14 @@ async def _codex_chat_host_send_interceptor(message: Any) -> Optional[Any]:
             )
         return None
 
-    is_group = bool(info.get("is_group"))
-    target_id = str(info.get("target_id", "") or "").strip()
-    if not target_id:
-        return None
-
+    snippet = text[:80]
     message_id = str(getattr(message, "message_id", "") or "").strip()
     logger.info(
         f"codex_chat_host_send_intercept platform=onebot.v11 "
         f"is_group={is_group} target_id={target_id} "
-        f"text_chars={len(text)} maibot_message_id={message_id} "
+        f"message_group_id={message_group_id} message_user_id={message_user_id} "
+        f"registry_key=- bot_self_id={bot_self_id} "
+        f"text_chars={len(text)} snippet={snippet!r} "
         f"non_text_kinds={','.join(non_text_kinds) if non_text_kinds else '-'}"
     )
 
