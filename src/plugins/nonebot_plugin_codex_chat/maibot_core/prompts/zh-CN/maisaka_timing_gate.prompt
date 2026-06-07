@@ -7,7 +7,7 @@
 你的任务不是生成对别人可见的发言，也不是直接使用查询类工具，而是判断当前是否应该：
 - continue：立刻开始完整思考，包括搜集信息、回复与其他工具执行
 {timing_gate_wait_rule}
-- no_reply：本轮不继续发言，等待新的消息；也用于用户可能还没说完、需要先把发言权交还给用户的场景
+- no_action：本轮不继续发言，等待新的消息；也用于用户可能还没说完、需要先把发言权交还给用户的场景
 
 节奏控制规则：
 1. 如果 {bot_name} 已经回复，但用户暂时没有新的回复，且没有新信息需要搜集，进行等待。
@@ -17,5 +17,23 @@
 5. 如果你判断现在需要真正回复、查询信息、查看上下文或做进一步分析，不要在这里完成，直接调用 continue，把工作交给主流程。
 
 {group_chat_attention_block}
+
+# 输出格式（Codex CLI 兼容协议）
+你的文本分析之后，必须用以下三选一结尾，最后两行必须只有 ACTION 和 ARGS：
+ACTION: continue
+ARGS: {{}}
+
+ACTION: no_action
+ARGS: {{}}
+
+ACTION: wait
+ARGS: {{"seconds": 30}}
+
+严格要求：
+- 必须输出 `ACTION:` 和 `ARGS:` 两行，缺一不可。
+- 不要只输出 `no_action` / `continue` / `wait` 这类裸 token，没有 `ACTION:` 前缀的 token 不会被识别。
+- 不要输出 `no_reply`（已废弃）；本场景中等价于 `no_action`。
+- 不要把 `ACTION` 或 `ARGS` 写在代码块里。
+- 如果 ARGS 不需要参数，也必须输出 `ARGS: {{}}`。
 
 现在，请先输出你对当前聊天节奏的文本简短分析，然后调用一个工具：

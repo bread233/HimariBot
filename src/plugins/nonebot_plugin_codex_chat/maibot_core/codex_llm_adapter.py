@@ -55,6 +55,18 @@ _TIMING_GATE_NO_ACTION_PATTERNS: tuple[str, ...] = (
     r"选\W*no_action",
     r"选择\W*no_action",
     r"调用\W*no_action",
+    r"返回\W*no_action",
+    r"应\W*no_action",
+    r"按\W*no_action",
+    # fix33a: 兼容模型不按 ACTION+ARGS 协议、只在文本里写裸 token 的退化样本。
+    # ``\b`` 要求两侧为非单词字符（_ 算单词字符），所以 ``no_action`` /
+    # ``no_action`` / ``(no_action)`` / `` no_action，`` 都会被命中。
+    r"\bno_action\b",
+    r"\bno_reply\b",
+    # ``no action`` / ``no-action`` / ``no_action`` / ``no reply`` / ``no-reply`` /
+    # ``no_reply`` 空格/连字符/下划线变体也一并兜底，避免模型把 token 拆写。
+    r"no[\s\-_]+action",
+    r"no[\s\-_]+reply",
     r"本轮不回复",
     r"不继续发言",
     r"等待新消息",
