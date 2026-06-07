@@ -7,14 +7,17 @@ from typing import Any
 import asyncio
 import hashlib
 import importlib.util
+import logging
 import re
 import sys
+from urllib.parse import urlparse
 
 import httpx
 
 MEDIA_ROOT = Path("data/nonebot_chat_agent/maibot_media")
 DEFAULT_MAX_MEDIA_BYTES = 10 * 1024 * 1024
 ALLOWED_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -150,6 +153,30 @@ def _coerce_content_type(response: httpx.Response) -> str | None:
     if not content_type:
         return None
     return content_type.split(";", 1)[0].strip() or None
+
+
+def _media_url_host(url: str | None) -> str | None:
+    if not url:
+        return None
+    try:
+        return urlparse(url).netloc or None
+    except Exception:
+        return None
+
+
+def _log_media_event(event: str, *, kind: str, index: int, mime: str | None = None, size: int | None = None, path_exists: bool | None = None, error: str | None = None, url_present: bool | None = None, url_host: str | None = None) -> None:
+    LOGGER.info(
+        "%s kind=%s index=%s mime=%s size=%s path_exists=%s error=%s url_host=%s source_url_present=%s",
+        event,
+        kind,
+        index,
+        mime,
+        size,
+        path_exists,
+        error,
+        url_host,
+        url_present,
+    )
 
 
 async def download_onebot_media(
@@ -408,8 +435,21 @@ async def convert_onebot_segments_to_maibot_components(
                     kind=seg_type,
                 )
                 media.append(media_item)
+                url_host = _media_url_host(media_item.source_url)
                 if media_item.ok and media_item.local_path:
                     binary_data = Path(media_item.local_path).read_bytes()
+                    binary_exists = bool(binary_data)
+                    _log_media_event(
+                        "onebot_media_download_ok",
+                        kind=seg_type,
+                        index=index,
+                        mime=media_item.mime_type,
+                        size=media_item.size_bytes,
+                        path_exists=Path(media_item.local_path).exists(),
+                        error=None,
+                        url_present=bool(media_item.source_url),
+                        url_host=url_host,
+                    )
                     if seg_type == "image":
                         components.append(ImageComponent(binary_hash=media_item.sha256 or sha256_bytes(binary_data), binary_data=binary_data))
                         append_plain("[图片]")
@@ -417,9 +457,31 @@ async def convert_onebot_segments_to_maibot_components(
                         components.append(EmojiComponent(binary_hash=media_item.sha256 or sha256_bytes(binary_data), binary_data=binary_data))
                         append_plain("[表情]")
                     continue
+                _log_media_event(
+                    "onebot_media_download_failed",
+                    kind=seg_type,
+                    index=index,
+                    mime=media_item.mime_type,
+                    size=media_item.size_bytes,
+                    path_exists=bool(media_item.local_path and Path(media_item.local_path).exists()),
+                    error=media_item.error,
+                    url_present=bool(media_item.source_url),
+                    url_host=url_host,
+                )
                 components.append(DictComponent(data=dict(_build_dict_component(segment, reason=media_item.error or "download_failed")["data"])))
                 append_plain("[图片:下载失败]" if seg_type == "image" else "[表情:下载失败]")
                 continue
+            _log_media_event(
+                "onebot_media_download_skipped",
+                kind=seg_type,
+                index=index,
+                mime=None,
+                size=None,
+                path_exists=False,
+                error="download_disabled",
+                url_present=bool(extract_media_url(segment)),
+                url_host=_media_url_host(extract_media_url(segment)),
+            )
             components.append(DictComponent(data=dict(_build_dict_component(segment, reason="download_disabled")["data"])))
             append_plain("[图片]" if seg_type == "image" else "[表情]")
             continue
@@ -436,12 +498,24 @@ async def convert_onebot_segments_to_maibot_components(
         else:
             append_plain("[未知消息]")
 
-    return ConvertedMessage(
+    converted = ConvertedMessage(
         components=components,
         plain_text="".join(plain_parts).strip(),
         raw_segments=raw_segments,
         media=media,
     )
+    media_ok = sum(1 for item in media if item.ok)
+    media_failed = sum(1 for item in media if not item.ok)
+    LOGGER.info(
+        "onebot_media_convert_done segments=%s components=%s media=%s ok=%s failed=%s plain_text_len=%s",
+        len(raw_segments),
+        len(components),
+        len(media),
+        media_ok,
+        media_failed,
+        len(converted.plain_text),
+    )
+    return converted
 
 
 async def download_onebot_media_stub(*_args: Any, **_kwargs: Any) -> DownloadedMedia:
