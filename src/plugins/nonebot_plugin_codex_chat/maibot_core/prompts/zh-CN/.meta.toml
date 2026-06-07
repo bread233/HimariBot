@@ -48,6 +48,11 @@ display_name = "图片描述"
 advanced = false
 description = "用于将图片内容转换为文本描述的模板。"
 
+[bridge_inline_vision]
+display_name = "桥接视觉识别"
+advanced = false
+description = "用于桥接入站图片同步视觉识别的模板。"
+
 [jargon_compare_inference]
 display_name = "黑话对比推理"
 advanced = true

@@ -14,12 +14,33 @@ bootstrap_src_alias()
 # fix33b: 入站同步识图，单消息最多识别 1 张图片，避免多图拖死。
 MAX_INLINE_VISION_IMAGES = 1
 
-# 复用 codex_vision_adapter.DEFAULT_VISION_PROMPT 的措辞；这里显式再写一次，
-# 避免与 codex_vision_adapter 顶层 import 在本函数外产生副作用。
-_BRIDGE_INLINE_VISION_PROMPT = (
+# prompt 文件加载失败时的兜底模板（与 prompts/zh-CN/bridge_inline_vision.prompt 内容一致）。
+_DEFAULT_BRIDGE_INLINE_VISION_PROMPT = (
     "请用中文简洁描述这张图片的主要内容。"
     "若无法判断，请明确说无法判断。不要编造看不见的信息。"
 )
+
+
+def _load_bridge_inline_vision_prompt() -> str:
+    """从 prompt 加载器获取桥接视觉识别 prompt；失败时返回默认 prompt。"""
+    from .common.prompt_i18n import load_prompt
+    from .common.logger import get_logger
+
+    try:
+        text = load_prompt("bridge_inline_vision")
+        text = text.strip()
+        if not text:
+            get_logger("bridge").debug(
+                "maibot_bridge_inline_vision_prompt_fallback reason=empty"
+            )
+            return _DEFAULT_BRIDGE_INLINE_VISION_PROMPT
+        return text
+    except Exception as exc:
+        get_logger("bridge").warning(
+            "maibot_bridge_inline_vision_prompt_fallback reason=load_error error=%s",
+            type(exc).__name__,
+        )
+        return _DEFAULT_BRIDGE_INLINE_VISION_PROMPT
 
 
 def _should_describe_image(comp: Any) -> bool:
@@ -154,7 +175,7 @@ async def _describe_inbound_images(components: list[Any] | None) -> None:
             result = await describe_image(
                 image_bytes=binary_data,
                 mime_type=None,
-                prompt=_BRIDGE_INLINE_VISION_PROMPT,
+                prompt=_load_bridge_inline_vision_prompt(),
                 context={"source": "bridge_inline_vision", "index": str(index)},
             )
         except Exception as exc:
