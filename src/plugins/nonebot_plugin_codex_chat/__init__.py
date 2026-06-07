@@ -255,7 +255,7 @@ async def _codex_chat_host_send_interceptor(
                 f"message_user_id={message_user_id_outbound} "
                 f"message_id={getattr(message, 'message_id', '')}"
             )
-            return None
+            return False
         is_group = True
         target_id = message_group_id
         route_bot_self_id = ""
@@ -267,7 +267,7 @@ async def _codex_chat_host_send_interceptor(
             f"reply_message_id={reply_message_id} resolved_via={resolved_via} "
             f"message_id={getattr(message, 'message_id', '')}"
         )
-        return None
+        return False
 
     # 3. 选 bot: 优先 route 自带的 bot_self_id
     if route_bot_self_id and route_bot_self_id in _onebot_bots_by_self_id:
@@ -293,7 +293,7 @@ async def _codex_chat_host_send_interceptor(
             f"reply_message_id={reply_message_id} resolved_via={resolved_via} "
             f"message_id={getattr(message, 'message_id', '')}"
         )
-        return None
+        return False
 
     # 5. 文本提取
     text, non_text_kinds = _build_onebot_message_text(message)

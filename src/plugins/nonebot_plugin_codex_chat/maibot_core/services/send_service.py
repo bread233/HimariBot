@@ -883,6 +883,14 @@ async def _send_via_platform_io(
                 f"回退原 Platform IO 路径"
             )
             host_synthetic = None
+
+        if host_synthetic is False:
+            logger.info(
+                f"[SendService] 消息 {message.message_id} 已被 host_send_interceptor 明确中止，"
+                f"跳过 Platform IO 真实发送"
+            )
+            return None
+
         if host_synthetic is not None:
             logger.info(
                 f"[SendService] 消息 {message.message_id} 已被 host_send_interceptor 接管，"
