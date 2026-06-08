@@ -19,8 +19,7 @@ from src.services.llm_service import LLMServiceClient
 
 install(extra_lines=3)
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.absolute().resolve()
-DATA_DIR = PROJECT_ROOT / "data"
+DATA_DIR = Path.cwd() / "data" / "nonebot_chat_agent"
 IMAGE_DIR = DATA_DIR / "images"
 
 logger = get_logger("image")
