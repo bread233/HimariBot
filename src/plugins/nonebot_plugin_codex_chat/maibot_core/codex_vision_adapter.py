@@ -34,6 +34,10 @@ _PLUGIN_CONFIG_CANDIDATES = (
     "src.plugins.nonebot_plugin_codex_chat",
     "nonebot_plugin_codex_chat",
 )
+_CODEX_PROVIDER_CANDIDATES = (
+    "src.plugins.nonebot_plugin_codex_chat.codex_provider",
+    "nonebot_plugin_codex_chat.codex_provider",
+)
 
 
 @dataclass(slots=True)
@@ -75,6 +79,29 @@ def _load_plugin_config():
             errors.append(f"{module_name}: {type(exc).__name__}: {exc}")
     raise RuntimeError(
         "Unable to load codex_chat plugin config for vision adapter: "
+        + " | ".join(errors)
+    )
+
+
+def _get_codex_provider_module():
+    """惰性解析 codex_provider 模块, 复用 codex_llm_adapter 的候选策略。"""
+    errors: list[str] = []
+
+    for module_name in _CODEX_PROVIDER_CANDIDATES:
+        module = sys.modules.get(module_name)
+        if module is not None and hasattr(module, "ask_codex"):
+            return module
+
+    for module_name in _CODEX_PROVIDER_CANDIDATES:
+        try:
+            module = importlib.import_module(module_name)
+            if hasattr(module, "ask_codex"):
+                return module
+        except Exception as exc:
+            errors.append(f"{module_name}: {type(exc).__name__}: {exc}")
+
+    raise RuntimeError(
+        "Unable to load codex_provider from candidates: "
         + " | ".join(errors)
     )
 
@@ -195,7 +222,8 @@ async def describe_image(
         )
 
     try:
-        from ..codex_provider import ask_codex
+        provider = _get_codex_provider_module()
+        ask_codex = provider.ask_codex
     except Exception as exc:
         logger.warning(
             "codex_vision_adapter failed error=codex_provider_import_error:%s mime=%s bytes=%s",
