@@ -363,27 +363,208 @@ def _normalize_timing_gate_output(text: str) -> list[Any]:
     return [tool_call]
 
 
+def _strip_code_fence(text: str) -> str:
+    """Remove optional markdown code fence wrapping from *text*."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        first_nl = stripped.find("\n")
+        if first_nl != -1:
+            stripped = stripped[first_nl + 1 :]
+        if stripped.endswith("```"):
+            stripped = stripped[:-3]
+        stripped = stripped.strip()
+    return stripped
+
+
+def _find_code_fence_json(text: str) -> dict | None:
+    """Try to extract JSON from a markdown code fence anywhere in *text*.
+
+    Scans for ``` opening fence, extracts content up to closing ```,
+    and attempts to parse as JSON dict.
+    """
+    lines = text.splitlines()
+    in_fence = False
+    fence_content: list[str] = []
+    for line in lines:
+        stripped_line = line.strip()
+        if not in_fence:
+            if stripped_line.startswith("```"):
+                in_fence = True
+                fence_content = []
+            continue
+        if stripped_line == "```":
+            inner = "\n".join(fence_content).strip()
+            if inner.startswith("{"):
+                try:
+                    parsed = json.loads(inner)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception:
+                    pass
+            in_fence = False
+            fence_content = []
+        else:
+            fence_content.append(line)
+    return None
+
+
+def _extract_json_from_last_line(text: str) -> dict | None:
+    """从 text 的最后一个非空行提取 JSON 对象。
+
+    规则：JSON 必须出现在最后一个非空行（允许 code-fence 包裹）。
+    如果最后一个非空行不是合法 JSON 对象，返回 ``None``。
+    """
+    # 1) 先尝试整段 code-fence 清理后的 JSON
+    candidate = _strip_code_fence(text)
+    if candidate.startswith("{"):
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+    # 2) 尝试从文本中任意位置的 code-fence 提取 JSON
+    fence_result = _find_code_fence_json(text)
+    if fence_result is not None:
+        return fence_result
+
+    # 3) 扫描最后一个非空行，必须是 JSON
+    lines = text.splitlines()
+    for raw_line in reversed(lines):
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        # 第一个遇到的非空行必须是 JSON
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
+        # 非空行不是合法 JSON → 立即返回 None
+        return None
+    return None
+
+
+def _extract_planner_tool_calls_json(
+    text: str,
+) -> list[Any] | None:
+    """尝试从 Planner 文本中解析 OpenAI-like ``tool_calls`` JSON。
+
+    支持的格式：
+    - 整段为纯 JSON / code-fence 包裹的 JSON
+    - 分析文本之后最后一行是 JSON 对象
+
+    返回 ``None`` 表示文本不含合法 tool_calls JSON，
+    调用方应回退到 ACTION/ARGS 协议。
+    """
+    if not text or _ToolCall is None:
+        return None
+
+    parsed = _extract_json_from_last_line(text)
+    if parsed is None:
+        return None
+
+    raw_calls = parsed.get("tool_calls")
+    if not isinstance(raw_calls, list):
+        return None
+
+    if not raw_calls:
+        return []
+
+    results: list[Any] = []
+    for item in raw_calls:
+        if not isinstance(item, dict):
+            continue
+
+        item_type = str(item.get("type") or "").strip()
+        if item_type != "function":
+            logger.debug(
+                "codex_planner_tool_calls_json_bad_type type=%s", item_type or "(missing)",
+            )
+            continue
+
+        func = item.get("function")
+        if not isinstance(func, dict):
+            continue
+        name = str(func.get("name") or "").strip()
+        if not name:
+            continue
+        if name not in _ALLOWED_PLANNER_ACTION_TOOLS:
+            logger.debug(
+                "codex_planner_tool_calls_json_unknown_tool name=%s", name,
+            )
+            continue
+
+        raw_args = func.get("arguments")
+        args_dict: dict[str, Any] = {}
+        if raw_args is None or raw_args == "":
+            pass
+        elif isinstance(raw_args, str):
+            stripped_args = raw_args.strip()
+            if not stripped_args:
+                pass
+            else:
+                try:
+                    parsed_args = json.loads(stripped_args)
+                except Exception:
+                    logger.debug(
+                        "codex_planner_tool_calls_json_bad_args name=%s raw=%s",
+                        name,
+                        stripped_args[:120],
+                    )
+                    continue
+                if not isinstance(parsed_args, dict):
+                    logger.debug(
+                        "codex_planner_tool_calls_json_args_not_dict name=%s got=%s",
+                        name,
+                        type(parsed_args).__name__,
+                    )
+                    continue
+                args_dict = parsed_args
+        elif isinstance(raw_args, dict):
+            args_dict = raw_args
+        else:
+            logger.debug(
+                "codex_planner_tool_calls_json_args_unsupported_type name=%s got=%s",
+                name,
+                type(raw_args).__name__,
+            )
+            continue
+
+        call_id = str(item.get("id") or "").strip()
+        if not call_id:
+            call_id = f"codex_planner_{name}_{uuid.uuid4().hex[:12]}"
+
+        results.append(
+            _ToolCall(
+                call_id=call_id,
+                func_name=name,
+                args=args_dict,
+                extra_content=None,
+            )
+        )
+
+    if len(results) > 1:
+        logger.info(
+            "codex_planner_tool_calls_json_multiple count=%d using_first=True",
+            len(results),
+        )
+
+    return results if results else None
+
+
 def _normalize_planner_output(text: str, *, extra: dict | None) -> list[Any]:
     """对 Codex 在 Planner 场景下返回的纯文本做保守规范化。
 
     仅在 ``request_type == "maisaka_planner"`` 时由 ``generate_text`` 调用；
     其他请求类型不会进入本函数，行为完全不受影响。
 
-    fix24 协议升级：优先解析 ``ACTION:`` + ``ARGS:``；若模型未给出合法 ACTION，
-    再回退到中文 positive/negative 关键词（仅当 ``anchor_message_id`` 非空时）。
-
-    判定规则：
-    - 必须从 ``extra["anchor_message_id"]`` 取到非空锚点消息 ID，否则返回空列表；
-    - ACTION 协议命中白名单 -> 按 ``_build_planner_tool_call`` 构造对应工具调用；
-      - ``action == "none"`` -> ``[]``（明确不调用）
-      - ``reply`` / ``view_complex_message`` -> 自动注入 ``msg_id``；
-      - ``query_jargon`` / ``query_memory`` / ``query_person_profile`` / ``tool_search``
-        校验最小参数，缺则丢弃并写日志；
-      - ``finish`` -> 直接构造 ``finish`` 工具调用。
-    - ACTION 命中黑名单或未知工具名 -> ``[]``；
-    - ACTION + ARGS JSON 解析失败（非 dict）-> ``[]``；
-    - 没有 ACTION 行 -> 进入旧中文 fallback；
-    - 旧 fallback：否定关键词命中 -> ``[]``；肯定关键词命中 -> ``reply``。
+    fix34k 协议升级：优先解析 OpenAI-like ``tool_calls`` JSON；
+    若非合法 JSON，回退到 ``ACTION:`` + ``ARGS:`` 文本协议；
+    若无 ACTION 行，再回退到中文 positive/negative 关键词。
     """
 
     if not text or _ToolCall is None:
@@ -395,6 +576,34 @@ def _normalize_planner_output(text: str, *, extra: dict | None) -> list[Any]:
         if raw_anchor is not None:
             anchor_message_id = str(raw_anchor).strip()
 
+    # --- fix34k: 优先尝试 OpenAI-like tool_calls JSON ---
+    json_calls = _extract_planner_tool_calls_json(text)
+    if json_calls is not None:
+        if not json_calls:
+            logger.info("codex_planner_tool_calls_json_empty")
+            return []
+        first = json_calls[0]
+        name = getattr(first, "func_name", None)
+        if name == "none":
+            return []
+        if name in ("reply", "view_complex_message") and not anchor_message_id:
+            logger.warning(
+                "codex_planner_json_dropped action=%s reason=no_anchor_message_id",
+                name,
+            )
+            return []
+        logger.info(
+            "codex_planner_json_accepted action=%s anchor_present=%s "
+            "args_keys=%s",
+            name,
+            bool(anchor_message_id),
+            sorted(getattr(first, "args", None) or {}),
+        )
+        return _build_planner_tool_call(
+            name, dict(getattr(first, "args", None) or {}), anchor_message_id,
+        )
+
+    # --- 回退: ACTION/ARGS 文本协议 ---
     action, parsed_args, error = _extract_planner_action_and_args(text)
     if action is not None:
         if error is not None:
