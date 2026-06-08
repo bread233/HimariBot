@@ -708,7 +708,11 @@ class MaisakaChatLoopService:
             self._build_chat_system_prompt(tools_section)
 
     def _build_chat_system_prompt(self, tools_section: str = "") -> str:
-        """基于当前配置实时构造主聊天系统提示词。"""
+        """基于当前配置实时构造主聊天系统提示词。
+
+        Args:
+            tools_section: 从 ToolRegistry 自动生成的工具描述文本。
+        """
 
         try:
             return load_prompt(self._get_chat_prompt_name(), **self.build_prompt_template_context(tools_section))
@@ -734,6 +738,47 @@ class MaisakaChatLoopService:
             "timing_gate_wait_rule": self._build_timing_gate_wait_rule(),
         }
 
+    _TOOL_RENDER_ORDER: tuple[str, ...] = (
+        "reply",
+        "finish",
+        "view_complex_message",
+        "query_jargon",
+        "query_memory",
+        "query_person_profile",
+        "tool_search",
+        "send_image",
+        "send_emoji",
+        "none",
+    )
+
+    async def _build_tools_section(self) -> str:
+        """从 ToolRegistry 自动生成 prompt 中的工具描述文本。"""
+
+        if self._tool_registry is None:
+            return ""
+
+        tool_specs = await self._tool_registry.list_tools(
+            ToolAvailabilityContext(
+                session_id=self._session_id,
+                stream_id=self._session_id,
+                is_group_chat=self._is_group_chat,
+            )
+        )
+        spec_map: dict[str, str] = {
+            spec.name: spec.description.strip()
+            for spec in tool_specs
+            if spec.description.strip()
+        }
+
+        lines: list[str] = []
+        for name in self._TOOL_RENDER_ORDER:
+            desc = spec_map.pop(name, "")
+            if desc:
+                lines.append(f"- {name}：{desc}")
+        for name, desc in sorted(spec_map.items()):
+            lines.append(f"- {name}：{desc}")
+
+        return "\n".join(lines)
 
     @staticmethod
     def _build_current_time_user_message() -> str:
@@ -819,11 +864,13 @@ class MaisakaChatLoopService:
         enable_visual_message: bool,
         injected_user_messages: Sequence[str] | None = None,
         system_prompt: Optional[str] = None,
+        tools_section: str = "",
     ) -> List[Message]:
         """构造发给大模型的消息列表。
 
         Args:
             selected_history: 已选中的上下文消息列表。
+            tools_section: 从 ToolRegistry 自动生成的工具描述文本。
 
         Returns:
             List[Message]: 发送给大模型的消息列表。
@@ -836,7 +883,7 @@ class MaisakaChatLoopService:
         elif self._custom_chat_system_prompt is not None:
             resolved_system_prompt = self._custom_chat_system_prompt
         else:
-            resolved_system_prompt = self._build_chat_system_prompt()
+            resolved_system_prompt = self._build_chat_system_prompt(tools_section)
         system_msg.add_text_content(resolved_system_prompt)
         messages.append(system_msg.build())
 
@@ -893,10 +940,12 @@ class MaisakaChatLoopService:
             request_kind=request_kind,
             enable_visual_message=enable_visual_message,
         )
+        tools_section = await self._build_tools_section()
         built_messages = self._build_request_messages(
             selected_history,
             enable_visual_message=enable_visual_message,
             injected_user_messages=injected_user_messages,
+            tools_section=tools_section,
         )
         if enable_visual_message:
             built_messages = limit_latest_images_in_messages(
