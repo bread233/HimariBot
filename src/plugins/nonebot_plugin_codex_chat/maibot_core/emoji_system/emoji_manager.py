@@ -1088,7 +1088,15 @@ class EmojiManager:
                 with get_db_session() as session:
                     statement = select(Images).filter_by(image_type=ImageType.EMOJI)
                     for record in session.exec(statement).all():
-                        if not record.is_registered and not record.is_banned:
+                        if record.is_banned:
+                            continue
+                        if not record.is_registered:
+                            if record_path := _resolve_existing_emoji_path(record.full_path):
+                                logger.debug(
+                                    "[emoji_maintenance] unregistered record rescan hash=%s path=%s",
+                                    record.image_hash,
+                                    record_path,
+                                )
                             continue
                         if record_path := _resolve_existing_emoji_path(record.full_path):
                             known_paths.add(record_path)
