@@ -30,7 +30,7 @@ logger = get_logger("webui_system")
 
 _start_time = time.time()
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
-_DATA_DIR = _PROJECT_ROOT / "data"
+_DATA_DIR = Path.cwd() / "data" / "nonebot_chat_agent"
 _IMAGE_DIR = _DATA_DIR / "images"
 _EMOJI_DIR = _DATA_DIR / "emoji"
 _EMOJI_THUMBNAIL_DIR = _DATA_DIR / "emoji_thumbnails"

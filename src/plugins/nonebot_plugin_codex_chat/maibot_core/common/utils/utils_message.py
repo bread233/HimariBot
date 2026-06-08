@@ -280,7 +280,7 @@ class MessageUtils:
             session.add(existing_record)
             return
 
-        image_dir = Path(__file__).parent.parent.parent.parent / "data" / "images"
+        image_dir = Path.cwd() / "data" / "nonebot_chat_agent" / "images"
         image_dir.mkdir(parents=True, exist_ok=True)
         image_format = MessageUtils._detect_image_format(component.binary_data)
         image_path = image_dir / f"{image_hash}.{image_format}"
