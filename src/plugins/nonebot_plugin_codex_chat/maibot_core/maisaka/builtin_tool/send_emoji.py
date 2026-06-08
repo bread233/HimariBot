@@ -341,6 +341,12 @@ async def _select_emoji_with_sub_agent(
 
     del reasoning, context_texts, sample_size
 
+    logger.info(
+        f"maisaka_send_emoji_manager_state id={id(emoji_manager)} "
+        f"module={emoji_manager.__class__.__module__} "
+        f"emoji_count={len(emoji_manager.emojis)} "
+        f"first3_hashes={[(e.file_hash[:8] if e.file_hash else '', e.full_path[:40] if e.full_path else '') for e in emoji_manager.emojis[:3]]}"
+    )
     available_emojis = list(emoji_manager.emojis)
     if not available_emojis:
         return None, ""

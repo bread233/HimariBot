@@ -40,7 +40,10 @@ def _ensure_maibot_emojis_loaded() -> None:
         return
     emoji_manager.load_emojis_from_db()
     logger.info(
-        f"codex_chat_emoji_manager_loaded emoji_count={len(emoji_manager.emojis)}"
+        f"codex_chat_emoji_manager_bootstrap_state id={id(emoji_manager)} "
+        f"class={emoji_manager.__class__} "
+        f"module={emoji_manager.__class__.__module__} "
+        f"emoji_count={len(emoji_manager.emojis)}"
     )
 
 
