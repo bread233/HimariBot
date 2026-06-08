@@ -10,8 +10,12 @@ from nonebot.params import EventMessage
 
 from .config import get_config
 from .maibot_core.bridge import MaibotInboundMessage, handle_inbound_message
-from .maibot_core.emoji_system.emoji_manager import emoji_manager
-from .maibot_core.prompt.prompt_manager import prompt_manager
+from .maibot_core.bootstrap import bootstrap_src_alias
+
+bootstrap_src_alias()
+
+from src.emoji_system.emoji_manager import emoji_manager
+from src.prompt.prompt_manager import prompt_manager
 
 __plugin_meta__ = {
     "name": "codex_chat",
