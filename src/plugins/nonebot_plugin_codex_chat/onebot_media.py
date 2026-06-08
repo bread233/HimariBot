@@ -148,6 +148,28 @@ def is_media_segment_type(segment_type: str) -> bool:
     return str(segment_type or "").strip().lower() in {"image", "mface", "emoji"}
 
 
+def _classify_onebot_media_kind(seg_type: str, data: dict[str, Any]) -> str:
+    """Classify OneBot media segment kind, treating animated QQ emojis as ``"emoji"``.
+
+    In OneBot V11, QQ animated emojis (黄脸/动画表情) arrive as ``type=image``
+    with ``summary`` containing ``"[动画表情]"`` or ``sub_type`` equal to ``1``.
+    This helper reclassifies them so they enter the emoji pipeline.
+    """
+    if seg_type in {"mface", "emoji"}:
+        return "emoji"
+    if seg_type != "image":
+        return seg_type
+    if not isinstance(data, dict):
+        return "image"
+    summary = str(data.get("summary") or "").strip()
+    if "动画表情" in summary:
+        return "emoji"
+    sub_type = str(data.get("sub_type") or "").strip()
+    if sub_type == "1":
+        return "emoji"
+    return "image"
+
+
 def _coerce_content_type(response: httpx.Response) -> str | None:
     content_type = str(response.headers.get("content-type") or "").strip().lower()
     if not content_type:
@@ -439,9 +461,10 @@ async def convert_onebot_segments_to_maibot_components(
                 if media_item.ok and media_item.local_path:
                     binary_data = Path(media_item.local_path).read_bytes()
                     binary_exists = bool(binary_data)
+                    effective_kind = _classify_onebot_media_kind(seg_type, data)
                     _log_media_event(
                         "onebot_media_download_ok",
-                        kind=seg_type,
+                        kind=effective_kind,
                         index=index,
                         mime=media_item.mime_type,
                         size=media_item.size_bytes,
@@ -450,7 +473,7 @@ async def convert_onebot_segments_to_maibot_components(
                         url_present=bool(media_item.source_url),
                         url_host=url_host,
                     )
-                    if seg_type == "image":
+                    if effective_kind == "image":
                         components.append(ImageComponent(binary_hash=media_item.sha256 or sha256_bytes(binary_data), binary_data=binary_data))
                         append_plain("[图片]")
                     else:
