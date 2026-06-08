@@ -834,7 +834,7 @@ class ManifestValidator:
         self.warnings.clear()
 
         try:
-            parsed_manifest = PluginManifest.model_validate(manifest)
+            parsed_manifest = PluginManifest.parse_obj(manifest)
         except ValidationError as exc:
             self.errors.extend(self._format_validation_errors(exc))
             self._log_errors()
