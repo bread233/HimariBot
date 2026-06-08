@@ -54,8 +54,8 @@ reply, finish, view_complex_message, query_jargon, query_memory, query_person_pr
 - query_memory：需要查询长期记忆时使用。arguments 必须提供 query，或者提供 time_start/time_end。
 - query_person_profile：需要查询人物画像时使用。arguments 必须提供 person_id 或 person_name。
 - tool_search：需要搜索可用扩展工具时使用。arguments 必须提供 query。
-- send_image：仅在需要发送上下文中已有图片时使用；必须提供 msg_id 或 media_index；不要凭空发图。
-- send_emoji：仅当表情回应明显比文字更合适时使用；不要连续发表情；不要在需要解释、回答问题、处理请求时用它代替 reply。arguments 可以写 {{}} 随机选表情，或写 {{"emotion": "情绪名"}} 指定情绪。
+- send_image：只用于发送上下文中已有的普通图片、照片、截图、图像内容。不要用于动画表情、QQ 表情、emoji、贴图、斗图、表情包。发送普通图片时必须提供 msg_id 或 media_index，不要凭空发图。
+- send_emoji：用于发送"表情包 / emoji / 贴图 / 动画表情 / QQ 表情 / 斗图 / 用表情回应"。用户说"发个表情包""来个表情""别发文字发个表情包""发 emoji"时，默认优先调用 send_emoji。不要连续发表情；不要在需要解释、回答问题、处理请求时用它代替 reply。arguments 可以写 {{}} 随机选表情，或写 {{"emotion": "情绪名"}} 指定情绪。
 
 当满足以下任一条件时，优先 ACTION: reply：
 - 对方直接 @ 你、点名你、问你是谁、问你在不在、问你为什么不说话。
