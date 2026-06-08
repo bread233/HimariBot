@@ -107,7 +107,7 @@ _TIMING_GATE_STRONG_CONTINUE_PATTERNS: tuple[str, ...] = (
 )
 
 # fix24: Planner ACTION + ARGS 协议白名单
-# 仅白名单内的 ACTION 会被路由到对应工具；不在白名单内的（包括当前未启用的 send_emoji / send_image）
+# 仅白名单内的 ACTION 会被路由到对应工具；不在白名单内的
 # 一律按 invalid_action 丢弃。``none`` 用于"不调用任何工具"；``finish`` 用于"结束本轮"。
 _ALLOWED_PLANNER_ACTION_TOOLS: frozenset[str] = frozenset(
     {
@@ -119,14 +119,13 @@ _ALLOWED_PLANNER_ACTION_TOOLS: frozenset[str] = frozenset(
         "query_person_profile",
         "tool_search",
         "send_image",
+        "send_emoji",
         "none",
     }
 )
 
-# 显式拒绝：当前方案 B 不开放 send_emoji
-_DISALLOWED_PLANNER_ACTION_TOOLS: frozenset[str] = frozenset(
-    {"send_emoji"}
-)
+# 显式拒绝列表（当前为空）
+_DISALLOWED_PLANNER_ACTION_TOOLS: frozenset[str] = frozenset()
 
 # ACTION 行匹配：``ACTION: <identifier>``（大小写不敏感，允许反引号包裹）
 _PLANNER_ACTION_LINE_PATTERN = re.compile(
@@ -381,7 +380,7 @@ def _normalize_planner_output(text: str, *, extra: dict | None) -> list[Any]:
       - ``query_jargon`` / ``query_memory`` / ``query_person_profile`` / ``tool_search``
         校验最小参数，缺则丢弃并写日志；
       - ``finish`` -> 直接构造 ``finish`` 工具调用。
-    - ACTION 命中黑名单（``send_emoji``）或未知工具名 -> ``[]``；
+    - ACTION 命中黑名单或未知工具名 -> ``[]``；
     - ACTION + ARGS JSON 解析失败（非 dict）-> ``[]``；
     - 没有 ACTION 行 -> 进入旧中文 fallback；
     - 旧 fallback：否定关键词命中 -> ``[]``；肯定关键词命中 -> ``reply``。
@@ -558,6 +557,8 @@ def _build_planner_tool_call(
     - ``action == "tool_search"`` -> 必须有非空 ``query`` 字符串。
     - ``action == "send_image"`` -> 必须有非空 ``msg_id`` 或非空 ``media_index``；
       ``index`` 可选，必须能转 int，非法值回退 0。
+    - ``action == "send_emoji"`` -> 可选 ``emotion`` 参数（非字符串会被转为字符串）；
+      无参数时发送随机表情。
     - ``action == "finish"`` -> 直接构造 ``finish`` 工具调用，args 透传。
     """
 
@@ -739,6 +740,22 @@ def _build_planner_tool_call(
             _ToolCall(
                 call_id=f"codex_planner_send_image_{uuid.uuid4().hex[:12]}",
                 func_name="send_image",
+                args=merged,
+                extra_content=None,
+            )
+        ]
+
+    if action == "send_emoji":
+        merged = dict(args or {})
+        emotion = merged.get("emotion")
+        if emotion is not None:
+            merged["emotion"] = str(emotion).strip()
+        else:
+            merged.pop("emotion", None)
+        return [
+            _ToolCall(
+                call_id=f"codex_planner_send_emoji_{uuid.uuid4().hex[:12]}",
+                func_name="send_emoji",
                 args=merged,
                 extra_content=None,
             )
