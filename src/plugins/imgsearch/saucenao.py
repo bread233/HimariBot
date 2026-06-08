@@ -104,7 +104,7 @@ class SauceNao:
                 object_pairs_hook=OrderedDict).decode(r.text)
             
             logger.info(
-                "SauceNAO header: status=%s user_id=%s results=%s short_remaining=%s long_remaining=%s minimum_similarity=%s",
+                "SauceNAO header: status={} user_id={} results={} short_remaining={} long_remaining={} minimum_similarity={}",
                 results["header"].get("status"),
                 results["header"].get("user_id"),
                 results["header"].get("results_returned"),
