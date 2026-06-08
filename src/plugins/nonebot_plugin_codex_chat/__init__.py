@@ -10,6 +10,7 @@ from nonebot.params import EventMessage
 
 from .config import get_config
 from .maibot_core.bridge import MaibotInboundMessage, handle_inbound_message
+from .maibot_core.prompt.prompt_manager import prompt_manager
 
 __plugin_meta__ = {
     "name": "codex_chat",
@@ -21,6 +22,20 @@ plugin_config = get_config()
 _codex_chat = on_message(priority=plugin_config.codex_chat_command_priority, block=False)
 driver = get_driver()
 _superusers = {str(x) for x in (getattr(driver.config, "superusers", set()) or set())}
+
+
+def _ensure_maibot_prompts_loaded() -> None:
+    if "emoji_selection" in prompt_manager.prompts:
+        return
+    prompt_manager.load_prompts()
+    logger.info(
+        "codex_chat_prompt_manager_loaded count=%s has_emoji_selection=%s",
+        len(prompt_manager.prompts),
+        "emoji_selection" in prompt_manager.prompts,
+    )
+
+
+_ensure_maibot_prompts_loaded()
 logger.info("codex_chat minimal bootstrap loaded")
 
 
