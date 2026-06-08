@@ -582,11 +582,10 @@ def _build_outbound_session_message(
             and target_stream.context.message.message_info.group_info
         ):
             group_name = target_stream.context.message.message_info.group_info.group_name
-        if group_name:
-            group_info = GroupInfo(
-                group_id=target_stream.group_id,
-                group_name=group_name,
-            )
+        group_info = GroupInfo(
+            group_id=target_stream.group_id,
+            group_name=group_name or "",
+        )
 
     additional_config: Dict[str, object] = _inherit_platform_io_route_metadata(target_stream)
     if selected_expressions is not None:
