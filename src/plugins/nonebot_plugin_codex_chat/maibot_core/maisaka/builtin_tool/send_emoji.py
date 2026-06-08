@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from io import BytesIO
+import json
 from json import dumps
 from random import sample
 from typing import Any, Dict, Optional
@@ -22,6 +23,7 @@ from src.config.config import config_manager, global_config
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.llm_models.payload_content.message import MessageBuilder, RoleType
 from src.maisaka.context_messages import (
+    LLMContextMessage,
     ReferenceMessage,
     ReferenceMessageType,
     SessionBackedMessage,
@@ -400,7 +402,8 @@ async def _select_emoji_with_sub_agent(
     }
 
     try:
-        selection = EmojiSelectionResult.model_validate_json(response.content or "")
+        parsed = json.loads(response.content or "{}")
+        selection = EmojiSelectionResult.parse_obj(parsed)
     except Exception as exc:
         logger.warning(f"{tool_ctx.runtime.log_prefix} 表情包子代理结果解析失败，将回退到候选首项: {exc}")
         if selection_metadata is not None:

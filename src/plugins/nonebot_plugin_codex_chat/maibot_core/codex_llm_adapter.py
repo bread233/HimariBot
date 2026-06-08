@@ -118,13 +118,14 @@ _ALLOWED_PLANNER_ACTION_TOOLS: frozenset[str] = frozenset(
         "query_memory",
         "query_person_profile",
         "tool_search",
+        "send_image",
         "none",
     }
 )
 
-# 显式拒绝：当前方案 B 不开放这两个工具
+# 显式拒绝：当前方案 B 不开放 send_emoji
 _DISALLOWED_PLANNER_ACTION_TOOLS: frozenset[str] = frozenset(
-    {"send_emoji", "send_image"}
+    {"send_emoji"}
 )
 
 # ACTION 行匹配：``ACTION: <identifier>``（大小写不敏感，允许反引号包裹）
@@ -380,7 +381,7 @@ def _normalize_planner_output(text: str, *, extra: dict | None) -> list[Any]:
       - ``query_jargon`` / ``query_memory`` / ``query_person_profile`` / ``tool_search``
         校验最小参数，缺则丢弃并写日志；
       - ``finish`` -> 直接构造 ``finish`` 工具调用。
-    - ACTION 命中黑名单（``send_emoji`` / ``send_image``）或未知工具名 -> ``[]``；
+    - ACTION 命中黑名单（``send_emoji``）或未知工具名 -> ``[]``；
     - ACTION + ARGS JSON 解析失败（非 dict）-> ``[]``；
     - 没有 ACTION 行 -> 进入旧中文 fallback；
     - 旧 fallback：否定关键词命中 -> ``[]``；肯定关键词命中 -> ``reply``。
@@ -555,6 +556,8 @@ def _build_planner_tool_call(
       ``time_start`` + ``time_end`` 同时存在。
     - ``action == "query_person_profile"`` -> 必须有 ``person_id`` 或 ``person_name``。
     - ``action == "tool_search"`` -> 必须有非空 ``query`` 字符串。
+    - ``action == "send_image"`` -> 必须有非空 ``msg_id`` 或非空 ``media_index``；
+      ``index`` 可选，必须能转 int，非法值回退 0。
     - ``action == "finish"`` -> 直接构造 ``finish`` 工具调用，args 透传。
     """
 
@@ -703,6 +706,39 @@ def _build_planner_tool_call(
             _ToolCall(
                 call_id=f"codex_planner_search_{uuid.uuid4().hex[:12]}",
                 func_name="tool_search",
+                args=merged,
+                extra_content=None,
+            )
+        ]
+
+    if action == "send_image":
+        merged = dict(args or {})
+        msg_id = str(merged.get("msg_id") or "").strip()
+        media_index = str(merged.get("media_index") or "").strip()
+        if not msg_id and not media_index:
+            logger.warning(
+                "codex_planner_action_dropped action=send_image "
+                "reason=missing_msg_id_or_media_index"
+            )
+            return []
+        if msg_id:
+            merged["msg_id"] = msg_id
+        else:
+            merged.pop("msg_id", None)
+        if media_index:
+            merged["media_index"] = media_index
+        else:
+            merged.pop("media_index", None)
+        raw_index = merged.get("index")
+        if raw_index is not None:
+            try:
+                merged["index"] = int(raw_index)
+            except (TypeError, ValueError):
+                merged["index"] = 0
+        return [
+            _ToolCall(
+                call_id=f"codex_planner_send_image_{uuid.uuid4().hex[:12]}",
+                func_name="send_image",
                 args=merged,
                 extra_content=None,
             )

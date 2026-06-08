@@ -38,6 +38,7 @@ query_jargon
 query_memory
 query_person_profile
 tool_search
+send_image
 none
 
 ARGS 必须是 JSON object，例如：
@@ -66,6 +67,12 @@ ARGS: {{}}
 ACTION: tool_search
 ARGS: {{"query": "天气"}}
 
+ACTION: send_image
+ARGS: {{"msg_id": "消息ID", "index": 0}}
+
+ACTION: send_image
+ARGS: {{"media_index": "tool_result:xxx:0", "index": 0}}
+
 工具规则：
 - reply：当你判断应该发出可见文字回复时使用。ARGS 可以写 {{}}，系统会自动补目标消息 msg_id。
 - finish：当前任务完成，结束本轮内部思考。
@@ -75,8 +82,8 @@ ARGS: {{"query": "天气"}}
 - query_memory：需要查询长期记忆时使用。ARGS 必须提供 query，或者提供 time_start/time_end。
 - query_person_profile：需要查询人物画像时使用。ARGS 必须提供 person_id 或 person_name。
 - tool_search：需要搜索可用扩展工具时使用。ARGS 必须提供 query。
+- send_image：仅在需要发送上下文中已有图片时使用；必须提供 msg_id 或 media_index；不要凭空发图。
 - 当前不要使用 send_emoji。
-- 当前不要使用 send_image。
 
 当满足以下任一条件时，优先 ACTION: reply：
 - 对方直接 @ 你、点名你、问你是谁、问你在不在、问你为什么不说话。
@@ -87,7 +94,6 @@ ARGS: {{"query": "天气"}}
 不要输出 ACTION: no_reply。
 不要输出 ACTION: no_action。
 不要输出 ACTION: send_emoji。
-不要输出 ACTION: send_image。
 不要把 ACTION 或 ARGS 写在代码块里。
 最后两行必须只有 ACTION 和 ARGS，不要在 ARGS 后追加解释。
 如果 ARGS 不需要参数，也必须输出 ARGS: {{}}。
