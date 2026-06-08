@@ -131,6 +131,57 @@ async def _save_inline_image_description_to_db(
         return False
 
 
+async def _process_inbound_emojis(components: list[Any] | None) -> None:
+    """Save inbound EmojiComponent binary data to the emoji DB via ensure_emoji_saved.
+
+    - Only processes ``EmojiComponent`` instances; skips everything else.
+    - Fail-soft: a single emoji failure logs a warning and continues.
+    - Must be called before ``_describe_inbound_images`` (which only handles
+      ``ImageComponent``).
+    """
+
+    if not components:
+        return
+
+    from src.common.data_models.message_component_data_model import EmojiComponent
+    from src.emoji_system.emoji_manager import emoji_manager
+    from .common.logger import get_logger
+
+    logger = get_logger("bridge")
+
+    saved = 0
+    skipped = 0
+    failed = 0
+
+    for comp in components:
+        if not isinstance(comp, EmojiComponent):
+            continue
+        binary_data = getattr(comp, "binary_data", None)
+        if not binary_data:
+            skipped += 1
+            continue
+        emoji_hash = getattr(comp, "binary_hash", None)
+        try:
+            await emoji_manager.ensure_emoji_saved(
+                emoji_bytes=binary_data,
+                emoji_hash=emoji_hash,
+            )
+            saved += 1
+        except Exception as exc:
+            failed += 1
+            logger.warning(
+                "maibot_bridge_emoji_save_failed hash=%s error=%s",
+                emoji_hash[:12] if emoji_hash else "?",
+                exc,
+            )
+
+    if saved or failed:
+        logger.debug(
+            "maibot_bridge_emoji_save_done emojis=%d saved=%d skipped=%d failed=%d",
+            saved + skipped + failed, saved, skipped, failed,
+        )
+
+
 async def _describe_inbound_images(components: list[Any] | None) -> None:
     """对入站 components 中前 N 张未识图 ImageComponent 同步调 Codex 视觉识别。
 
@@ -325,6 +376,7 @@ async def handle_inbound_message(
         additional_config={},
     )
     if inbound.components:
+        await _process_inbound_emojis(inbound.components)
         await _describe_inbound_images(inbound.components)
         raw_message = MessageSequence(inbound.components)
     else:
