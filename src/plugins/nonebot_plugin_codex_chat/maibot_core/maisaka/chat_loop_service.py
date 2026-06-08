@@ -46,6 +46,11 @@ from .display.prompt_cli_renderer import PromptCLIVisualizer
 from .visual_message_limiter import limit_latest_images_in_messages
 from .visual_mode_utils import resolve_enable_visual_planner
 
+try:
+    from ..codex_vision_adapter import describe_image as _codex_describe_image
+except Exception:
+    _codex_describe_image = None
+
 TIMING_GATE_TOOL_NAMES = {"continue", "no_action", "wait"}
 REQUEST_TYPE_BY_REQUEST_KIND = {
     "planner": "maisaka_planner",
@@ -953,6 +958,20 @@ class MaisakaChatLoopService:
                 max_image_num=global_config.visual.max_image_num,
             )
 
+        if enable_visual_message and _codex_describe_image is not None:
+            image_data = self._extract_first_image_from_messages(built_messages)
+            if image_data is not None:
+                return await self._route_to_vision_adapter(
+                    built_messages=built_messages,
+                    image_data=image_data,
+                    request_kind=request_kind,
+                    enable_visual_message=enable_visual_message,
+                    selected_history=selected_history,
+                    selection_reason=selection_reason,
+                    response_format=response_format,
+                    all_tools=[],
+                )
+
         def message_factory(_client: BaseClient) -> List[Message]:
             """返回当前轮次已经构建好的请求消息。
 
@@ -1339,8 +1358,151 @@ class MaisakaChatLoopService:
     def _resolve_enable_visual_message(request_kind: str) -> bool:
         if request_kind in {"planner", "timing_gate"}:
             return resolve_enable_visual_planner()
+        if request_kind == "emotion":
+            return True
         if request_kind in {"expression_selector", "reply_effect_judge"}:
             return False
+
+    @staticmethod
+    def _extract_first_image_from_messages(
+        built_messages: List[Message],
+    ) -> tuple[bytes, str] | None:
+        """从已构建的 LLM 消息中提取第一个图片的字节和格式。"""
+        from ..llm_models.payload_content.message import ImageMessagePart
+        for msg in built_messages:
+            for part in msg.parts:
+                if isinstance(part, ImageMessagePart) and part.image_base64:
+                    import base64 as _b64
+                    try:
+                        raw = _b64.b64decode(part.image_base64)
+                        if raw:
+                            return raw, part.image_format
+                    except Exception:
+                        pass
+        return None
+
+    async def _route_to_vision_adapter(
+        self,
+        built_messages: List[Message],
+        image_data: tuple[bytes, str],
+        request_kind: str,
+        enable_visual_message: bool,
+        selected_history: list,
+        selection_reason: str,
+        response_format: RespFormat | None,
+        all_tools: list,
+    ) -> "ChatResponse":
+        """当消息包含图片时，路由到 Codex Vision Adapter。"""
+        import hashlib
+        from datetime import datetime as _dt
+        from ..llm_models.payload_content.message import ImageMessagePart
+
+        image_bytes, image_format = image_data
+
+        prompt_parts: list[str] = []
+        for msg in built_messages:
+            for part in msg.parts:
+                if hasattr(part, "text") and part.text.strip():
+                    prompt_parts.append(part.text.strip())
+        prompt_text = "\n\n".join(prompt_parts) if prompt_parts else "请描述这张图片。"
+
+        cache_prompt_text = json.dumps(
+            {
+                "messages": [
+                    {
+                        "role": str(msg.role.value if hasattr(msg.role, "value") else msg.role),
+                        "parts": [
+                            {"type": "text", "text": part.text}
+                            if hasattr(part, "text")
+                            else {
+                                "type": "image",
+                                "format": getattr(part, "image_format", ""),
+                                "size": len(getattr(part, "image_base64", "")),
+                                "sha256": hashlib.sha256(
+                                    getattr(part, "image_base64", "").encode("utf-8")
+                                ).hexdigest()
+                                if getattr(part, "image_base64", "")
+                                else "",
+                            }
+                            for part in msg.parts
+                        ],
+                    }
+                    for msg in built_messages
+                ],
+                "tool_options": [],
+                "response_format": None,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+
+        logger.info(
+            "codex_vision_for_emoji_selection start request_kind=%s image_format=%s image_bytes=%s",
+            request_kind, image_format, len(image_bytes),
+        )
+
+        try:
+            vision_result = await _codex_describe_image(
+                image_bytes=image_bytes,
+                mime_type=f"image/{image_format}" if image_format else None,
+                prompt=prompt_text,
+                context={"request_kind": request_kind, "prompt_text": cache_prompt_text},
+            )
+        except Exception as exc:
+            logger.warning(
+                "codex_vision_for_emoji_selection failure error=%s:%s",
+                type(exc).__name__, exc,
+            )
+            vision_result = None
+
+        if vision_result is None:
+            final_response = ""
+            model_name = "codex_vision"
+        elif not vision_result.ok:
+            final_response = ""
+            model_name = vision_result.source or "codex_vision"
+        else:
+            final_response = vision_result.text or ""
+            model_name = vision_result.source or "codex_vision"
+
+        llm_duration_ms = 0.0
+
+        from ..services.llm_service import LLMResponseResult
+        generation_result = LLMResponseResult(
+            response=final_response,
+            model_name=model_name,
+        )
+
+        self._log_prompt_cache_usage(
+            request_kind=request_kind,
+            prompt_tokens=generation_result.prompt_tokens,
+            prompt_cache_hit_tokens=getattr(generation_result, "prompt_cache_hit_tokens", 0) or 0,
+            prompt_cache_miss_tokens=getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0,
+        )
+
+        final_response_text = generation_result.response or ""
+        final_tool_calls = list(generation_result.tool_calls or [])
+
+        raw_message = AssistantMessage(
+            content=final_response_text,
+            timestamp=_dt.now(),
+            tool_calls=final_tool_calls,
+        )
+        return ChatResponse(
+            content=final_response_text or None,
+            tool_calls=final_tool_calls,
+            request_messages=built_messages,
+            raw_message=raw_message,
+            selected_history_count=len(selected_history),
+            tool_count=len(all_tools),
+            prompt_tokens=generation_result.prompt_tokens,
+            built_message_count=len(built_messages),
+            completion_tokens=generation_result.completion_tokens,
+            total_tokens=generation_result.total_tokens,
+            model_name=model_name,
+            duration_ms=llm_duration_ms,
+        )
 
     @staticmethod
     def _extract_anchor_message_id(chat_history: List[LLMContextMessage]) -> Optional[str]:
