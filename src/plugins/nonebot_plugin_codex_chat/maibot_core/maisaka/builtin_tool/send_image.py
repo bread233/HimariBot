@@ -160,11 +160,14 @@ async def handle_tool(
             structured_content=structured_content,
         )
 
+    source_message = tool_ctx.runtime.find_source_message_by_id(target_message_id)
+
     image_base64 = b64encode(images[image_index].binary_data).decode("utf-8")
     source_label = f"{target_message_id} 的第 {image_index} 张图片"
     success = await send_service.image_to_stream(
         image_base64=image_base64,
         stream_id=tool_ctx.runtime.session_id,
+        reply_message=source_message,
         sync_to_maisaka_history=True,
         maisaka_source_kind="send_image",
     )
