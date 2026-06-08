@@ -102,6 +102,17 @@ class SauceNao:
         else:
             results = json.JSONDecoder(
                 object_pairs_hook=OrderedDict).decode(r.text)
+            
+            logger.info(
+                "SauceNAO header: status=%s user_id=%s results=%s short_remaining=%s long_remaining=%s minimum_similarity=%s",
+                results["header"].get("status"),
+                results["header"].get("user_id"),
+                results["header"].get("results_returned"),
+                results["header"].get("short_remaining"),
+                results["header"].get("long_remaining"),
+                results["header"].get("minimum_similarity"),
+            )
+
             if int(results['header']['user_id']) > 0:
                 _remain_searches = 'Remaining Searches 30s|24h: ' + \
                     str(results['header']['short_remaining']) + \
@@ -275,3 +286,5 @@ class SauceNao:
 
                 if int(results['header']['short_remaining']) < 1:
                     return Response(ACTION_FAILED, message="Out of searches in 30s. ")
+
+                return Response(ACTION_WARNING, message="SauceNAO: not found")
