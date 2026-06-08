@@ -161,8 +161,9 @@ async def _process_inbound_emojis(components: list[Any] | None) -> None:
             skipped += 1
             continue
         emoji_hash = getattr(comp, "binary_hash", None)
+        saved_emoji = None
         try:
-            await emoji_manager.ensure_emoji_saved(
+            saved_emoji = await emoji_manager.ensure_emoji_saved(
                 emoji_bytes=binary_data,
                 emoji_hash=emoji_hash,
             )
@@ -174,6 +175,22 @@ async def _process_inbound_emojis(components: list[Any] | None) -> None:
                 emoji_hash[:12] if emoji_hash else "?",
                 exc,
             )
+            continue
+        if saved_emoji:
+            try:
+                reg_status = await emoji_manager.register_emoji_by_filename(saved_emoji.full_path)
+                if reg_status == "registered":
+                    logger.info(
+                        "maibot_bridge_emoji_registered hash=%s path=%s",
+                        emoji_hash[:12] if emoji_hash else "?",
+                        saved_emoji.full_path,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "maibot_bridge_emoji_register_failed hash=%s error=%s",
+                    emoji_hash[:12] if emoji_hash else "?",
+                    exc,
+                )
 
     if saved or failed:
         logger.debug(
