@@ -114,12 +114,12 @@ class Ascii2D:
                 result.thumbnail = resp.content
             else:
                 logger.warning(
-                    "Ascii2D thumbnail request failed: HTTP %s url=%s",
+                    "Ascii2D thumbnail request failed: HTTP {} url={}",
                     resp.status_code,
                     result.thumbnail_url,
                 )
         except httpx.HTTPError as e:
-            logger.warning("Ascii2D thumbnail request failed: %r", e)
+            logger.warning("Ascii2D thumbnail request failed: {}", e)
 
     async def search(self, url: str) -> "BaseResponse":
         color_results = []
@@ -141,7 +141,7 @@ class Ascii2D:
                 )
 
                 logger.info(
-                    "Ascii2D color response: HTTP %s url=%s",
+                    "Ascii2D color response: HTTP {} url={}",
                     color_response.status_code,
                     color_response.url,
                 )
@@ -156,7 +156,7 @@ class Ascii2D:
                 bovw_response = await client.get(bovw_url, follow_redirects=True)
 
                 logger.info(
-                    "Ascii2D bovw response: HTTP %s url=%s",
+                    "Ascii2D bovw response: HTTP {} url={}",
                     bovw_response.status_code,
                     bovw_response.url,
                 )
@@ -171,7 +171,7 @@ class Ascii2D:
                 bovw_results = self.parse_html(bovw_response)
 
                 logger.info(
-                    "Ascii2D parsed results: color=%s bovw=%s",
+                    "Ascii2D parsed results: color={} bovw={}",
                     len(color_results),
                     len(bovw_results),
                 )
@@ -188,7 +188,7 @@ class Ascii2D:
         except httpx.ProxyError:
             return BaseResponse(ACTION_FAILED, message="连接代理服务器出现错误, 请检查代理设置")
         except httpx.HTTPError as e:
-            logger.warning("Ascii2D request failed: %r", e)
+            logger.warning("Ascii2D request failed: {}", e)
             return BaseResponse(ACTION_FAILED, message="Ascii2D请求失败, 请检查网络或代理")
         except Exception:
             logger.exception("Ascii2D unexpected error")
@@ -259,7 +259,7 @@ class Ascii2D:
             )
 
         logger.warning(
-            "Ascii2D returned no usable results: color=%s bovw=%s",
+            "Ascii2D returned no usable results: color={} bovw={}",
             len(color_results),
             len(bovw_results),
         )
