@@ -32,8 +32,12 @@ def compress_image(bytes_image: bytes) -> "bytes":
     """
 
     image = Image.open(BytesIO(bytes_image))
-    image.thumbnail((250,250),resample=Image.ANTIALIAS)
+    image.thumbnail((250, 250), resample=_get_lanczos_filter())
     image_data = BytesIO()
     image.save(image_data, format='JPEG')
     return image_data.getvalue()
 
+def _get_lanczos_filter():
+    if hasattr(Image, "Resampling"):
+        return Image.Resampling.LANCZOS
+    return Image.LANCZOS if hasattr(Image, "LANCZOS") else Image.ANTIALIAS
