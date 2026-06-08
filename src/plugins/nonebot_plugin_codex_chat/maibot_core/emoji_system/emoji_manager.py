@@ -1075,7 +1075,6 @@ class EmojiManager:
             try:
                 await asyncio.wait_for(self._maintenance_wakeup_event.wait(), timeout=wait_seconds)
                 self._maintenance_wakeup_event.clear()
-                continue
             except asyncio.TimeoutError:
                 self._maintenance_wakeup_event.clear()
 
