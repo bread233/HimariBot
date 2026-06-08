@@ -177,6 +177,7 @@ async def _process_inbound_emojis(components: list[Any] | None) -> None:
             )
             continue
         if saved_emoji:
+            reg_status = "failed"
             try:
                 reg_status = await emoji_manager.register_emoji_by_filename(saved_emoji.full_path)
                 if reg_status == "registered":
@@ -191,6 +192,31 @@ async def _process_inbound_emojis(components: list[Any] | None) -> None:
                     emoji_hash[:12] if emoji_hash else "?",
                     exc,
                 )
+            if reg_status == "failed":
+                try:
+                    saved_emoji.description = saved_emoji.description or "群聊中收集的表情"
+                    saved_emoji.emotion = saved_emoji.emotion or ["表情"]
+                    db_status = emoji_manager.register_emoji_to_db(saved_emoji)
+                    if db_status == "registered":
+                        if not emoji_manager.get_emoji_by_hash(saved_emoji.file_hash):
+                            emoji_manager.emojis.append(saved_emoji)
+                        emoji_manager._emoji_num = len(emoji_manager.emojis)
+                        logger.info(
+                            "maibot_bridge_emoji_fallback_registered hash=%s path=%s",
+                            emoji_hash[:12] if emoji_hash else "?",
+                            saved_emoji.full_path,
+                        )
+                    elif db_status == "skipped":
+                        logger.debug(
+                            "maibot_bridge_emoji_fallback_skipped hash=%s",
+                            emoji_hash[:12] if emoji_hash else "?",
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "maibot_bridge_emoji_fallback_register_failed hash=%s error=%s",
+                        emoji_hash[:12] if emoji_hash else "?",
+                        exc,
+                    )
 
     if saved or failed:
         logger.debug(
