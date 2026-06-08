@@ -10,6 +10,7 @@ from nonebot.params import EventMessage
 
 from .config import get_config
 from .maibot_core.bridge import MaibotInboundMessage, handle_inbound_message
+from .maibot_core.emoji_system.emoji_manager import emoji_manager
 from .maibot_core.prompt.prompt_manager import prompt_manager
 
 __plugin_meta__ = {
@@ -29,13 +30,22 @@ def _ensure_maibot_prompts_loaded() -> None:
         return
     prompt_manager.load_prompts()
     logger.info(
-        "codex_chat_prompt_manager_loaded count=%s has_emoji_selection=%s",
-        len(prompt_manager.prompts),
-        "emoji_selection" in prompt_manager.prompts,
+        f"codex_chat_prompt_manager_loaded count={len(prompt_manager.prompts)} "
+        f"has_emoji_selection={'emoji_selection' in prompt_manager.prompts}"
+    )
+
+
+def _ensure_maibot_emojis_loaded() -> None:
+    if emoji_manager.emojis:
+        return
+    emoji_manager.load_emojis_from_db()
+    logger.info(
+        f"codex_chat_emoji_manager_loaded emoji_count={len(emoji_manager.emojis)}"
     )
 
 
 _ensure_maibot_prompts_loaded()
+_ensure_maibot_emojis_loaded()
 logger.info("codex_chat minimal bootstrap loaded")
 
 
