@@ -15,8 +15,8 @@ from src.common.logger import get_logger
 
 logger = get_logger("image_cache_cleanup")
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.absolute().resolve()
-IMAGE_DIR = PROJECT_ROOT / "data" / "images"
+DATA_DIR = Path.cwd() / "data" / "nonebot_chat_agent"
+IMAGE_DIR = DATA_DIR / "images"
 _CACHE_IMAGE_EXTENSIONS = {
     ".avif",
     ".bmp",

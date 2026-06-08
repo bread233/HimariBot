@@ -28,10 +28,9 @@ logger = get_logger("emoji")
 
 install(extra_lines=3)
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = PROJECT_ROOT / "data"
 EmojiRegisterStatus = Literal["registered", "skipped", "failed"]
-EMOJI_DIR = DATA_DIR / "emoji"  # 表情包存储目录
+DATA_DIR = Path.cwd() / "data" / "nonebot_chat_agent"
+EMOJI_DIR = DATA_DIR / "emoji"
 MAX_EMOJI_FOR_PROMPT = 20  # 最大允许的表情包描述数量于图片替换的 prompt 中
 
 
