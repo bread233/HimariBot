@@ -308,6 +308,15 @@ def _resolve_emoji_selector_model_task_name() -> str:
     return "vlm"
 
 
+def _is_codex_vision_available() -> bool:
+    """判断 Codex Vision Adapter 是否可用。"""
+    try:
+        from src.plugins.nonebot_plugin_codex_chat.maibot_core.codex_vision_adapter import describe_image
+        return describe_image is not None
+    except Exception:
+        return False
+
+
 def _is_missing_visual_model_error(exc: Exception) -> bool:
     """判断是否为未配置视觉模型导致的选择失败。"""
 
@@ -380,7 +389,7 @@ async def _select_emoji_with_sub_agent(
     serialized_request_messages = serialize_prompt_messages(request_messages)
 
     model_task_name = _resolve_emoji_selector_model_task_name()
-    if model_task_name == "vlm" and not _is_vlm_task_configured():
+    if model_task_name == "vlm" and not _is_vlm_task_configured() and not _is_codex_vision_available():
         raise RuntimeError(_EMOJI_VLM_NOT_CONFIGURED_MESSAGE)
 
     selection_started_at = datetime.now()
