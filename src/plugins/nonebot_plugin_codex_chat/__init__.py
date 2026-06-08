@@ -217,6 +217,74 @@ def _build_onebot_message_text(message: Any) -> tuple[Optional[str], list[str]]:
     return None, []
 
 
+def _get_component_kind(component: Any) -> str:
+    """获取组件的格式名称。"""
+
+    format_name = getattr(component, "format_name", None)
+    return format_name() if callable(format_name) else (format_name or type(component).__name__)
+
+
+async def _build_onebot_message(message: Any) -> tuple[Optional[Any], list[str]]:
+    """从 SessionMessage 构建 NoneBot Message，支持文本 + 图片 + 表情组件。
+
+    返回 (Message | None, unsupported_kinds)。
+    - 有可发送片段时返回 (Message, unsupported_kinds)
+    - 全部不支持时返回 ([], unsupported_kinds)
+    - 失败时返回 (None, unsupported_kinds)
+    """
+
+    from nonebot.adapters.onebot.v11 import Message, MessageSegment
+
+    raw_message = getattr(message, "raw_message", None)
+    components = getattr(raw_message, "components", None) if raw_message is not None else None
+    if not components:
+        plain_text = str(getattr(message, "processed_plain_text", "") or "").strip()
+        if plain_text:
+            return Message(plain_text), []
+        return None, []
+
+    message_parts: list = []
+    unsupported_kinds: list[str] = []
+
+    for component in components:
+        kind = _get_component_kind(component)
+
+        if kind == "text":
+            text_val = str(getattr(component, "text", "") or "").strip()
+            if text_val:
+                message_parts.append(MessageSegment.text(text_val))
+            continue
+
+        if kind in ("image", "emoji"):
+            binary_data: Optional[bytes] = getattr(component, "binary_data", None) or b""
+            if not binary_data:
+                try:
+                    if kind == "image":
+                        await component.load_image_binary()
+                    else:
+                        await component.load_emoji_binary()
+                    binary_data = getattr(component, "binary_data", None) or b""
+                except Exception as exc:
+                    logger.warning(
+                        f"codex_chat_host_send_media_load_failed kind={kind} "
+                        f"error={type(exc).__name__}: {exc}"
+                    )
+                    continue
+            if binary_data:
+                message_parts.append(MessageSegment.image(binary_data))
+            continue
+
+        unsupported_kinds.append(kind)
+        logger.warning(
+            f"codex_chat_host_send_unsupported_component kind={kind}"
+        )
+
+    if not message_parts:
+        return None, unsupported_kinds
+
+    return Message(message_parts), unsupported_kinds
+
+
 async def _codex_chat_host_send_interceptor(
     message: Any,
     reply_message_id: str = "",
@@ -300,17 +368,16 @@ async def _codex_chat_host_send_interceptor(
         )
         return False
 
-    # 5. 文本提取
-    text, non_text_kinds = _build_onebot_message_text(message)
-    if not text:
-        if non_text_kinds:
+    # 5. 构建 OneBot Message（支持文本 + 图片 + 表情组件）
+    onebot_msg, unsupported_kinds = await _build_onebot_message(message)
+    if onebot_msg is None:
+        if unsupported_kinds:
             logger.info(
                 f"codex_chat_host_send_skip message_id={getattr(message, 'message_id', '')} "
-                f"reason=non_text_only kinds={','.join(non_text_kinds)}"
+                f"reason=unsupported_only kinds={','.join(unsupported_kinds)}"
             )
         return None
 
-    snippet = text[:80]
     message_id = str(getattr(message, "message_id", "") or "").strip()
     logger.info(
         f"codex_chat_host_send_intercept platform=onebot.v11 "
@@ -319,30 +386,22 @@ async def _codex_chat_host_send_interceptor(
         f"message_group_id={message_group_id} "
         f"reply_message_id={reply_message_id} "
         f"bot_self_id={bot_self_id} "
-        f"text_chars={len(text)} snippet={snippet!r} "
-        f"non_text_kinds={','.join(non_text_kinds) if non_text_kinds else '-'}"
+        f"parts={len(onebot_msg)} "
+        f"non_text_kinds={','.join(unsupported_kinds) if unsupported_kinds else '-'}"
     )
-
-    try:
-        from nonebot.adapters.onebot.v11 import Message
-    except Exception as exc:
-        logger.error(
-            f"codex_chat_host_send_failed stage=import_message error={type(exc).__name__}: {exc}"
-        )
-        return None
 
     try:
         if is_group:
             api_response = await bot.call_api(
                 "send_group_msg",
                 group_id=int(target_id),
-                message=Message(text),
+                message=onebot_msg,
             )
         else:
             api_response = await bot.call_api(
                 "send_private_msg",
                 user_id=int(target_id),
-                message=Message(text),
+                message=onebot_msg,
             )
     except Exception as exc:
         logger.error(
@@ -375,7 +434,7 @@ async def _codex_chat_host_send_interceptor(
 
     logger.info(
         f"codex_chat_host_send_success message_id={onebot_message_id} "
-        f"target_id={target_id} is_group={is_group} text_chars={len(text)}"
+        f"target_id={target_id} is_group={is_group} parts={len(onebot_msg)}"
     )
     return synthetic_message
 
