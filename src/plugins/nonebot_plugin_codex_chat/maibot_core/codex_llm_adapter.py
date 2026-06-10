@@ -318,6 +318,79 @@ def _parse_timing_gate_fallback_text_action(
     return None, None
 
 
+def _resolve_tool_call_args(args_raw: Any) -> dict[str, Any]:
+    """将 OpenAI-like arguments 规范化为 dict。"""
+    if isinstance(args_raw, dict):
+        return args_raw
+    if isinstance(args_raw, str):
+        try:
+            decoded = json.loads(args_raw)
+            if isinstance(decoded, dict):
+                return decoded
+        except (TypeError, ValueError):
+            pass
+    return {}
+
+
+_PLANNER_FALLBACK_TOOL_NAMES: frozenset[str] = frozenset(
+    {"reply", "send_emoji", "send_image", "no_action"}
+)
+
+
+def _parse_planner_fallback_text_tool_calls(
+    text: str,
+    available_tool_names: set[str] | None = None,
+) -> list[Any] | None:
+    """从 fallback LLM 文本响应中解析 Planner tool_calls。"""
+    if not text:
+        logger.info("maibot_planner_fallback_text_tool_parse_failed reason=empty")
+        return None
+
+    valid_names = available_tool_names if available_tool_names else _PLANNER_FALLBACK_TOOL_NAMES
+    if not valid_names:
+        logger.info("maibot_planner_fallback_text_tool_parse_failed reason=no_valid_names")
+        return None
+
+    json_obj = _extract_json_from_last_line(text)
+    if json_obj is None:
+        logger.info("maibot_planner_fallback_text_tool_parse_failed reason=no_json_found")
+        return None
+
+    raw_calls = json_obj.get("tool_calls")
+    if isinstance(raw_calls, list) and raw_calls:
+        tool_calls: list[Any] = []
+        for raw_call in raw_calls:
+            if not isinstance(raw_call, dict):
+                continue
+            call_id = raw_call.get("id") or f"planner_fb_{uuid.uuid4().hex[:12]}"
+            func = raw_call.get("function")
+            if isinstance(func, dict):
+                func_name = (func.get("name") or "").strip()
+                if func_name not in valid_names:
+                    continue
+                args = _resolve_tool_call_args(func.get("arguments"))
+            else:
+                func_name = (raw_call.get("name") or "").strip()
+                if func_name not in valid_names:
+                    continue
+                args = _resolve_tool_call_args(raw_call.get("arguments"))
+            if _ToolCall is not None:
+                tool_calls.append(_ToolCall(call_id=call_id, func_name=func_name, args=args))
+        if tool_calls:
+            return tool_calls
+        logger.info("maibot_planner_fallback_text_tool_parse_failed reason=no_valid_tool_in_list")
+        return None
+
+    func_name = (json_obj.get("name") or "").strip()
+    if func_name in valid_names:
+        args = _resolve_tool_call_args(json_obj.get("arguments"))
+        if _ToolCall is not None:
+            return [_ToolCall(call_id=f"planner_fb_{uuid.uuid4().hex[:12]}", func_name=func_name, args=args)]
+
+    logger.info("maibot_planner_fallback_text_tool_parse_failed reason=no_valid_tool")
+    return None
+
+
 def _match_any_pattern(patterns: tuple[str, ...], lowered_text: str) -> bool:
     """判断 lowered_text 是否命中 patterns 中任意一个子串正则。"""
 
