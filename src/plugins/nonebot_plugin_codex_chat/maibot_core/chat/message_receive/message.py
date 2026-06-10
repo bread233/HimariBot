@@ -341,8 +341,15 @@ class SessionMessage(MaiMessage):
         from src.common.utils.system_utils import is_bot_self
         from src.config.config import global_config
 
-        # 务必在早期判断目标是否是当前bot，供下游渲染使用
-        is_bot = is_bot_self(self.platform, component.target_user_id)
+        # 以 event.self_id 为最高优先级判断是否 @当前 bot
+        event_bot_id = str(getattr(self, 'bot_self_id', '') or '').strip()
+        target_id = str(component.target_user_id or '').strip()
+        if event_bot_id and target_id and target_id == event_bot_id:
+            component.target_user_is_bot = True
+            return "[@我]"
+
+        # 未命中 event.self_id，回退到配置级 bot account 检测
+        is_bot = is_bot_self(self.platform, target_id)
         component.target_user_is_bot = is_bot
 
         if is_bot:

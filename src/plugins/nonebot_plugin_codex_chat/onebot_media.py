@@ -433,9 +433,9 @@ async def convert_onebot_segments_to_maibot_components(
                 components.append(AtComponent(target_user_id=target_user_id, target_user_nickname=nickname, target_user_cardname=cardname))
                 append_plain(f"@{nickname or target_user_id}")
                 if self_id and target_user_id == self_id:
-                    LOGGER.info(f"onebot_media_at_segment kind=bot qq={target_user_id} self_id={self_id}")
+                    LOGGER.info(f"onebot_media_at_segment kind=bot qq={target_user_id} self_id={self_id} source=event.self_id")
                 else:
-                    LOGGER.info(f"onebot_media_at_segment kind=user qq={target_user_id}")
+                    LOGGER.info(f"onebot_media_at_segment kind=user qq={target_user_id} self_id={self_id or ''} source=event.self_id")
             else:
                 components.append(DictComponent(data=dict(_build_dict_component(segment, reason="missing_at_target")["data"])))
             continue
