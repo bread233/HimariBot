@@ -160,6 +160,7 @@ class AtComponent(BaseMessageComponentModel):
         target_user_id: str,
         target_user_nickname: Optional[str] = None,
         target_user_cardname: Optional[str] = None,
+        target_user_is_bot: bool = False,
     ) -> None:
         self.target_user_id = target_user_id
         """目标用户ID"""
@@ -167,6 +168,8 @@ class AtComponent(BaseMessageComponentModel):
         """目标用户昵称"""
         self.target_user_cardname: Optional[str] = target_user_cardname
         """目标用户备注名"""
+        self.target_user_is_bot: bool = target_user_is_bot
+        """目标是否是当前bot"""
         assert isinstance(target_user_id, str), "AtComponent 的 target_user_id 必须是字符串类型"
 
     async def to_seg(self) -> Seg:

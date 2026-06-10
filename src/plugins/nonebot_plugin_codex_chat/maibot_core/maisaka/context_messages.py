@@ -99,7 +99,8 @@ def _render_at_component_text(component: AtComponent) -> str:
     """灏?AtComponent 娓叉煋涓烘枃鏈舰寮忋€?"""
 
     target_name = component.target_user_cardname or component.target_user_nickname or component.target_user_id
-    return f"@{target_name}".strip()
+    suffix = "(当前bot)" if getattr(component, 'target_user_is_bot', False) else "(不是当前bot)"
+    return f"@{target_name}{suffix}".strip()
 
 
 def _append_at_component(builder: MessageBuilder, component: AtComponent) -> bool:
