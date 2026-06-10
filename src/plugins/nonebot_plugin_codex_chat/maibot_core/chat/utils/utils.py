@@ -56,9 +56,16 @@ def _get_configured_qq_account() -> str:
     return qq_account
 
 
+def _normalize_bot_account_platform(platform: str) -> str:
+    normalized = str(platform or "").strip().lower()
+    if normalized in {"onebot", "onebot.v11", "onebot_v11", "ob11"}:
+        return "qq"
+    return normalized
+
+
 def get_bot_account(platform: str) -> str:
     """根据当前平台获取对应的机器人账号。"""
-    normalized_platform = str(platform or "").strip().lower()
+    normalized_platform = _normalize_bot_account_platform(platform)
     if not normalized_platform:
         return ""
 
