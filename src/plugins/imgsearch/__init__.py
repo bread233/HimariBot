@@ -10,8 +10,6 @@ from nonebot.typing import T_State
 from .ascii2d import Ascii2D
 from .config import saucenao_api_key, search_proxy
 from .saucenao import SauceNao
-from .utils import get_message_image
-
 
 logger.warning(f"PROXY: {search_proxy}")
 logger.warning(f"S_API configured: {bool(saucenao_api_key)}")
@@ -28,7 +26,10 @@ def _format_dict(data: dict) -> str:
 
 
 def _make_reply(event: Event, text: str):
-    return MessageSegment.reply(event.message_id) + MessageSegment.text(text)
+    message_id = getattr(event, "message_id", None)
+    if message_id is None:
+        return MessageSegment.text(text)
+    return MessageSegment.reply(message_id) + MessageSegment.text(text)
 
 
 def _make_ascii2d_content(item: dict, thumbnail=None):
@@ -41,34 +42,89 @@ def _make_ascii2d_content(item: dict, thumbnail=None):
 saucenao = SauceNao(saucenao_api_key, search_proxy)
 ascii2d = Ascii2D(search_proxy)
 
+
+def _extract_images_from_segments(message) -> list:
+    images = []
+
+    if message is None:
+        return images
+
+    # 兼容 get_msg 返回整包 dict: {"message": ...}
+    if isinstance(message, dict):
+        message = message.get("message")
+
+    # 兼容 OneBot get_msg / message 字段返回 JSON 字符串
+    if isinstance(message, str):
+        try:
+            message = json.loads(message)
+        except Exception:
+            return images
+
+    if message is None:
+        return images
+
+    try:
+        segments = list(message)
+    except Exception:
+        return images
+
+    for seg in segments:
+        seg_type = None
+        seg_data = None
+
+        # OneBot MessageSegment 对象
+        if hasattr(seg, "type"):
+            seg_type = getattr(seg, "type", None)
+            seg_data = getattr(seg, "data", None)
+
+        # OneBot get_msg 返回的 dict segment
+        elif isinstance(seg, dict):
+            seg_type = seg.get("type")
+            seg_data = seg.get("data")
+
+        if seg_type == "image" and isinstance(seg_data, dict):
+            url = seg_data.get("url")
+            file = seg_data.get("file")
+
+            if url:
+                images.append(url)
+            elif file:
+                images.append(file)
+
+    return images
+
+
 async def _get_search_images(bot: Bot, event: Event) -> list:
-    # 1. 先取当前消息里的图片：搜图 + 图片
-    images = get_message_image(event.json())
+    # 当前消息：搜图 + 图片
+    images = _extract_images_from_segments(getattr(event, "message", None))
     if images:
         return images
 
-    # 2. 再取 reply 内联消息里的图片：回复图片 + 搜图
+    # 回复消息：回复图片 + 搜图
     reply = getattr(event, "reply", None)
     if reply is not None:
-        reply_message = getattr(reply, "message", None)
-        if reply_message:
-            payload = {"message": reply_message}
-            images = get_message_image(json.dumps(payload, ensure_ascii=False, default=str))
-            if images:
-                return images
+        images = _extract_images_from_segments(getattr(reply, "message", None))
+        if images:
+            logger.info(f"imgsearch: found {len(images)} image(s) in reply.message")
+            return images
 
-        # 3. 有些适配器 reply 里没有完整 message，需要用 get_msg 拉原消息
         reply_message_id = getattr(reply, "message_id", None)
         if reply_message_id:
             try:
                 msg = await bot.get_msg(message_id=reply_message_id)
-                images = get_message_image(json.dumps(msg, ensure_ascii=False, default=str))
+                images = _extract_images_from_segments(msg)
                 if images:
+                    logger.info(
+                        f"imgsearch: found {len(images)} image(s) via get_msg reply_id={reply_message_id}"
+                    )
                     return images
             except Exception:
-                logger.warning(f"imgsearch: failed to fetch replied message: {traceback.format_exc()}")
+                logger.warning(
+                    f"imgsearch: failed to fetch replied message: {traceback.format_exc()}"
+                )
 
     return []
+
 
 @Search.handle()
 async def search(bot: Bot, event: Event, state: T_State):
@@ -76,7 +132,7 @@ async def search(bot: Bot, event: Event, state: T_State):
         images = await _get_search_images(bot, event)
 
         if not have_image(images):
-            await bot.send(event, "现在的搜图功能为 搜图直接跟图片 不需要at")
+            await bot.send(event, "请发送「搜图 + 图片」，或者回复一张图片发送「搜图」")
             return
 
         for image in images:
@@ -162,7 +218,7 @@ async def search(bot: Bot, event: Event, state: T_State):
                             "type": "node",
                             "data": {
                                 "name": "搜图",
-                                "uin": event.self_id,
+                                "uin": getattr(event, "self_id", "0"),
                                 "content": content_1,
                             },
                         }
@@ -178,7 +234,7 @@ async def search(bot: Bot, event: Event, state: T_State):
                             "type": "node",
                             "data": {
                                 "name": "搜图",
-                                "uin": event.self_id,
+                                "uin": getattr(event, "self_id", "0"),
                                 "content": content_2,
                             },
                         }
