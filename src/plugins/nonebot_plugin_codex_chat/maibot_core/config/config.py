@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, TypeVar, cast
+import os
 import shutil
 
 
@@ -83,6 +84,7 @@ from src.common.logger import get_logger
 PROJECT_ROOT: Path = Path(__file__).parent.parent.parent.absolute().resolve()
 PACKAGE_CONFIG_DIR: Path = (PROJECT_ROOT / "config").resolve().absolute()
 RUNTIME_CONFIG_DIR: Path = (Path.cwd() / "data" / "nonebot_chat_agent" / "config").resolve().absolute()
+CODEX_CHAT_CONFIG_DIR: Path = (Path.cwd() / "data" / "nonebot_chat_agent" / "codex_chat_config").resolve().absolute()
 LEGACY_ENV_PATH: Path = (PROJECT_ROOT / ".env").resolve().absolute()
 A_MEMORIX_LEGACY_CONFIG_PATH: Path = (PACKAGE_CONFIG_DIR / "a_memorix.toml").resolve().absolute()
 
@@ -101,8 +103,46 @@ def get_runtime_config_path(filename: str) -> Path:
     ensure_runtime_config_files()
     return get_runtime_config_dir() / filename
 
-BOT_CONFIG_PATH: Path = get_runtime_config_path("bot_config.toml")
-MODEL_CONFIG_PATH: Path = get_runtime_config_path("model_config.toml")
+
+def resolve_primary_config_path(filename: str) -> Path:
+    """解析 bot_config.toml / model_config.toml 路径。
+
+    优先级:
+    1. 环境变量 (CODEX_CHAT_BOT_CONFIG_PATH / CODEX_CHAT_MODEL_CONFIG_PATH)
+    2. data 目录 (CODEX_CHAT_CONFIG_DIR / filename)
+    3. 包内模板 (PACKAGE_CONFIG_DIR / filename，自动复制到 data 目录)
+    """
+    if filename == "bot_config.toml":
+        env_var = "CODEX_CHAT_BOT_CONFIG_PATH"
+    elif filename == "model_config.toml":
+        env_var = "CODEX_CHAT_MODEL_CONFIG_PATH"
+    else:
+        return get_runtime_config_path(filename)
+
+    env_val = os.environ.get(env_var)
+    if env_val:
+        p = Path(env_val).resolve()
+        if p.exists():
+            return p
+
+    data_path = CODEX_CHAT_CONFIG_DIR / filename
+    if data_path.exists():
+        return data_path
+
+    CODEX_CHAT_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    package_path = PACKAGE_CONFIG_DIR / filename
+    if package_path.exists():
+        try:
+            shutil.copy2(package_path, data_path)
+            return data_path
+        except OSError:
+            pass
+
+    return package_path
+
+
+BOT_CONFIG_PATH: Path = resolve_primary_config_path("bot_config.toml")
+MODEL_CONFIG_PATH: Path = resolve_primary_config_path("model_config.toml")
 
 MMC_VERSION: str = "1.0.0-rc.4"
 CONFIG_VERSION: str = "8.12.26"
@@ -279,9 +319,11 @@ class ConfigManager:
     VLM_NOT_CONFIGURED_WARNING: str = "未配置视觉识图模型，部分图片理解可能受限，请在webui或model_config中配置"
 
     def __init__(self):
-        self.bot_config_path: Path = get_runtime_config_path("bot_config.toml")
-        self.model_config_path: Path = get_runtime_config_path("model_config.toml")
+        self.bot_config_path: Path = resolve_primary_config_path("bot_config.toml")
+        self.model_config_path: Path = resolve_primary_config_path("model_config.toml")
         self.global_config: Config | None = None
+        logger.info(f"codex_chat_config: bot_config={self.bot_config_path}")
+        logger.info(f"codex_chat_config: model_config={self.model_config_path}")
         self.model_config: ModelConfig | None = None
 
         self._reload_lock: asyncio.Lock = asyncio.Lock()
