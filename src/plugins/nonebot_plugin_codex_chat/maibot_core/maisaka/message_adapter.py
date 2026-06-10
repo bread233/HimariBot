@@ -53,9 +53,12 @@ def clone_message_sequence(message_sequence: MessageSequence) -> MessageSequence
 def _render_at_component_text(component: AtComponent) -> str:
     """将 AtComponent 渲染为文本。"""
 
-    target_name = component.target_user_cardname or component.target_user_nickname or component.target_user_id
-    suffix = "(当前bot)" if getattr(component, 'target_user_is_bot', False) else "(不是当前bot)"
-    return f"@{target_name}{suffix}".strip()
+    if getattr(component, 'target_user_is_bot', False):
+        return "[@我]"
+    user_name = component.target_user_cardname or component.target_user_nickname
+    if user_name:
+        return f"@{user_name}"
+    return f"[@用户:{component.target_user_id}]"
 
 
 def _render_voice_component_text(component: VoiceComponent) -> str:

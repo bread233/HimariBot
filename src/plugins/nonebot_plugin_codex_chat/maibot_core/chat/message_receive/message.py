@@ -346,11 +346,12 @@ class SessionMessage(MaiMessage):
         component.target_user_is_bot = is_bot
 
         if is_bot:
-            bot_nickname = global_config.bot.nickname.strip()
-            if bot_nickname:
-                component.target_user_nickname = bot_nickname
-                component.target_user_cardname = bot_nickname
-                return f"@{bot_nickname}"
+            return "[@我]"
+
+        bot_nickname = global_config.bot.nickname.strip()
+        if bot_nickname:
+            component.target_user_nickname = bot_nickname
+            component.target_user_cardname = bot_nickname
 
         # 非bot，如果已经有昵称或备注了，直接使用
         if component.target_user_cardname:
