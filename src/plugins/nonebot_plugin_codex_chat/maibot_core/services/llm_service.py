@@ -192,7 +192,7 @@ class LLMServiceClient:
     ) -> LLMResponseResult:
         """生成单轮文本响应。
 
-        默认文本路径已统一走 codex_llm_adapter.generate_text。
+        优先走 codex_llm_adapter.generate_text，失败时 fallback 到原始 LLMOrchestrator。
 
         Args:
             prompt: 文本提示词。
@@ -216,6 +216,9 @@ class LLMServiceClient:
         }
         if anchor_message_id:
             extra["anchor_message_id"] = str(anchor_message_id).strip()
+
+        # Phase 1: Codex CLI
+        reason: str | None = None
         try:
             from ..codex_llm_adapter import generate_text
 
@@ -225,16 +228,44 @@ class LLMServiceClient:
                 request_type=self.request_type,
                 extra=extra,
             )
-            result = LLMResponseResult(
-                response=adapter_result.text,
-                model_name=active_options.model_name or "codexcli",
-                tool_calls=adapter_result.tool_calls,
-            )
+            if adapter_result.ok and adapter_result.text.strip():
+                result = LLMResponseResult(
+                    response=adapter_result.text,
+                    model_name=active_options.model_name or "codexcli",
+                    tool_calls=adapter_result.tool_calls,
+                )
+                self._record_cache_stats(result, prompt_text=prompt_text)
+                return result
+            reason = "empty_response"
         except Exception as exc:
             logger.exception(
                 f"maibot_codex_llm failed error={type(exc).__name__}: {exc}\n{traceback.format_exc()}"
             )
-            result = LLMResponseResult(response="", model_name=active_options.model_name or "codexcli")
+            reason = "exception"
+
+        # Phase 2: fallback to original LLMOrchestrator
+        logger.warning(
+            f"maibot_codex_fallback_to_orchestrator request_type={self.request_type} reason={reason}"
+        )
+        try:
+            result = await self._orchestrator.generate_response_async(
+                prompt=prompt,
+                temperature=active_options.temperature,
+                max_tokens=active_options.max_tokens,
+                model_name=active_options.model_name,
+                tools=active_options.tool_options,
+                response_format=active_options.response_format,
+                interrupt_flag=active_options.interrupt_flag,
+            )
+            self._record_cache_stats(result, prompt_text=prompt_text)
+            return result
+        except Exception as exc:
+            logger.exception(
+                f"maibot_codex_fallback_to_orchestrator orchestrator_failed "
+                f"request_type={self.request_type} error={type(exc).__name__}: {exc}"
+            )
+
+        result = LLMResponseResult(response="", model_name=active_options.model_name or "fallback")
         self._record_cache_stats(result, prompt_text=prompt_text)
         return result
 
@@ -245,7 +276,10 @@ class LLMServiceClient:
         *,
         anchor_message_id: Optional[str] = None,
     ) -> LLMResponseResult:
-        """基于消息工厂生成响应。"""
+        """基于消息工厂生成响应。
+
+        优先走 codex_llm_adapter.generate_text，失败时 fallback 到原始 LLMOrchestrator。
+        """
         active_options = self._normalize_generation_options(options)
 
         async def _resolve_messages() -> list[Message]:
@@ -270,6 +304,9 @@ class LLMServiceClient:
         }
         if anchor_message_id:
             extra["anchor_message_id"] = str(anchor_message_id).strip()
+
+        # Phase 1: Codex CLI
+        reason: str | None = None
         try:
             from ..codex_llm_adapter import generate_text
 
@@ -279,16 +316,44 @@ class LLMServiceClient:
                 request_type=self.request_type,
                 extra=extra,
             )
-            result = LLMResponseResult(
-                response=adapter_result.text,
-                model_name=active_options.model_name or "codexcli",
-                tool_calls=adapter_result.tool_calls,
-            )
+            if adapter_result.ok and adapter_result.text.strip():
+                result = LLMResponseResult(
+                    response=adapter_result.text,
+                    model_name=active_options.model_name or "codexcli",
+                    tool_calls=adapter_result.tool_calls,
+                )
+                self._record_cache_stats(result, prompt_text=prompt_text)
+                return result
+            reason = "empty_response"
         except Exception as exc:
             logger.exception(
                 f"maibot_codex_llm failed error={type(exc).__name__}: {exc}\n{traceback.format_exc()}"
             )
-            result = LLMResponseResult(response="", model_name=active_options.model_name or "codexcli")
+            reason = "exception"
+
+        # Phase 2: fallback to original LLMOrchestrator
+        logger.warning(
+            f"maibot_codex_fallback_to_orchestrator request_type={self.request_type} reason={reason}"
+        )
+        try:
+            result = await self._orchestrator.generate_response_with_message_async(
+                message_factory=message_factory,
+                temperature=active_options.temperature,
+                max_tokens=active_options.max_tokens,
+                model_name=active_options.model_name,
+                tools=active_options.tool_options,
+                response_format=active_options.response_format,
+                interrupt_flag=active_options.interrupt_flag,
+            )
+            self._record_cache_stats(result, prompt_text=prompt_text)
+            return result
+        except Exception as exc:
+            logger.exception(
+                f"maibot_codex_fallback_to_orchestrator orchestrator_failed "
+                f"request_type={self.request_type} error={type(exc).__name__}: {exc}"
+            )
+
+        result = LLMResponseResult(response="", model_name=active_options.model_name or "fallback")
         self._record_cache_stats(result, prompt_text=prompt_text)
         return result
 
