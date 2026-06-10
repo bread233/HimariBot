@@ -2827,6 +2827,100 @@ class EmojiConfig(ConfigBase):
     )
     """是否启用表情包过滤，只有符合该要求的表情包才会被保存"""
 
+    r18_review_enabled: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "注册前 R18 审核",
+                "en_US": "R18 review before registration",
+                "ja_JP": "登録前R18審査",
+            },
+            "advanced": True,
+            "x-widget": "switch",
+            "x-icon": "shield",
+        },
+    )
+    """表情包注册为可发送表情前是否使用 Codex Vision 进行 R18/NSFW 审核"""
+
+    r18_review_reject_unknown: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "未知结果拒绝注册",
+                "en_US": "Reject on unknown result",
+                "ja_JP": "不明な結果は拒否",
+            },
+            "advanced": True,
+            "x-widget": "switch",
+            "x-icon": "help-circle",
+        },
+    )
+    """Codex Vision 无法判断时默认拒绝注册"""
+
+    r18_review_reject_suggestive: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "性暗示内容拒绝注册",
+                "en_US": "Reject suggestive content",
+                "ja_JP": "示唆的な内容は拒否",
+            },
+            "advanced": True,
+            "x-widget": "switch",
+            "x-icon": "alert-triangle",
+        },
+    )
+    """性暗示过强内容默认拒绝注册"""
+
+    r18_review_timeout_seconds: int = Field(
+        default=60,
+        ge=5,
+        le=300,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "审核超时（秒）",
+                "en_US": "Review timeout (seconds)",
+                "ja_JP": "審査タイムアウト（秒）",
+            },
+            "advanced": True,
+            "x-widget": "input",
+            "x-icon": "clock",
+        },
+    )
+    """单次 R18 审核的最大等待时间（秒）"""
+
+    r18_review_gif_max_frames: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "GIF 最大抽帧数",
+                "en_US": "GIF max frames to extract",
+                "ja_JP": "GIF最大抽出フレーム数",
+            },
+            "advanced": True,
+            "x-widget": "input",
+            "x-icon": "film",
+        },
+    )
+    """GIF 动图审核时最多抽取的关键帧数量"""
+
+    r18_review_gif_contact_sheet: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "GIF 抽帧拼图审核",
+                "en_US": "GIF contact sheet review",
+                "ja_JP": "GIFフレーム合成審査",
+            },
+            "advanced": True,
+            "x-widget": "switch",
+            "x-icon": "columns",
+        },
+    )
+    """GIF 动图是否抽取关键帧拼成一张 contact sheet 再审核"""
+
 
 class KeywordRuleConfig(ConfigBase):
     """关键词规则配置类"""
