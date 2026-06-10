@@ -590,6 +590,7 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
         components=components,
         raw_segments=raw_segments,
         raw_event=event,
+        bot_self_id=self_id or "",
     )
     result = await handle_inbound_message(inbound)
     if not result.should_reply or not result.replies:

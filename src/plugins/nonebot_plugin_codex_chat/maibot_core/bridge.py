@@ -364,6 +364,7 @@ class MaibotInboundMessage:
     components: list[Any] | None = None
     raw_segments: list[dict[str, Any]] | None = None
     raw_event: Any | None = None
+    bot_self_id: str = ""
 
 
 @dataclass(slots=True)
@@ -444,6 +445,7 @@ async def handle_inbound_message(
         raw_message = MessageSequence([TextComponent(text=inbound.plain_text)])
     session_message.raw_message = raw_message
     session_message.processed_plain_text = inbound.plain_text
+    session_message.bot_self_id = inbound.bot_self_id
     session_message.initialized = True
 
     session = await chat_manager.get_or_create_session(
