@@ -243,6 +243,81 @@ def _resolve_timing_gate_wait_seconds(parsed_args: dict[str, Any] | None) -> int
     return max(0, seconds)
 
 
+def _extract_last_timing_gate_action_and_args(text: str) -> tuple[str | None, dict[str, Any] | None]:
+    """从下到上扫描，取最后一个 ACTION + ARGS 对。"""
+    if not text:
+        return None, None
+
+    lines = text.splitlines()
+    action: str | None = None
+    parsed_args: dict[str, Any] = {}
+
+    last_action_idx = -1
+    for i in range(len(lines) - 1, -1, -1):
+        stripped = lines[i].strip()
+        if not stripped:
+            continue
+        cleaned = stripped.strip("`").strip()
+        m = _PLANNER_ACTION_LINE_PATTERN.match(cleaned)
+        if m is not None:
+            raw_action = m.group(1).lower()
+            if raw_action in _TIMING_GATE_PROTOCOL_ACTIONS:
+                action = "no_action" if raw_action == "none" else raw_action
+                last_action_idx = i
+                break
+
+    if action is None:
+        return None, None
+
+    for j in range(last_action_idx + 1, len(lines)):
+        stripped = lines[j].strip()
+        if not stripped:
+            continue
+        cleaned = stripped.strip("`").strip()
+        m_args = _PLANNER_ARGS_LINE_PATTERN.match(cleaned)
+        if m_args is not None:
+            try:
+                decoded = json.loads(m_args.group(1))
+            except (TypeError, ValueError):
+                decoded = None
+            if isinstance(decoded, dict):
+                parsed_args = decoded
+            break
+
+    return action, parsed_args
+
+
+def _parse_timing_gate_fallback_text_action(
+    text: str,
+    available_tool_names: set[str],
+) -> tuple[str | None, dict[str, Any] | None]:
+    """从 fallback LLM 文本响应中解析 Timing Gate action/args。"""
+    if not text or not available_tool_names:
+        logger.info(f"maibot_timing_fallback_text_action_parse_failed reason=empty_input text_chars={len(text)}")
+        return None, None
+
+    action, args = _extract_last_timing_gate_action_and_args(text)
+    if action is not None and action in available_tool_names:
+        logger.info(f"maibot_timing_fallback_text_action_parsed action={action} args={args or {}}")
+        return action, args or {}
+
+    json_obj = _extract_json_from_last_line(text)
+    if json_obj is not None:
+        raw_action = json_obj.get("action") or json_obj.get("name")
+        if raw_action and isinstance(raw_action, str):
+            raw_action = raw_action.strip().lower()
+            if raw_action in available_tool_names:
+                action = "no_action" if raw_action == "none" else raw_action
+                args = json_obj.get("args") or json_obj.get("arguments") or {}
+                if not isinstance(args, dict):
+                    args = {}
+                logger.info(f"maibot_timing_fallback_text_action_parsed action={action} args={args}")
+                return action, args
+
+    logger.info(f"maibot_timing_fallback_text_action_parse_failed reason=no_valid_action text_chars={len(text)}")
+    return None, None
+
+
 def _match_any_pattern(patterns: tuple[str, ...], lowered_text: str) -> bool:
     """判断 lowered_text 是否命中 patterns 中任意一个子串正则。"""
 
