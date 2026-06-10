@@ -5,6 +5,8 @@ from typing import Any, Literal, Optional
 import asyncio
 import hashlib
 import heapq
+import io
+import json
 import random
 import re
 
@@ -924,6 +926,21 @@ class EmojiManager:
             logger.error(f"[表情包审查] 调用视觉模型审查表情包时出错: {e}")
             return False
 
+        try:
+            data = json.loads(llm_response)
+            if isinstance(data, dict) and "allow" in data:
+                allowed = bool(data["allow"])
+                if not allowed:
+                    logger.warning(
+                        "[表情包审查] 表情包内容不符合要求，拒绝注册: %s rating=%s reason=%s",
+                        target_emoji.file_name,
+                        data.get("rating", "?"),
+                        data.get("reason", ""),
+                    )
+                return allowed
+        except (json.JSONDecodeError, TypeError):
+            pass
+
         if "否" in llm_response:
             logger.warning(f"[表情包审查] 表情包内容不符合要求，拒绝注册: {target_emoji.file_name}")
             return False
@@ -1236,6 +1253,219 @@ class EmojiManager:
             # 计算该表情包与输入标签的最接近匹配度
             similarity_list.append((emoji, max(emotion_similarities)))
         return similarity_list
+
+    @staticmethod
+    def _extract_gif_contact_sheet(gif_bytes: bytes, max_frames: int = 5) -> bytes:
+        from PIL import Image as PILImage
+
+        with PILImage.open(io.BytesIO(gif_bytes)) as gif:
+            total_frames = getattr(gif, "n_frames", 1)
+            if total_frames <= 1:
+                frame = gif.convert("RGB")
+                buf = io.BytesIO()
+                frame.save(buf, format="PNG")
+                return buf.getvalue()
+
+            if max_frames <= 1:
+                positions = [0]
+            else:
+                positions = set()
+                for i in range(max_frames):
+                    idx = int(total_frames * i / (max_frames - 1))
+                    if idx < total_frames:
+                        positions.add(idx)
+                positions = sorted(positions)
+
+            frames = []
+            for idx in positions:
+                gif.seek(idx)
+                frames.append(gif.convert("RGB"))
+
+            if not frames:
+                raise ValueError("未抽到有效 GIF 帧")
+
+            target_height = 200
+            resized = []
+            for frame in frames:
+                w, h = frame.size
+                if h == 0:
+                    continue
+                new_w = max(1, int((target_height / h) * w))
+                resized.append(frame.resize((new_w, target_height), PILImage.Resampling.LANCZOS))
+
+            if not resized:
+                raise ValueError("有效帧缩放后为空")
+
+            total_w = sum(f.width for f in resized)
+            combined = PILImage.new("RGB", (total_w, target_height))
+            x = 0
+            for f in resized:
+                combined.paste(f, (x, 0))
+                x += f.width
+
+            buf = io.BytesIO()
+            combined.save(buf, format="PNG")
+            return buf.getvalue()
+
+    async def review_emoji_r18_with_codex(
+        self,
+        image_bytes: bytes | None = None,
+        image_path: str | Path | None = None,
+        mime_type: str | None = None,
+    ) -> dict:
+        from ..codex_vision_adapter import describe_image as _describe_image
+        from src.common.logger import get_logger as _get_logger
+        from src.config.config import global_config as _gc
+
+        _log = _get_logger("emoji_r18")
+        cfg = _gc.emoji
+
+        if not getattr(cfg, "r18_review_enabled", True):
+            _log.info("emoji_r18_review_skip reason=disabled")
+            return {"allow": True, "rating": "skip", "reason": "审核已关闭",
+                    "source": "codex_cli_image", "is_gif": False, "frame_count": None}
+
+        raw_bytes = b""
+        path_suffix = ""
+        if image_bytes:
+            raw_bytes = bytes(image_bytes)
+        elif image_path:
+            p = Path(image_path)
+            path_suffix = p.name
+            if not p.exists():
+                raise FileNotFoundError(f"图片文件不存在: {image_path}")
+            raw_bytes = p.read_bytes()
+        else:
+            raise ValueError("需提供 image_bytes 或 image_path")
+
+        if not raw_bytes:
+            raise ValueError("图片数据为空")
+
+        is_gif = bool(
+            (mime_type and mime_type == "image/gif")
+            or raw_bytes[:6] in (b"GIF87a", b"GIF89a")
+        )
+
+        _log.info(
+            "emoji_r18_review_start source=codex_cli_image is_gif=%s bytes=%s path_suffix=%s",
+            is_gif, len(raw_bytes), path_suffix,
+        )
+
+        final_bytes = raw_bytes
+        frame_count = None
+        max_frames = getattr(cfg, "r18_review_gif_max_frames", 5)
+        use_contact_sheet = getattr(cfg, "r18_review_gif_contact_sheet", True)
+
+        if is_gif and use_contact_sheet:
+            try:
+                from PIL import Image as PILImage
+
+                with PILImage.open(io.BytesIO(raw_bytes)) as gif_img:
+                    frame_count = getattr(gif_img, "n_frames", 1)
+                final_bytes = await asyncio.to_thread(
+                    self._extract_gif_contact_sheet, raw_bytes, max_frames,
+                )
+                _log.info("emoji_r18_gif_frames_extracted frame_count=%s", frame_count)
+                mime_type = "image/png"
+            except Exception as exc:
+                _log.warning("emoji_r18_gif_extract_failed action=reject error=%s", exc)
+                return {"allow": False, "rating": "unknown",
+                        "reason": f"GIF 抽帧失败: {exc}",
+                        "source": "codex_cli_image", "is_gif": True, "frame_count": None}
+
+        prompt_text = (
+            "这是从群聊中收集的表情包图片。"
+            + ("这是从 GIF/动画表情中抽取的关键帧拼图，请综合所有帧判断。" if is_gif else "")
+            + "\n\n请判断这张图是否适合作为群聊可发送表情包进入公共候选池。\n\n"
+            "审核标准：\n"
+            "1. 拒绝成人内容、明显色情、裸露、性暗示过强内容\n"
+            "2. 对未成年人相关可疑成人化内容必须拒绝\n"
+            "3. 对暴力血腥、仇恨、违法内容也应拒绝或 rating=unknown\n"
+            "4. 如果是 GIF contact sheet，必须综合所有关键帧判断，不要只看第一帧\n\n"
+            "不要详细描述图片内容。\n\n"
+            "只返回严格 JSON（不要输出 JSON 外任何内容）：\n"
+            '{"allow":true,"rating":"safe","reason":"普通安全表情"}\n'
+            "或\n"
+            '{"allow":false,"rating":"r18","reason":"成人内容"}\n'
+            "或\n"
+            '{"allow":false,"rating":"suggestive","reason":"性暗示过强"}\n'
+            "或\n"
+            '{"allow":false,"rating":"unknown","reason":"无法可靠判断"}'
+        )
+
+        timeout_sec = getattr(cfg, "r18_review_timeout_seconds", 60)
+
+        try:
+            result = await asyncio.wait_for(
+                _describe_image(
+                    image_bytes=final_bytes,
+                    mime_type=mime_type or "image/png",
+                    prompt=prompt_text,
+                ),
+                timeout=timeout_sec,
+            )
+        except asyncio.TimeoutError:
+            _log.warning("emoji_r18_review_error action=reject error=timeout_%ss", timeout_sec)
+            return {"allow": False, "rating": "unknown",
+                    "reason": f"审核超时 ({timeout_sec}s)",
+                    "source": "codex_cli_image", "is_gif": is_gif, "frame_count": frame_count}
+        except Exception as exc:
+            _log.warning("emoji_r18_review_error action=reject error=%s", exc)
+            return {"allow": False, "rating": "unknown",
+                    "reason": f"审核调用失败: {exc}",
+                    "source": "codex_cli_image", "is_gif": is_gif, "frame_count": frame_count}
+
+        if not result.ok:
+            _log.warning("emoji_r18_review_error action=reject error=codex_vision_failed:%s", result.error)
+            return {"allow": False, "rating": "unknown",
+                    "reason": f"Codex Vision 审核失败: {result.error}",
+                    "source": "codex_cli_image", "is_gif": is_gif, "frame_count": frame_count}
+
+        try:
+            data = json.loads(result.text)
+            if not isinstance(data, dict):
+                raise ValueError("响应不是 JSON 对象")
+            allow = bool(data.get("allow", False))
+            rating = str(data.get("rating", "unknown"))
+            reason = str(data.get("reason", ""))
+        except Exception as exc:
+            _log.warning(
+                "emoji_r18_review_error action=reject error=json_parse:%s raw=%.200s",
+                exc, result.text,
+            )
+            reject_unknown = getattr(cfg, "r18_review_reject_unknown", True)
+            return {"allow": not reject_unknown, "rating": "unknown",
+                    "reason": f"JSON 解析失败: {exc}",
+                    "source": "codex_cli_image", "is_gif": is_gif, "frame_count": frame_count}
+
+        reject_unknown = getattr(cfg, "r18_review_reject_unknown", True)
+        reject_suggestive = getattr(cfg, "r18_review_reject_suggestive", True)
+
+        if rating == "safe":
+            final_allow = True
+        elif rating == "r18":
+            final_allow = False
+        elif rating == "suggestive":
+            final_allow = not reject_suggestive
+        else:
+            final_allow = not reject_unknown
+
+        _log.info(
+            "emoji_r18_review_done allow=%s rating=%s reason=%s is_gif=%s frame_count=%s",
+            final_allow, rating, reason, is_gif, frame_count,
+        )
+
+        if not final_allow:
+            _log.info("emoji_r18_review_rejected rating=%s reason=%s", rating, reason)
+
+        return {
+            "allow": final_allow,
+            "rating": rating,
+            "reason": reason,
+            "source": "codex_cli_image",
+            "is_gif": is_gif,
+            "frame_count": frame_count,
+        }
 
 
 emoji_manager = EmojiManager()

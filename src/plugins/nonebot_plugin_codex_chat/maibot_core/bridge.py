@@ -177,6 +177,24 @@ async def _process_inbound_emojis(components: list[Any] | None) -> None:
             )
             continue
         if saved_emoji:
+            try:
+                review_result = await emoji_manager.review_emoji_r18_with_codex(
+                    image_bytes=binary_data,
+                )
+                if not review_result.get("allow", True):
+                    logger.info(
+                        "emoji_r18_review_rejected rating=%s reason=%s",
+                        review_result.get("rating", "unknown"),
+                        review_result.get("reason", ""),
+                    )
+                    continue
+            except Exception as exc:
+                logger.warning(
+                    "emoji_r18_review_error action=reject error=%s",
+                    exc,
+                )
+                continue
+
             reg_status = "failed"
             try:
                 reg_status = await emoji_manager.register_emoji_by_filename(saved_emoji.full_path)

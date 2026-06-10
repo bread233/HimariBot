@@ -338,20 +338,25 @@ class SessionMessage(MaiMessage):
         return content
 
     async def process_at_component(self, component: AtComponent) -> str:
-        # 如果已经有昵称或备注了，直接使用
-        if component.target_user_cardname:
-            return f"@{component.target_user_cardname}"
-        elif component.target_user_nickname:
-            return f"@{component.target_user_nickname}"
         from src.common.utils.system_utils import is_bot_self
         from src.config.config import global_config
 
-        if is_bot_self(self.platform, component.target_user_id):
+        # 务必在早期判断目标是否是当前bot，供下游渲染使用
+        is_bot = is_bot_self(self.platform, component.target_user_id)
+        component.target_user_is_bot = is_bot
+
+        if is_bot:
             bot_nickname = global_config.bot.nickname.strip()
             if bot_nickname:
                 component.target_user_nickname = bot_nickname
                 component.target_user_cardname = bot_nickname
                 return f"@{bot_nickname}"
+
+        # 非bot，如果已经有昵称或备注了，直接使用
+        if component.target_user_cardname:
+            return f"@{component.target_user_cardname}"
+        elif component.target_user_nickname:
+            return f"@{component.target_user_nickname}"
 
         from src.common.utils.utils_person import PersonUtils
 
