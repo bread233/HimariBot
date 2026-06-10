@@ -204,11 +204,11 @@ class BaseMaisakaReplyGenerator:
                 continue
 
             if isinstance(component, ImageComponent):
-                rendered_parts.append(component.content.strip() or "[图片，识别中.....]")
+                rendered_parts.append(component.content.strip() or "[图片:视觉识别失败，内容未知]")
                 continue
 
             if isinstance(component, EmojiComponent):
-                rendered_parts.append(component.content.strip() or "[表情包]")
+                rendered_parts.append(component.content.strip() or "[表情:视觉识别失败，内容未知]")
                 continue
 
             if isinstance(component, VoiceComponent):

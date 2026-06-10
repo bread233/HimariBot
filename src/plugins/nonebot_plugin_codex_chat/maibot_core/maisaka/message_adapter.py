@@ -102,11 +102,11 @@ def build_visible_text_from_sequence(message_sequence: MessageSequence) -> str:
             continue
 
         if isinstance(component, EmojiComponent):
-            append_visible_part(component.content.strip() or "[表情包]")
+            append_visible_part(component.content.strip() or "[表情:视觉识别失败，内容未知]")
             continue
 
         if isinstance(component, ImageComponent):
-            append_visible_part(component.content.strip() or "[图片，识别中.....]")
+            append_visible_part(component.content.strip() or "[图片:视觉识别失败，内容未知]")
             continue
 
         if isinstance(component, VoiceComponent):
