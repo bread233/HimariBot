@@ -45,11 +45,14 @@ def build_session_message_visible_text(
     speaker_name = user_info.user_cardname or user_info.user_nickname or user_info.user_id
     visible_message_id = None if message.is_notify else message.message_id
 
+    private_marker = ""
+    if not message.message_info.group_info:
+        private_marker = "[私聊:直接对我]"
     visible_sequence = MessageSequence([])
     visible_sequence.text(
         format_speaker_content(
             speaker_name,
-            "",
+            private_marker,
             message.timestamp,
             visible_message_id,
         )

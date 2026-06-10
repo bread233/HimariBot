@@ -839,6 +839,19 @@ class MaisakaHeartFlowChatting:
         if detected_mentioned:
             message.is_mentioned = True
 
+        if not getattr(self.chat_stream, 'is_group_session', True):
+            logger.info(
+                f"maibot_timing_gate_private_force_continue "
+                f"user_id={message.message_info.user_info.user_id} "
+                f"session_id={self.session_id}"
+            )
+            self._arm_force_next_timing_continue(
+                message,
+                is_at=True,
+                is_mentioned=True,
+            )
+            return
+
         should_force_reply = (
             reply_probability_boost >= 1.0
             or (message.is_at and global_config.chat.inevitable_at_reply)
