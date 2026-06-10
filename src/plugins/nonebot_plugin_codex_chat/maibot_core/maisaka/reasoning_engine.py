@@ -15,7 +15,7 @@ import traceback
 from ..chat.heart_flow.heartFC_utils import CycleDetail
 from ..chat.message_receive.message import SessionMessage
 from ..common.data_models.message_component_data_model import EmojiComponent, ImageComponent, MessageSequence, TextComponent
-from ..codex_llm_adapter import _build_timing_gate_tool_call, _parse_timing_gate_fallback_text_action
+from ..codex_llm_adapter import _build_timing_gate_tool_call, _parse_planner_fallback_text_tool_calls, _parse_timing_gate_fallback_text_action
 from ..common.logger import get_logger
 from ..common.prompt_i18n import load_prompt
 from ..config.config import global_config
@@ -693,6 +693,28 @@ class MaisakaReasoningEngine:
                             self._last_reasoning_content = reasoning_content
                             self._runtime._chat_history.append(response.raw_message)
                             tool_monitor_results = []
+
+                            if not response.tool_calls and response.content:
+                                available_planner_names = {
+                                    str(td.get("name") or "").strip()
+                                    for td in action_tool_definitions
+                                    if str(td.get("name") or "").strip()
+                                }
+                                logger.info(
+                                    f"maibot_planner_output_route source=fallback_llm format=text_tool_calls "
+                                    f"text_chars={len(response.content)}"
+                                )
+                                parsed_calls = _parse_planner_fallback_text_tool_calls(
+                                    response.content,
+                                    available_planner_names,
+                                )
+                                if parsed_calls:
+                                    logger.info(
+                                        f"maibot_planner_fallback_text_tool_parsed "
+                                        f"name={parsed_calls[0].func_name} "
+                                        f"args_keys={list(parsed_calls[0].args.keys()) if parsed_calls[0].args else []}"
+                                    )
+                                    response.tool_calls = parsed_calls
 
                             if response.tool_calls:
                                 tool_started_at = time.time()
