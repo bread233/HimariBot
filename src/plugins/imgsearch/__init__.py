@@ -1,3 +1,4 @@
+import json
 import traceback
 
 from nonebot import on_command
@@ -40,11 +41,39 @@ def _make_ascii2d_content(item: dict, thumbnail=None):
 saucenao = SauceNao(saucenao_api_key, search_proxy)
 ascii2d = Ascii2D(search_proxy)
 
+async def _get_search_images(bot: Bot, event: Event) -> list:
+    # 1. 先取当前消息里的图片：搜图 + 图片
+    images = get_message_image(event.json())
+    if images:
+        return images
+
+    # 2. 再取 reply 内联消息里的图片：回复图片 + 搜图
+    reply = getattr(event, "reply", None)
+    if reply is not None:
+        reply_message = getattr(reply, "message", None)
+        if reply_message:
+            payload = {"message": reply_message}
+            images = get_message_image(json.dumps(payload, ensure_ascii=False, default=str))
+            if images:
+                return images
+
+        # 3. 有些适配器 reply 里没有完整 message，需要用 get_msg 拉原消息
+        reply_message_id = getattr(reply, "message_id", None)
+        if reply_message_id:
+            try:
+                msg = await bot.get_msg(message_id=reply_message_id)
+                images = get_message_image(json.dumps(msg, ensure_ascii=False, default=str))
+                if images:
+                    return images
+            except Exception:
+                logger.warning(f"imgsearch: failed to fetch replied message: {traceback.format_exc()}")
+
+    return []
 
 @Search.handle()
 async def search(bot: Bot, event: Event, state: T_State):
     try:
-        images = get_message_image(event.json())
+        images = await _get_search_images(bot, event)
 
         if not have_image(images):
             await bot.send(event, "现在的搜图功能为 搜图直接跟图片 不需要at")
