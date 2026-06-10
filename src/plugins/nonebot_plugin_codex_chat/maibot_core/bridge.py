@@ -83,6 +83,54 @@ def _guess_image_mime(data: bytes) -> str | None:
     return None
 
 
+async def _orchestrator_vlm_fallback(
+    binary_data: bytes,
+    mime: str,
+) -> str | None:
+    """Codex 视觉识别失败后降级到编排器 VLM 重新识图。"""
+    import base64
+    from .llm_models.utils_model import LLMOrchestrator
+    from .common.logger import get_logger
+
+    logger = get_logger("bridge")
+    prompt = _load_bridge_inline_vision_prompt()
+
+    image_base64 = base64.b64encode(binary_data).decode("utf-8")
+    image_format = mime.split("/")[-1] if "/" in mime else "png"
+
+    logger.info(
+        "maibot_vlm_fallback_to_orchestrator mime=%s format=%s",
+        mime, image_format,
+    )
+
+    try:
+        orchestrator = LLMOrchestrator(task_name="vlm", request_type="image")
+        result = await orchestrator.generate_response_for_image(
+            prompt=prompt,
+            image_base64=image_base64,
+            image_format=image_format,
+        )
+        text = (result.response or "").strip()
+        if text:
+            logger.info(
+                "maibot_vlm_fallback_success model=%s chars=%s",
+                result.model_name,
+                len(text),
+            )
+            return text
+        logger.warning(
+            "maibot_vlm_fallback_failed error=empty_response model=%s",
+            result.model_name,
+        )
+        return None
+    except Exception as exc:
+        logger.warning(
+            "maibot_vlm_fallback_failed error=%s",
+            type(exc).__name__,
+        )
+        return None
+
+
 async def _save_inline_image_description_to_db(
     binary_hash: str,
     description: str,
@@ -299,7 +347,14 @@ async def _describe_inbound_images(components: list[Any] | None) -> None:
                 index,
                 binary_len,
             )
-            fail_count += 1
+            fallback_desc = await _orchestrator_vlm_fallback(binary_data, mime)
+            if fallback_desc is not None:
+                comp.content = f"[图片：{fallback_desc}]"
+                ok_count += 1
+                await _save_inline_image_description_to_db(comp.binary_hash, fallback_desc)
+            else:
+                comp.content = "[图片:视觉识别失败，内容未知]"
+                fail_count += 1
             continue
 
         if not result.ok:
@@ -312,7 +367,14 @@ async def _describe_inbound_images(components: list[Any] | None) -> None:
                 index,
                 binary_len,
             )
-            fail_count += 1
+            fallback_desc = await _orchestrator_vlm_fallback(binary_data, mime)
+            if fallback_desc is not None:
+                comp.content = f"[图片：{fallback_desc}]"
+                ok_count += 1
+                await _save_inline_image_description_to_db(comp.binary_hash, fallback_desc)
+            else:
+                comp.content = "[图片:视觉识别失败，内容未知]"
+                fail_count += 1
             continue
 
         text = (result.text or "").strip()
@@ -325,7 +387,14 @@ async def _describe_inbound_images(components: list[Any] | None) -> None:
                 index,
                 binary_len,
             )
-            fail_count += 1
+            fallback_desc = await _orchestrator_vlm_fallback(binary_data, mime)
+            if fallback_desc is not None:
+                comp.content = f"[图片：{fallback_desc}]"
+                ok_count += 1
+                await _save_inline_image_description_to_db(comp.binary_hash, fallback_desc)
+            else:
+                comp.content = "[图片:视觉识别失败，内容未知]"
+                fail_count += 1
             continue
 
         comp.content = f"[图片：{text}]"
