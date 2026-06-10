@@ -375,6 +375,11 @@ def _parse_planner_fallback_text_tool_calls(
                     continue
                 args = _resolve_tool_call_args(raw_call.get("arguments"))
             if _ToolCall is not None:
+                if func_name == "reply":
+                    msg_id = str((args or {}).get("msg_id") or "").strip()
+                    if not msg_id:
+                        logger.info("maibot_planner_fallback_reply_missing_msg_id name=reply")
+                        continue
                 tool_calls.append(_ToolCall(call_id=call_id, func_name=func_name, args=args))
         if tool_calls:
             return tool_calls
@@ -385,6 +390,11 @@ def _parse_planner_fallback_text_tool_calls(
     if func_name in valid_names:
         args = _resolve_tool_call_args(json_obj.get("arguments"))
         if _ToolCall is not None:
+            if func_name == "reply":
+                msg_id = str((args or {}).get("msg_id") or "").strip()
+                if not msg_id:
+                    logger.info("maibot_planner_fallback_reply_missing_msg_id name=reply")
+                    return None
             return [_ToolCall(call_id=f"planner_fb_{uuid.uuid4().hex[:12]}", func_name=func_name, args=args)]
 
     logger.info("maibot_planner_fallback_text_tool_parse_failed reason=no_valid_tool")
