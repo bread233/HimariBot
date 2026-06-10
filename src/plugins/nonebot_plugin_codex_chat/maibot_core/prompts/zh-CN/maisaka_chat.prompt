@@ -34,7 +34,7 @@ reply, finish, view_complex_message, query_jargon, query_memory, query_person_pr
 工具调用示例：
 
 回复：
-{{"content":"用户在打招呼，应该回复","tool_calls":[{{"id":"call_001","type":"function","function":{{"name":"reply","arguments":"{{}}"}}}}]}}
+{{"content":"用户在打招呼，应该回复","tool_calls":[{{"id":"call_001","type":"function","function":{{"name":"reply","arguments":"{{\\"msg_id\\":\\"853648781\\"}}"}}}}]}}
 
 发送表情：
 {{"content":"用户发了搞笑内容","tool_calls":[{{"id":"call_002","type":"function","function":{{"name":"send_emoji","arguments":"{{\\"emotion\\":\\"开心\\"}}"}}}}]}}
@@ -46,7 +46,7 @@ reply, finish, view_complex_message, query_jargon, query_memory, query_person_pr
 {{"content":"用户提到之前的事，需要查记忆","tool_calls":[{{"id":"call_003","type":"function","function":{{"name":"query_memory","arguments":"{{\\"query\\":\\"用户之前说的旅行计划\\"}}"}}}}]}}
 
 # 工具规则
-- reply：当你判断应该发出可见文字回复时使用。系统会自动补目标消息 msg_id。
+- reply：当你判断应该发出可见文字回复时使用。必须从历史消息的 msg_id 中选择一个有效 msg_id 作为参数。缺少 msg_id 的 reply 会被拒绝。
 - finish：当前任务完成，结束本轮内部思考。
 - none：当前不调用任何工具，继续观察或等待。
 - view_complex_message：需要查看复杂消息详情时使用。系统会自动补目标消息 msg_id。
@@ -68,7 +68,7 @@ reply, finish, view_complex_message, query_jargon, query_memory, query_person_pr
 
 不要输出 no_reply 或 no_action 作为工具名。
 JSON 不要写在代码块里。
-arguments 不需要参数时写 {{}}。
+arguments 不需要参数时写 {{}}，但 reply 必须提供有效的 msg_id。如果没有可回复的 msg_id，使用 no_action。
 
 如果你无法稳定输出 JSON，可退回旧格式（最后两行输出 ACTION: <工具名> 和 ARGS: {{}}）。
 
