@@ -15,6 +15,7 @@ import traceback
 from ..chat.heart_flow.heartFC_utils import CycleDetail
 from ..chat.message_receive.message import SessionMessage
 from ..common.data_models.message_component_data_model import EmojiComponent, ImageComponent, MessageSequence, TextComponent
+from ..codex_llm_adapter import _build_timing_gate_tool_call, _parse_timing_gate_fallback_text_action
 from ..common.logger import get_logger
 from ..common.prompt_i18n import load_prompt
 from ..config.config import global_config
@@ -302,6 +303,24 @@ class MaisakaReasoningEngine:
                 system_prompt=self._build_timing_gate_system_prompt(),
                 tool_definitions=timing_tool_definitions,
             )
+            if response.tool_calls:
+                logger.info(
+                    f"maibot_timing_output_route source=codex format=tool_call "
+                    f"n={len(response.tool_calls)}"
+                )
+            elif response.content:
+                logger.info(
+                    f"maibot_timing_output_route source=fallback_llm format=text_action "
+                    f"text_chars={len(response.content)}"
+                )
+                fallback_action, fallback_args = _parse_timing_gate_fallback_text_action(
+                    response.content,
+                    available_timing_tool_names,
+                )
+                if fallback_action is not None:
+                    fallback_call = _build_timing_gate_tool_call(fallback_action, fallback_args)
+                    if fallback_call is not None:
+                        response.tool_calls = [fallback_call]
             selected_tool_call = None
             for tool_call in response.tool_calls:
                 if tool_call.func_name in available_timing_tool_names:
