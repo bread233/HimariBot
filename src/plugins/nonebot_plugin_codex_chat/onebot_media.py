@@ -389,6 +389,7 @@ async def convert_onebot_segments_to_maibot_components(
     group_id: str | None,
     user_id: str | None,
     message_id: str,
+    self_id: str | None = None,
     download_media: bool = True,
 ) -> ConvertedMessage:
     comps = await _load_maibot_component_types()
@@ -431,6 +432,10 @@ async def convert_onebot_segments_to_maibot_components(
                 cardname = str(data.get("card") or data.get("target_user_cardname") or "").strip() or None
                 components.append(AtComponent(target_user_id=target_user_id, target_user_nickname=nickname, target_user_cardname=cardname))
                 append_plain(f"@{nickname or target_user_id}")
+                if self_id and target_user_id == self_id:
+                    LOGGER.info(f"onebot_media_at_segment kind=bot qq={target_user_id} self_id={self_id}")
+                else:
+                    LOGGER.info(f"onebot_media_at_segment kind=user qq={target_user_id}")
             else:
                 components.append(DictComponent(data=dict(_build_dict_component(segment, reason="missing_at_target")["data"])))
             continue
