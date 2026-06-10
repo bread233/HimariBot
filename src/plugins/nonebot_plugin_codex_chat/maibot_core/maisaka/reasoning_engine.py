@@ -1810,7 +1810,7 @@ class MaisakaReasoningEngine:
         if media_description:
             visible_parts.append(media_description)
         if any(isinstance(component, ImageComponent) for component in media_sequence.components):
-            visible_parts.append("[图片]")
+            visible_parts.append("[图片:视觉识别失败，内容未知]")
         return "\n".join(part for part in visible_parts if part).strip()
 
     def _append_tool_result_media_messages(self, tool_call: ToolCall, result: ToolExecutionResult) -> None:
