@@ -383,6 +383,37 @@ def _build_dict_component(segment: dict[str, Any], reason: str | None = None):
     return {"type": "dict", "data": payload}
 
 
+def _expand_forward_node_text(node_message: Any) -> str:
+    """将 forward node 的 message 字段展开为纯文本（扁平化，不递归识别）。"""
+    if isinstance(node_message, str):
+        return node_message.strip()
+    if not isinstance(node_message, (list, tuple)):
+        return ""
+
+    parts: list[str] = []
+    for seg in node_message:
+        seg = normalize_onebot_segment(seg)
+        seg_type = str(seg.get("type") or "").strip().lower()
+        seg_data = seg.get("data") if isinstance(seg.get("data"), dict) else {}
+
+        if seg_type == "text":
+            text = str(seg_data.get("text") or "").strip()
+            if text:
+                parts.append(text)
+        elif seg_type in ("image", "mface"):
+            parts.append("[图片]")
+        elif seg_type in ("emoji", "face"):
+            parts.append("[表情]")
+        elif seg_type == "forward":
+            parts.append("[嵌套合并转发]")
+        else:
+            summary = str(seg_data.get("summary") or seg_data.get("text") or "").strip()
+            if summary:
+                parts.append(summary)
+
+    return "".join(parts).strip()
+
+
 async def convert_onebot_segments_to_maibot_components(
     message: Any,
     *,
@@ -390,6 +421,7 @@ async def convert_onebot_segments_to_maibot_components(
     user_id: str | None,
     message_id: str,
     self_id: str | None = None,
+    bot: Any | None = None,
     download_media: bool = True,
 ) -> ConvertedMessage:
     comps = await _load_maibot_component_types()
@@ -517,6 +549,67 @@ async def convert_onebot_segments_to_maibot_components(
         if seg_type == "face":
             components.append(DictComponent(data=dict(_build_dict_component(segment, reason="face_not_mapped")["data"])))
             append_plain("[表情]")
+            continue
+
+        if seg_type == "forward":
+            forward_id = str(data.get("id") or data.get("forward_id") or "").strip()
+            if not forward_id:
+                components.append(DictComponent(data=dict(_build_dict_component(segment, reason="forward_missing_id")["data"])))
+                append_plain("[合并转发消息: 缺少 id]")
+                continue
+
+            if bot is None:
+                components.append(DictComponent(data=dict(_build_dict_component(segment, reason="forward_no_bot")["data"])))
+                append_plain(f"[合并转发消息: 未展开 id={forward_id}]")
+                continue
+
+            try:
+                forward_data = await bot.call_api("get_forward_msg", id=forward_id)
+            except Exception as exc:
+                LOGGER.warning(
+                    "onebot_media_forward_expand_failed id=%s error=%r",
+                    forward_id, exc,
+                )
+                components.append(DictComponent(data=dict(_build_dict_component(segment, reason=f"forward_expand_error:{exc}")["data"])))
+                append_plain(f"[合并转发消息: 展开失败 id={forward_id}]")
+                continue
+
+            messages = (
+                forward_data.get("messages")
+                or forward_data.get("nodes")
+                or (forward_data.get("data") or {}).get("messages")
+                or (forward_data.get("data") or {}).get("nodes")
+                or []
+            )
+            if not isinstance(messages, (list, tuple)):
+                messages = []
+
+            lines: list[str] = []
+            for node in messages:
+                if not isinstance(node, dict):
+                    continue
+                sender = node.get("sender") or {}
+                sender_name = (
+                    str(sender.get("nickname") or sender.get("card") or sender.get("user_id") or "未知用户")
+                    if isinstance(sender, dict)
+                    else "未知用户"
+                )
+                node_msg = node.get("message") or node.get("content") or node.get("messages") or ""
+                node_text = _expand_forward_node_text(node_msg)
+                if node_text:
+                    lines.append(f"【{sender_name}】: {node_text}")
+
+            if lines:
+                forward_text = "【合并转发消息:\n" + "\n".join(lines) + "\n】"
+            else:
+                forward_text = f"[合并转发消息: 空 id={forward_id}]"
+
+            components.append(DictComponent(data=dict(_build_dict_component(segment, reason="forward_expanded")["data"])))
+            append_plain(forward_text)
+            LOGGER.info(
+                "onebot_media_forward_expand_done id=%s nodes=%s text_len=%s",
+                forward_id, len(messages), len(forward_text),
+            )
             continue
 
         components.append(DictComponent(data=dict(_build_dict_component(segment, reason="unknown_segment")["data"])))
