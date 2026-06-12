@@ -561,6 +561,7 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
             user_id=str(getattr(event, "user_id", "") or "").strip() or None,
             message_id=str(getattr(event, "message_id", "") or "").strip() or f"codex_chat_{getattr(event, 'message_id', '')}",
             self_id=str(getattr(bot, "self_id", "") or "").strip() or None,
+            bot=bot,
             download_media=True,
         )
     except Exception as exc:
