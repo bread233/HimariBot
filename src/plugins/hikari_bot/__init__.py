@@ -10,7 +10,7 @@ import httpx
 from hikari_core import callback_hikari, init_hikari, set_hikari_config
 from hikari_core.data_source import __version__
 from hikari_core.game.help import check_version
-from hikari_core.model import Hikari_Model
+from hikari_core.model import Hikari_Model, UserInfo_Model
 from hikari_core.moudle.wws_real_game import get_diff_ship
 from nonebot import get_driver, on_command, on_fullmatch, on_message, require
 from nonebot.adapters.onebot.v11 import (
@@ -234,7 +234,8 @@ async def OCR_listen(bot: Bot, ev: MessageEvent):
                 searchtag = re.sub(r'^(/?)wws', '', ocr_text)  # 删除wws和/wws
                 is_send = await main(bot, ev, searchtag)
                 if is_send:
-                    await upload_OcrResult(ocr_text, filename)
+                    UserModel = UserInfo_Model(Platform='QQ', PlatformId=str(ev.user_id))
+                    await upload_OcrResult(ocr_text, filename, UserModel)
     except Exception:
         logger.error(traceback.format_exc())
         return
@@ -302,7 +303,7 @@ async def update_Hikari(ev: MessageEvent, bot: Bot):
 async def startup():
     try:
         if driver.config.ocr_on:
-            await downlod_OcrResult()
+            await downlod_OcrResult(UserInfo_Model())
     except Exception:
         logger.error(traceback.format_exc())
         return
@@ -343,7 +344,7 @@ async def job_listen_battle():
 
 scheduler.add_job(job_chech_version, 'cron', hour=12)
 scheduler.add_job(startup, 'cron', hour=4)
-scheduler.add_job(downlod_OcrResult, 'interval', minutes=10)
+scheduler.add_job(downlod_OcrResult, 'interval', minutes=10, args=[UserInfo_Model()])
 scheduler.add_job(job_listen_battle, 'interval', minutes=driver.config.battle_listen_time)
 
 
