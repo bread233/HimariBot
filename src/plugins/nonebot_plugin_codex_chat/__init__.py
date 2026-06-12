@@ -554,7 +554,12 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
     try:
         from .onebot_media import convert_onebot_segments_to_maibot_components
 
-        raw_message = getattr(message, "message", None) or message
+        raw_message = (
+            getattr(event, "original_message", None)
+            or getattr(event, "message", None)
+            or getattr(message, "message", None)
+            or message
+        )
         converted = await convert_onebot_segments_to_maibot_components(
             raw_message,
             group_id=str(getattr(event, "group_id", "") or "").strip() or None,
