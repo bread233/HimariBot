@@ -8,10 +8,10 @@
 5. 不要详细描述图片内容
 
 只返回严格 JSON（不要输出 JSON 外任何内容）：
-{"allow":true,"rating":"safe","reason":"普通安全表情"}
+{{"allow":true,"rating":"safe","reason":"普通安全表情"}}
 或
-{"allow":false,"rating":"r18","reason":"成人内容"}
+{{"allow":false,"rating":"r18","reason":"成人内容"}}
 或
-{"allow":false,"rating":"suggestive","reason":"性暗示过强"}
+{{"allow":false,"rating":"suggestive","reason":"性暗示过强"}}
 或
-{"allow":false,"rating":"unknown","reason":"无法可靠判断"}
+{{"allow":false,"rating":"unknown","reason":"无法可靠判断"}}

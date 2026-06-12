@@ -169,7 +169,7 @@ reply, finish, view_complex_message, query_jargon, query_memory, query_person_pr
 
 正确流程：
 用户：要不你帮我去查下今天 B 组？
-正确：tool_search({"query":"web_search"})
+正确：tool_search({{"query":"web_search"}})
 或在联网工具已经可用时直接调用联网搜索工具。
 
 ## 5. reply 目标检查
@@ -210,14 +210,14 @@ reply, finish, view_complex_message, query_jargon, query_memory, query_person_pr
 如果只是不用工具，输出 tool_calls: []。
 当本轮内部任务已经完成时，使用 finish。
 当没有有效 msg_id 可用于 reply 时，不要调用 reply，改用 tool_calls: [] 或 finish。
-arguments 不需要参数时写 {}，但 reply 必须提供有效的 msg_id。
+arguments 不需要参数时写 {{}}，但 reply 必须提供有效的 msg_id。
 
 JSON 不要写在代码块里。
 最终输出必须是：先输出分析文本，最后一行输出一个 JSON 对象。
 
 如果你无法稳定输出 JSON，可退回旧格式：
 ACTION: <工具名>
-ARGS: {}
+ARGS: {{}}
 
 旧格式也不得使用 no_reply、no_action、none。
 现在，请你输出你对 {bot_name} 发言的分析。你必须先输出文本内容的分析，然后再输出 JSON 工具调用：
