@@ -35,6 +35,7 @@ async def ask_codex(config, prompt: str, image_paths: list[str] | None = None) -
             "-i",
             config.codex_chat_docker_container,
             "codex",
+            "--search",
             "exec",
             "-m",
             config.codex_chat_model,
