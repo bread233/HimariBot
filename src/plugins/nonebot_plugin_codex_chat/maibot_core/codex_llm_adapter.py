@@ -729,10 +729,21 @@ def _normalize_planner_output(text: str, *, extra: dict | None) -> list[Any]:
         return []
 
     anchor_message_id = ""
+    latest_at_bot_msg_id = ""
     if isinstance(extra, dict):
         raw_anchor = extra.get("anchor_message_id")
         if raw_anchor is not None:
             anchor_message_id = str(raw_anchor).strip()
+        raw_at_bot = extra.get("latest_at_current_bot_msg_id")
+        if raw_at_bot is not None:
+            latest_at_bot_msg_id = str(raw_at_bot).strip()
+    if latest_at_bot_msg_id and latest_at_bot_msg_id != anchor_message_id:
+        logger.info(
+            "maisaka_reply_anchor_corrected from=%s to=%s reason=at_current_bot_detected",
+            anchor_message_id,
+            latest_at_bot_msg_id,
+        )
+        anchor_message_id = latest_at_bot_msg_id
 
     # --- fix34k: 优先尝试 OpenAI-like tool_calls JSON ---
     json_calls = _extract_planner_tool_calls_json(text)

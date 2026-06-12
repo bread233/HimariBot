@@ -462,9 +462,20 @@ async def convert_onebot_segments_to_maibot_components(
             if target_user_id:
                 nickname = str(data.get("nickname") or data.get("target_user_nickname") or data.get("name") or "").strip() or None
                 cardname = str(data.get("card") or data.get("target_user_cardname") or "").strip() or None
-                components.append(AtComponent(target_user_id=target_user_id, target_user_nickname=nickname, target_user_cardname=cardname))
-                append_plain(f"@{nickname or target_user_id}")
-                if self_id and target_user_id == self_id:
+                target_user_is_bot = bool(self_id and target_user_id == self_id)
+                components.append(AtComponent(
+                    target_user_id=target_user_id,
+                    target_user_nickname=nickname,
+                    target_user_cardname=cardname,
+                    target_user_is_bot=target_user_is_bot,
+                ))
+                if target_user_id == "all":
+                    append_plain("[@全体成员]")
+                elif target_user_is_bot:
+                    append_plain(f"[@{target_user_id}(当前bot)]")
+                else:
+                    append_plain(f"[@{target_user_id}(不是当前bot)]")
+                if target_user_is_bot:
                     LOGGER.info(f"onebot_media_at_segment kind=bot qq={target_user_id} self_id={self_id} source=event.self_id")
                 else:
                     LOGGER.info(f"onebot_media_at_segment kind=user qq={target_user_id} self_id={self_id or ''} source=event.self_id")
