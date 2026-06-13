@@ -932,6 +932,7 @@ class MaisakaChatLoopService:
         request_kind: str = "planner",
         response_format: RespFormat | None = None,
         tool_definitions: Sequence[ToolDefinitionInput] | None = None,
+        avoid_msg_ids: set[str] | None = None,
     ) -> ChatResponse:
         """执行一轮 Maisaka 规划器请求。
 
@@ -1033,7 +1034,7 @@ class MaisakaChatLoopService:
 
         llm_chat = self._get_llm_chat_client(request_kind)
         llm_started_at = time.perf_counter()
-        latest_at_bot = self._detect_latest_at_current_bot_msg_id(chat_history)
+        latest_at_bot = self._detect_latest_at_current_bot_msg_id(chat_history, avoid_msg_ids=avoid_msg_ids)
         generation_result = await llm_chat.generate_response_with_messages(
             message_factory=message_factory,
             options=LLMGenerationOptions(
@@ -1534,11 +1535,18 @@ class MaisakaChatLoopService:
         return None
 
     @staticmethod
-    def _detect_latest_at_current_bot_msg_id(chat_history: List[LLMContextMessage]) -> Optional[str]:
+    def _detect_latest_at_current_bot_msg_id(
+        chat_history: List[LLMContextMessage],
+        *,
+        avoid_msg_ids: set[str] | None = None,
+    ) -> Optional[str]:
         """反向扫描聊天历史，返回最近一条 @当前 bot 的用户消息 ID。
 
         优先于 ``_extract_anchor_message_id``：如果用户最新输入中 @了当前 bot，
         则 reply 应当回复这条 @消息而非上一条普通消息。
+
+        Args:
+            avoid_msg_ids: 如果提供，跳过这些 msg_id 对应的 @消息（用于避免已回复的锚点被重复修正）。
         """
 
         for context_message in reversed(chat_history or []):
@@ -1548,6 +1556,8 @@ class MaisakaChatLoopService:
                 continue
             msg_id = getattr(context_message, "message_id", None)
             if not msg_id or not isinstance(msg_id, str) or not msg_id.strip():
+                continue
+            if avoid_msg_ids and msg_id.strip() in avoid_msg_ids:
                 continue
             bot_self_id = getattr(context_message.original_message, 'bot_self_id', '') if context_message.original_message else ''
             if not bot_self_id:

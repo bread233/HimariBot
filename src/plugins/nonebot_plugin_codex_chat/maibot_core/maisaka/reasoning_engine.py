@@ -127,6 +127,7 @@ class MaisakaReasoningEngine:
                 self._runtime._chat_history,
                 injected_user_messages=injected_user_messages,
                 tool_definitions=tool_definitions,
+                avoid_msg_ids=self._runtime._answered_msg_ids,
             )
         except ReqAbortException:
             interrupted = True
@@ -2090,6 +2091,25 @@ class MaisakaReasoningEngine:
             )
             tool_started_at = time.time()
             is_unexpanded_tool = not self._runtime.is_action_tool_currently_available(invocation.tool_name)
+            VISIBLE_TOOL_NAMES = {"reply", "send_image", "send_emoji"}
+
+            if invocation.tool_name in VISIBLE_TOOL_NAMES:
+                target_msg_id = str(invocation.arguments.get("msg_id") or "").strip()
+                if target_msg_id and target_msg_id in self._runtime._answered_msg_ids:
+                    logger.info(
+                        f"{self._runtime.log_prefix} maibot_duplicate_reply_intercepted "
+                        f"anchor_msg_id={target_msg_id}"
+                    )
+                    if (
+                        self._runtime._force_next_timing_continue
+                        and self._runtime._force_next_timing_message_id == target_msg_id
+                    ):
+                        logger.info(
+                            f"{self._runtime.log_prefix} maibot_force_continue_answered "
+                            f"trigger_msg_id={target_msg_id}"
+                        )
+                    self._remove_tool_call_from_history(tool_call)
+                    return True, "finish", tool_result_summaries, tool_monitor_results
 
             if invocation.tool_name == "ocr_image":
                 target_msg_id = invocation.arguments.get("message_id", "")
@@ -2119,6 +2139,8 @@ class MaisakaReasoningEngine:
                                     reply_result = await self._runtime._tool_registry.invoke(
                                         reply_invocation, execution_context
                                     )
+                                    if reply_result.success:
+                                        self._runtime._answered_msg_ids.add(guard_msg_id)
                                     self._append_tool_execution_result(reply_tool_call, reply_result)
                                     tool_result_summaries.append(
                                         self._build_tool_result_summary(reply_tool_call, reply_result)
@@ -2179,6 +2201,11 @@ class MaisakaReasoningEngine:
             if not result.success and tool_call.func_name == "reply":
                 logger.warning(f"{self._runtime.log_prefix} 回复工具未生成可见消息，将继续下一轮循环")
 
+            if result.success and invocation.tool_name in VISIBLE_TOOL_NAMES:
+                answered_target = str(invocation.arguments.get("msg_id") or "").strip()
+                if answered_target:
+                    self._runtime._answered_msg_ids.add(answered_target)
+
             if bool(result.metadata.get("pause_execution", False)):
                 if invocation.tool_name == "finish":
                     guard_msg_id = self._check_ocr_finish_guard_conditions(
@@ -2200,6 +2227,8 @@ class MaisakaReasoningEngine:
                         reply_result = await self._runtime._tool_registry.invoke(
                             reply_invocation, execution_context
                         )
+                        if reply_result.success:
+                            self._runtime._answered_msg_ids.add(guard_msg_id)
                         self._append_tool_execution_result(reply_tool_call, reply_result)
                         tool_result_summaries.append(
                             self._build_tool_result_summary(reply_tool_call, reply_result)
