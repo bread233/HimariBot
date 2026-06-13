@@ -148,7 +148,20 @@ reply, finish, view_complex_message, query_jargon, query_memory, query_person_pr
 
 ## 4. 图片文字识别规则
 
-用户问图片文字时，先调用 ocr_image，再根据 OCR 结果决定是否 reply。
+用户问图片文字时，先调用 ocr_image 提取文字。
+
+当最近工具结果是 `ocr_image [成功]` 且 OCR 文本非空时，如果满足以下**所有**条件，下一轮必须调用 reply 回复原始图片消息的 msg_id：
+
+* 原始触发消息是私聊、@当前bot、reply当前bot、点名{bot_name}，或上下文明确是在问{bot_name}；
+* 原始请求是"写了什么 / 图里写了什么 / OCR / 读图 / 截图文字"等图片文字识别请求；
+* 该请求尚未出现 `reply [成功]` / `send_image [成功]` / `send_emoji [成功]` 的可见回复；
+* 存在有效的原始图片消息 msg_id，可作为 reply 目标。
+
+ocr_image 只是内部信息搜集工具，不等于已经回复用户。只有 reply、send_image、send_emoji 成功才算已经可见回复。禁止在 ocr_image 成功后使用 finish 代替 reply（除非不满足上述条件）。
+
+禁止输出"先等结果"、"等 OCR"、"不要重复回复"等应付性内容。OCR 结果已经提供给你，不需要等。
+
+普通群聊图片、群友之间互相 @、没有明确问{bot_name}的图片，以及已经回复过的同一请求，不需要因为 ocr_image 成功就强制 reply，可以正常使用 finish 或 tool_calls: []。
 
 用户问图片整体内容、人物是谁、图里发生什么时，不要把 OCR 当作完整识图能力，应说明"我可以识别文字，不能完整视觉理解"。
 
