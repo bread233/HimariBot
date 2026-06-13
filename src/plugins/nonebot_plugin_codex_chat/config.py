@@ -38,6 +38,8 @@ class ConfigModel(BaseModel):
     codex_chat_searxng_timeout: int = Field(default=8)
     codex_chat_web_search_max_results: int = Field(default=5)
     codex_chat_web_search_fallback_codexcli: bool = Field(default=True)
+    codex_chat_ocr_url: str = Field(default="")
+    codex_chat_ocr_timeout: int = Field(default=30)
 
     class Config:
         extra = "ignore"
