@@ -2090,6 +2090,71 @@ class MaisakaReasoningEngine:
             )
             tool_started_at = time.time()
             is_unexpanded_tool = not self._runtime.is_action_tool_currently_available(invocation.tool_name)
+
+            if invocation.tool_name == "ocr_image":
+                target_msg_id = invocation.arguments.get("message_id", "")
+                if target_msg_id:
+                    for msg in self._runtime._chat_history:
+                        if isinstance(msg, ToolResultMessage) and msg.tool_name == "ocr_image" and msg.success:
+                            text = msg.content.strip()
+                            if text and text != "OCR 未识别到文字。":
+                                logger.info(
+                                    f"{self._runtime.log_prefix} maibot_ocr_duplicate_intercepted "
+                                    f"message_id={target_msg_id}"
+                                )
+                                guard_msg_id = self._check_ocr_finish_guard_conditions(
+                                    self._runtime._chat_history, anchor_message
+                                )
+                                if guard_msg_id:
+                                    logger.info(
+                                        f"{self._runtime.log_prefix} maibot_ocr_success_forced_reply "
+                                        f"message_id={guard_msg_id}"
+                                    )
+                                    reply_tool_call = ToolCall(
+                                        id=f"force_reply_{uuid.uuid4().hex[:8]}",
+                                        func_name="reply",
+                                        args={"msg_id": guard_msg_id},
+                                    )
+                                    reply_invocation = self._build_tool_invocation(reply_tool_call, latest_thought)
+                                    reply_result = await self._runtime._tool_registry.invoke(
+                                        reply_invocation, execution_context
+                                    )
+                                    self._append_tool_execution_result(reply_tool_call, reply_result)
+                                    tool_result_summaries.append(
+                                        self._build_tool_result_summary(reply_tool_call, reply_result)
+                                    )
+                                    tool_monitor_results.append(
+                                        self._build_tool_monitor_result(
+                                            reply_tool_call,
+                                            reply_invocation,
+                                            reply_result,
+                                            tool_duration_ms=0.0,
+                                            tool_spec=tool_spec_map.get("reply"),
+                                        )
+                                    )
+                                    if bool(reply_result.metadata.get("pause_execution", False)):
+                                        return True, invocation.tool_name, tool_result_summaries, tool_monitor_results
+                                else:
+                                    dup_result = ToolExecutionResult(
+                                        tool_name="ocr_image",
+                                        success=False,
+                                        error_message="该图片已在上一轮完成文字识别，请直接回复或结束。",
+                                    )
+                                    self._append_tool_execution_result(tool_call, dup_result)
+                                    tool_result_summaries.append(
+                                        self._build_tool_result_summary(tool_call, dup_result)
+                                    )
+                                    tool_monitor_results.append(
+                                        self._build_tool_monitor_result(
+                                            tool_call,
+                                            invocation,
+                                            dup_result,
+                                            tool_duration_ms=0.0,
+                                            tool_spec=tool_spec_map.get("ocr_image"),
+                                        )
+                                    )
+                                continue
+
             result = await self._runtime._tool_registry.invoke(invocation, execution_context)
             if is_unexpanded_tool and not result.success:
                 result = self._append_deferred_tool_parameter_hint(result)
