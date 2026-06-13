@@ -150,6 +150,8 @@ reply, finish, view_complex_message, query_jargon, query_memory, query_person_pr
 
 用户问图片文字时，先调用 ocr_image 提取文字。
 
+如果最近已有同一图片消息的 ocr_image [成功] 且 OCR 文本非空，不要再次调用 ocr_image，应根据 OCR 文本 reply 或结束。
+
 当最近工具结果是 `ocr_image [成功]` 且 OCR 文本非空时，如果满足以下**所有**条件，下一轮必须调用 reply 回复原始图片消息的 msg_id：
 
 * 原始触发消息是私聊、@当前bot、reply当前bot、点名{bot_name}，或上下文明确是在问{bot_name}；

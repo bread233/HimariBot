@@ -127,6 +127,7 @@ class MaisakaReasoningEngine:
                 self._runtime._chat_history,
                 injected_user_messages=injected_user_messages,
                 tool_definitions=tool_definitions,
+                avoid_msg_ids=self._runtime._answered_msg_ids,
             )
         except ReqAbortException:
             interrupted = True
@@ -2090,6 +2091,92 @@ class MaisakaReasoningEngine:
             )
             tool_started_at = time.time()
             is_unexpanded_tool = not self._runtime.is_action_tool_currently_available(invocation.tool_name)
+            VISIBLE_TOOL_NAMES = {"reply", "send_image", "send_emoji"}
+
+            if invocation.tool_name in VISIBLE_TOOL_NAMES:
+                target_msg_id = str(invocation.arguments.get("msg_id") or "").strip()
+                if target_msg_id and target_msg_id in self._runtime._answered_msg_ids:
+                    logger.info(
+                        f"{self._runtime.log_prefix} maibot_duplicate_reply_intercepted "
+                        f"anchor_msg_id={target_msg_id}"
+                    )
+                    if (
+                        self._runtime._force_next_timing_continue
+                        and self._runtime._force_next_timing_message_id == target_msg_id
+                    ):
+                        logger.info(
+                            f"{self._runtime.log_prefix} maibot_force_continue_answered "
+                            f"trigger_msg_id={target_msg_id}"
+                        )
+                    self._remove_tool_call_from_history(tool_call)
+                    return True, "finish", tool_result_summaries, tool_monitor_results
+
+            if invocation.tool_name == "ocr_image":
+                target_msg_id = invocation.arguments.get("message_id", "")
+                if target_msg_id:
+                    for msg in self._runtime._chat_history:
+                        if isinstance(msg, ToolResultMessage) and msg.tool_name == "ocr_image" and msg.success:
+                            text = msg.content.strip()
+                            if text and text != "OCR 未识别到文字。":
+                                logger.info(
+                                    f"{self._runtime.log_prefix} maibot_ocr_duplicate_intercepted "
+                                    f"message_id={target_msg_id}"
+                                )
+                                guard_msg_id = self._check_ocr_finish_guard_conditions(
+                                    self._runtime._chat_history, anchor_message
+                                )
+                                if guard_msg_id:
+                                    logger.info(
+                                        f"{self._runtime.log_prefix} maibot_ocr_success_forced_reply "
+                                        f"message_id={guard_msg_id}"
+                                    )
+                                    reply_tool_call = ToolCall(
+                                        id=f"force_reply_{uuid.uuid4().hex[:8]}",
+                                        func_name="reply",
+                                        args={"msg_id": guard_msg_id},
+                                    )
+                                    reply_invocation = self._build_tool_invocation(reply_tool_call, latest_thought)
+                                    reply_result = await self._runtime._tool_registry.invoke(
+                                        reply_invocation, execution_context
+                                    )
+                                    if reply_result.success:
+                                        self._runtime._answered_msg_ids.add(guard_msg_id)
+                                    self._append_tool_execution_result(reply_tool_call, reply_result)
+                                    tool_result_summaries.append(
+                                        self._build_tool_result_summary(reply_tool_call, reply_result)
+                                    )
+                                    tool_monitor_results.append(
+                                        self._build_tool_monitor_result(
+                                            reply_tool_call,
+                                            reply_invocation,
+                                            reply_result,
+                                            tool_duration_ms=0.0,
+                                            tool_spec=tool_spec_map.get("reply"),
+                                        )
+                                    )
+                                    if bool(reply_result.metadata.get("pause_execution", False)):
+                                        return True, invocation.tool_name, tool_result_summaries, tool_monitor_results
+                                else:
+                                    dup_result = ToolExecutionResult(
+                                        tool_name="ocr_image",
+                                        success=False,
+                                        error_message="该图片已在上一轮完成文字识别，请直接回复或结束。",
+                                    )
+                                    self._append_tool_execution_result(tool_call, dup_result)
+                                    tool_result_summaries.append(
+                                        self._build_tool_result_summary(tool_call, dup_result)
+                                    )
+                                    tool_monitor_results.append(
+                                        self._build_tool_monitor_result(
+                                            tool_call,
+                                            invocation,
+                                            dup_result,
+                                            tool_duration_ms=0.0,
+                                            tool_spec=tool_spec_map.get("ocr_image"),
+                                        )
+                                    )
+                                continue
+
             result = await self._runtime._tool_registry.invoke(invocation, execution_context)
             if is_unexpanded_tool and not result.success:
                 result = self._append_deferred_tool_parameter_hint(result)
@@ -2114,6 +2201,11 @@ class MaisakaReasoningEngine:
             if not result.success and tool_call.func_name == "reply":
                 logger.warning(f"{self._runtime.log_prefix} 回复工具未生成可见消息，将继续下一轮循环")
 
+            if result.success and invocation.tool_name in VISIBLE_TOOL_NAMES:
+                answered_target = str(invocation.arguments.get("msg_id") or "").strip()
+                if answered_target:
+                    self._runtime._answered_msg_ids.add(answered_target)
+
             if bool(result.metadata.get("pause_execution", False)):
                 if invocation.tool_name == "finish":
                     guard_msg_id = self._check_ocr_finish_guard_conditions(
@@ -2135,6 +2227,8 @@ class MaisakaReasoningEngine:
                         reply_result = await self._runtime._tool_registry.invoke(
                             reply_invocation, execution_context
                         )
+                        if reply_result.success:
+                            self._runtime._answered_msg_ids.add(guard_msg_id)
                         self._append_tool_execution_result(reply_tool_call, reply_result)
                         tool_result_summaries.append(
                             self._build_tool_result_summary(reply_tool_call, reply_result)

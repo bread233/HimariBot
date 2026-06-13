@@ -121,6 +121,7 @@ class MaisakaHeartFlowChatting:
         self._force_next_timing_continue = False
         self._force_next_timing_message_id = ""
         self._force_next_timing_reason = ""
+        self._answered_msg_ids: set[str] = set()
         self._planner_interrupt_flag: Optional[asyncio.Event] = None
         self._planner_interrupt_requested = False
         self._planner_interrupt_consecutive_count = 0
