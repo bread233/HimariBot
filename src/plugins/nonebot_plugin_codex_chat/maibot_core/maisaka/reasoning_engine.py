@@ -715,6 +715,16 @@ class MaisakaReasoningEngine:
                                         f"args_keys={list(parsed_calls[0].args.keys()) if parsed_calls[0].args else []}"
                                     )
                                     response.tool_calls = parsed_calls
+                                else:
+                                    logger.info(
+                                        f"{self._runtime.log_prefix} Planner 输出解析失败，"
+                                        f"替换历史条目防止误判已回复"
+                                    )
+                                    response.raw_message.content = (
+                                        '[Planner 输出解析失败，未产生任何工具调用，'
+                                        '请重新输出合法 JSON。禁止说"已回复"，'
+                                        '因为上一步没有产生任何有效回复。]'
+                                    )
 
                             if response.tool_calls:
                                 tool_started_at = time.time()
