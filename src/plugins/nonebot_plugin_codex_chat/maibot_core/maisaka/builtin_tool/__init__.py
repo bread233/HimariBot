@@ -34,6 +34,8 @@ from .view_complex_message import get_tool_spec as get_view_complex_message_tool
 from .view_complex_message import handle_tool as handle_view_complex_message_tool
 from .wait import get_tool_spec as get_wait_tool_spec
 from .wait import handle_tool as handle_wait_tool
+from .ocr_image import get_tool_spec as get_ocr_image_tool_spec
+from .ocr_image import handle_tool as handle_ocr_image_tool
 from .web_search import get_tool_spec as get_web_search_tool_spec
 from .web_search import handle_tool as handle_web_search_tool
 
@@ -104,6 +106,7 @@ BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
     BuiltinToolEntry("send_emoji", get_send_emoji_tool_spec, handle_send_emoji_tool, stage="action"),
     BuiltinToolEntry("send_image", get_send_image_tool_spec, handle_send_image_tool, stage="action"),
     BuiltinToolEntry("tool_search", get_tool_search_tool_spec, handle_tool_search_tool, stage="action"),
+    BuiltinToolEntry("ocr_image", get_ocr_image_tool_spec, handle_ocr_image_tool, stage="action"),
     BuiltinToolEntry("web_search", get_web_search_tool_spec, handle_web_search_tool, stage="action"),
 ]
 
