@@ -121,7 +121,7 @@ async def handle_tool(
 
 
 async def _caption_by_file(base_url: str, image_data: bytes, timeout: int) -> dict[str, Any]:
-    endpoint = base_url.rstrip("/")
+    endpoint = base_url.strip()
 
     logger.info(f"codex_chat_vision_caption_request mode=file endpoint={endpoint}")
     started = time.perf_counter()
