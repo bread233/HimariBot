@@ -3942,7 +3942,7 @@ def game_api_shop_buy():
 
     payload = request.get_json(silent=True) or {}
     item_id_raw = payload.get('item_id')
-    quantity_raw = payload.get('quantity')
+    quantity_raw = payload.get('quantity', 1)
 
     if not isinstance(item_id_raw, int):
         return _err("item_id 必须是整数")
@@ -3969,7 +3969,8 @@ def game_api_shop_buy():
         return _err("未找到角色信息")
     current_stone = int((user_rows[0] or {}).get("stone") or 0)
     if current_stone < total_cost:
-        return _err(f"灵石不足，需要 {total_cost}")
+        max_qty = current_stone // price
+        return _err(f"灵石不足！需要 {total_cost} 灵石，当前持有 {current_stone} 灵石，最多可购买 {max_qty} 个")
 
     deduct_res = execute_sql(
         DATABASE,

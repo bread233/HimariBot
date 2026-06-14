@@ -2722,7 +2722,7 @@
 
                     <div id="tab-shop" class="tab-pane">
                         <h3 class="panel-title">仙坊商店 <span class="badge">单价 1000 灵石</span></h3>
-                        <p class="notice">当前仅支持单次购买 1 个道具。</p>
+                        <p class="notice">输入购买数量后可批量购买，单次最多 99 个。</p>
                         <div class="item-list" id="shop-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:10px;">
                             <div class="item-card"><div class="item-name">加载中...</div></div>
                         </div>
@@ -3563,6 +3563,47 @@
             renderImpartPkStatus();
         }
 
+        /* 商店数量辅助函数 */
+        function normalizeShopQuantity(input, max) {
+            let val = parseInt(input.value);
+            if (isNaN(val) || val < 1) val = 1;
+            if (val > max) val = max;
+            input.value = val;
+            updateShopTotal(input);
+            return val;
+        }
+        function updateShopTotal(input) {
+            const card = input.closest('.item-card');
+            if (!card) return;
+            const price = parseInt(card.dataset.price) || parseInt(card.dataset.cost) || 0;
+            const qty = parseInt(input.value) || 1;
+            const el = card.querySelector('.shop-total');
+            if (el) el.textContent = `总 ${number_to(price * qty)}`;
+        }
+        function setShopMaxQuantity(btn) {
+            const card = btn.closest('.item-card');
+            if (!card) return;
+            const price = parseInt(card.dataset.price) || 0;
+            const cost = parseInt(card.dataset.cost) || 0;
+            const unitPrice = price || cost;
+            const input = card.querySelector('.shop-qty-input');
+            if (!input || !unitPrice) return;
+            let max = 99;
+            if (price > 0) {
+                const stone = Number((state.profile || {}).stone || 0);
+                max = Math.min(Math.floor(stone / price) || 0, 99);
+            }
+            if (cost > 0) {
+                const shop = state.worldBossShop || {};
+                const integral = Number(shop.boss_integral || 0);
+                max = Math.min(Math.floor(integral / cost) || 0, 99);
+                const weeklyLeft = parseInt(card.dataset.weeklyLeft);
+                if (weeklyLeft > 0 && weeklyLeft < max) max = weeklyLeft;
+            }
+            input.value = Math.max(max, 1);
+            updateShopTotal(input);
+        }
+
         function renderShop() {
             const list = $('shop-list');
             const goods = state.shop || [];
@@ -3571,15 +3612,24 @@
                 list.innerHTML = `<div class="item-card"><div class="item-name">暂无可购买商品</div></div>`;
                 return;
             }
-            list.innerHTML = goods.map(item => `
-                <div class="item-card">
-                    <div class="item-name" title="${item.name}">${item.name}</div>
-                    <div class="item-meta">${item.type} · ${item.level}</div>
-                    <div class="item-meta">${item.desc || '暂无描述'}</div>
-                    <div class="item-count"><span>价格</span><b>${number_to(item.price || 1000)} 灵石</b></div>
-                    <button class="btn" onclick="buyShopItem(${item.id}, this)">购买</button>
-                </div>
-            `).join('');
+            const stone = Number((state.profile || {}).stone || 0);
+            list.innerHTML = goods.map(item => {
+                const price = item.price || 1000;
+                return `
+                    <div class="item-card" data-price="${price}">
+                        <div class="item-name" title="${item.name}">${item.name}</div>
+                        <div class="item-meta">${item.type} · ${item.level}</div>
+                        <div class="item-meta">${item.desc || '暂无描述'}</div>
+                        <div class="item-count"><span>单价</span><b>${number_to(price)} 灵石</b></div>
+                        <div class="shop-qty-row" style="display:flex;align-items:center;gap:4px;margin:6px 0;">
+                            <input class="shop-qty-input" type="number" value="1" min="1" max="99" style="width:50px;padding:2px 4px;text-align:center;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--text);" oninput="updateShopTotal(this)">
+                            <button style="font-size:11px;padding:2px 8px;border-radius:8px;border:0;cursor:pointer;color:#2b1500;font-weight:700;background:var(--gold);" onclick="setShopMaxQuantity(this)" title="最大可购买数量">最大</button>
+                            <span class="shop-total" style="font-size:12px;color:var(--gold);">总 ${number_to(price)}</span>
+                        </div>
+                        <button class="btn" onclick="buyShopItem(${item.id}, this)">购买</button>
+                    </div>
+                `;
+            }).join('');
         }
 
         function renderWorldBossShop() {
@@ -3612,16 +3662,24 @@
                 const limitText = weeklyLimit > 0
                     ? `本周 ${weeklyPurchased}/${weeklyLimit}，剩余 ${weeklyLeft}`
                     : '本周不限购';
-                const disabledText = canExchange ? '' : 'disabled';
+                const btnDisabled = !canExchange || (weeklyLeft <= 0 && weeklyLimit > 0);
                 const btnText = weeklyLeft <= 0 && weeklyLimit > 0 ? '本周已售罄' : '兑换';
+                const inpDisabled = btnDisabled;
                 return `
-                    <div class="item-card">
+                    <div class="item-card" data-cost="${cost}" data-weekly-left="${weeklyLeft}">
                         <div class="item-name" title="${item.name || ''}">${item.name || '未知商品'}</div>
                         <div class="item-meta">${item.type || '未知'} · ${item.level || '凡品'}</div>
                         <div class="item-meta">${item.desc || '暂无描述'}</div>
                         <div class="item-count"><span>消耗</span><b>${number_to(cost)} 世界积分</b></div>
                         <div class="item-meta">${limitText}</div>
-                        <button class="btn" ${disabledText} onclick="exchangeWorldBossItem(${Number(item.shop_id || 0)}, this)">${btnText}</button>
+                        ${!inpDisabled ? `
+                        <div class="shop-qty-row" style="display:flex;align-items:center;gap:4px;margin:6px 0;">
+                            <input class="shop-qty-input" type="number" value="1" min="1" max="${Math.min(99, weeklyLeft || 99)}" style="width:50px;padding:2px 4px;text-align:center;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--text);" oninput="updateShopTotal(this)">
+                            <button style="font-size:11px;padding:2px 8px;border-radius:8px;border:0;cursor:pointer;color:#2b1500;font-weight:700;background:var(--gold);" onclick="setShopMaxQuantity(this)" title="最大可兑换数量">最大</button>
+                            <span class="shop-total" style="font-size:12px;color:var(--gold);">总 ${number_to(cost)}</span>
+                        </div>
+                        ` : ''}
+                        <button class="btn" ${btnDisabled ? 'disabled' : ''} onclick="exchangeWorldBossItem(${Number(item.shop_id || 0)}, this)">${btnText}</button>
                     </div>
                 `;
             }).join('');
@@ -3705,13 +3763,16 @@
 
         async function buyShopItem(itemId, btn) {
             if (!itemId || !btn) return;
+            const card = btn.closest('.item-card');
+            const qtyInput = card ? card.querySelector('.shop-qty-input') : null;
+            const quantity = qtyInput ? normalizeShopQuantity(qtyInput, 99) : 1;
             btn.disabled = true;
             const oldText = btn.textContent;
             btn.textContent = '购买中...';
             try {
                 const data = await api('/game/api/shop/buy', {
                     method: 'POST',
-                    body: JSON.stringify({ item_id: itemId, quantity: 1 })
+                    body: JSON.stringify({ item_id: itemId, quantity })
                 });
                 toast(data.message || '购买成功');
                 await loadProfileOnly();
@@ -3727,13 +3788,16 @@
 
         async function exchangeWorldBossItem(shopId, btn) {
             if (!shopId || !btn) return;
+            const card = btn.closest('.item-card');
+            const qtyInput = card ? card.querySelector('.shop-qty-input') : null;
+            const quantity = qtyInput ? normalizeShopQuantity(qtyInput, 99) : 1;
             btn.disabled = true;
             const oldText = btn.textContent;
             btn.textContent = '兑换中...';
             try {
                 const data = await api('/game/api/world-boss/exchange', {
                     method: 'POST',
-                    body: JSON.stringify({ shop_id: shopId, quantity: 1 })
+                    body: JSON.stringify({ shop_id: shopId, quantity })
                 });
                 toast(data.message || '兑换成功');
                 state.worldBossShop = data.shop || state.worldBossShop;
