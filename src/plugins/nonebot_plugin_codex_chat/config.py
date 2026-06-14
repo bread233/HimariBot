@@ -40,6 +40,10 @@ class ConfigModel(BaseModel):
     codex_chat_web_search_fallback_codexcli: bool = Field(default=True)
     codex_chat_ocr_url: str = Field(default="")
     codex_chat_ocr_timeout: int = Field(default=30)
+    codex_chat_vision_caption_url: str = Field(default="http://vision-caption:23339/DESCRIBE/")
+    codex_chat_vision_caption_timeout: int = Field(default=60)
+    codex_chat_vision_caption_enabled: bool = Field(default=True)
+    codex_chat_vision_caption_fallback_codex: bool = Field(default=False)
 
     class Config:
         extra = "ignore"
