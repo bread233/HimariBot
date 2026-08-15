@@ -1,14 +1,15 @@
 import re
 from typing import List, Union
 from aiohttp import ClientSession
-from nonebot import on_regex, logger, require
+from nonebot import on_regex, logger
 from nonebot.adapters import Event
+from nonebot.adapters.onebot.v11 import Message, MessageSegment
 from nonebot.rule import Rule
 from nonebot.plugin import PluginMetadata
 from .analysis_bilibili import config, b23_extract, bili_keyword, search_bili_by_title
 
-require("nonebot_plugin_saa")
-from nonebot_plugin_saa import MessageFactory, MessageSegmentFactory, Text, Image  # noqa: E402
+
+
 
 __plugin_meta__ = PluginMetadata(
     name="analysis_bilibili",
@@ -88,15 +89,15 @@ def format_msg(msg_list: List[Union[List[str], str]], is_plain_text: bool = Fals
     if is_plain_text:
         return "".join([i for i in flatten_msg_list if not is_image(i)])
 
-    msg: List[MessageSegmentFactory] = []
+    msg = Message()
 
     for i in flatten_msg_list:
         if not i:
             continue
         elif is_image(i):
-            msg.append(Image(i))
+            msg.append(MessageSegment.image(i))
         else:
-            msg.append(Text(i))
+            msg.append(MessageSegment.text(i))
     return msg
 
 
@@ -108,7 +109,7 @@ async def send_msg(msg_list: List[Union[List[str], str, bool]],text) -> None:
         return
 
     try:
-        await MessageFactory(format_msg(msg_list)).send()
+        await analysis_bili.send(format_msg(msg_list))
     except RuntimeError:
         await analysis_bili.send(format_msg(msg_list, is_plain_text=True))
     except Exception as e:
