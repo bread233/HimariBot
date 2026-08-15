@@ -253,7 +253,7 @@ encourage_command = on_command("加油", aliases={"鼓励", "fighting", "冲鸭"
 crazy_thursday = on_command("疯狂星期四", aliases={"周四", "肯德基", "KFC", "礼拜四"}, priority=30, block=True)
 funny_story = on_command("讲个段子", aliases={"段子", "来段搞笑的", "趣事", "幽默"}, priority=30, block=True)
 love_sentence = on_command("土味情话", aliases={"情话", "土味", "表白", "说情话"}, priority=30, block=True)
-fortune_command = on_command("今日运势", aliases={"运势", "占卜", "算命", "卜卦", "求签"}, priority=30, block=True)
+fortune_command = on_command("今日运势", aliases={"运势", "算命", "卜卦", "求签"}, priority=30, block=True)
 licking_dog_diary = on_command("舔狗日记", aliases={"舔狗", "舔日记", "今日舔狗"}, priority=30, block=True)
 what_to_eat = on_command("今天吃什么", aliases={"吃什么", "吃啥", "推荐美食", "美食推荐"}, priority=30, block=True)
 give_exp_command = on_command("给点修为", aliases={"赏点修为", "施舍点修为", "求点修为"}, priority=30, block=True)

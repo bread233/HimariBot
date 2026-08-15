@@ -407,7 +407,7 @@ async def handle(bot: Bot, event: MessageEvent, state: T_State):
 
 
 help = on_command(
-    "帮助",
+    "Hanayori帮助",
     rule=to_me(),
     priority=5,
     permission=GROUP_ADMIN | GROUP_OWNER | PRIVATE_FRIEND | SUPERUSER,

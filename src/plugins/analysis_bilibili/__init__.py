@@ -8,9 +8,6 @@ from nonebot.rule import Rule
 from nonebot.plugin import PluginMetadata
 from .analysis_bilibili import config, b23_extract, bili_keyword, search_bili_by_title
 
-
-
-
 __plugin_meta__ = PluginMetadata(
     name="analysis_bilibili",
     description="自动解析bilibili链接内容",
@@ -94,14 +91,14 @@ def format_msg(msg_list: List[Union[List[str], str]], is_plain_text: bool = Fals
     for i in flatten_msg_list:
         if not i:
             continue
-        elif is_image(i):
+        if is_image(i):
             msg.append(MessageSegment.image(i))
         else:
             msg.append(MessageSegment.text(i))
     return msg
 
 
-async def send_msg(msg_list: List[Union[List[str], str, bool]],text) -> None:
+async def send_msg(msg_list: List[Union[List[str], str, bool]], text) -> None:
     if msg_list is False:
         return
     if msg_list is None:
@@ -131,21 +128,17 @@ async def get_msg(event: Event, text: str, search: bool = False) -> Union[List[s
     async with ClientSession(trust_env=trust_env, headers=headers) as session:
         if search:
             text = await search_bili_by_title(text, session=session)
-        else:
-            if re.search(r"(b23.tv)|(bili(22|23|33|2233).cn)", text, re.I):
-                # 提前处理短链接，避免解析到其他的
-                text = await b23_extract(text, session=session)
+        elif re.search(r"(b23.tv)|(bili(22|23|33|2233).cn)", text, re.I):
+            text = await b23_extract(text, session=session)
 
         msg = await bili_keyword(group_id, text, session=session)
 
     if msg:
         if isinstance(msg, str):
-            # 说明是错误信息
             await analysis_bili.finish(msg)
 
-        if group_id in desc_blacklist:
-            if msg[-1].startswith("简介"):
-                msg[-1] = ""
+        if group_id in desc_blacklist and msg[-1].startswith("简介"):
+            msg[-1] = ""
 
     return msg
 
@@ -154,29 +147,11 @@ async def get_msg(event: Event, text: str, search: bool = False) -> Union[List[s
 async def handle_analysis(event: Event) -> None:
     text = str(event.message).strip()
     msg = await get_msg(event, text)
-
-    try:
-        from src.plugins.nonebot_plugin_codex_chat.context_extractors import (
-            put_bilibili_context,
-            _flatten_bili_msg,
-            _unique_join,
-        )
-
-        group_id = int(getattr(event, "group_id", 0) or 0)
-        message_id = int(getattr(event, "message_id", 0) or 0)
-        lines = _flatten_bili_msg(msg)
-        context_text = _unique_join(lines, 1200)
-
-        if group_id and message_id and context_text:
-            put_bilibili_context(group_id, message_id, context_text)
-    except Exception:
-        logger.warning("analysis_bilibili codex_context_cache failed", exc_info=True)
-
-    await send_msg(msg,text)
+    await send_msg(msg, text)
 
 
 @search_bili.handle()
 async def handle_search(event: Event) -> None:
     text = str(event.message)[3:].strip()
     msg = await get_msg(event, text, search=True)
-    await send_msg(msg,text)
+    await send_msg(msg, text)
