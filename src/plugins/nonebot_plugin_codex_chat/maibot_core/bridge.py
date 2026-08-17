@@ -434,6 +434,9 @@ class MaibotInboundMessage:
     raw_segments: list[dict[str, Any]] | None = None
     raw_event: Any | None = None
     bot_self_id: str = ""
+    at_targets: list[str] = field(default_factory=list)
+    at_bot: bool = False
+    at_others: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -504,7 +507,11 @@ async def handle_inbound_message(
             if inbound.group_id
             else None
         ),
-        additional_config={},
+        additional_config={
+            "at_bot": inbound.at_bot,
+            "at_targets": list(inbound.at_targets),
+            "at_others": list(inbound.at_others),
+        },
     )
     if inbound.components:
         await _process_inbound_emojis(inbound.components)
@@ -515,6 +522,8 @@ async def handle_inbound_message(
     session_message.raw_message = raw_message
     session_message.processed_plain_text = inbound.plain_text
     session_message.bot_self_id = inbound.bot_self_id
+    session_message.is_at = inbound.at_bot
+    session_message.is_mentioned = inbound.at_bot
     session_message.initialized = True
 
     session = await chat_manager.get_or_create_session(

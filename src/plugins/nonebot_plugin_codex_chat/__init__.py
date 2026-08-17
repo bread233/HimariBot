@@ -62,6 +62,29 @@ _onebot_bots_by_self_id: dict[str, Bot] = {}
 _inbound_route_by_message_id: dict[str, dict[str, Any]] = {}
 
 
+def _extract_onebot_at_targets(message: Any) -> set[str]:
+    """提取 OneBot V11 消息里明确 @ 的用户目标。@all 不算定向他人。"""
+
+    targets: set[str] = set()
+    try:
+        iterator = iter(message)
+    except TypeError:
+        return targets
+
+    for segment in iterator:
+        try:
+            segment_type = str(getattr(segment, "type", "") or "").strip()
+            data = getattr(segment, "data", None)
+            if segment_type != "at" or not isinstance(data, dict):
+                continue
+            qq = str(data.get("qq") or "").strip()
+            if qq and qq.lower() != "all":
+                targets.add(qq)
+        except Exception:
+            continue
+    return targets
+
+
 def _remember_target(event: MessageEvent, bot: Bot) -> None:
     """记录最近一次入站事件对应的 NoneBot Bot 与目标。"""
 
@@ -546,6 +569,27 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
         if plugin_config.allowed_groups_list and int(group_id or 0) not in plugin_config.allowed_groups_list:
             return
 
+    raw_message_for_addressing = getattr(message, "message", None) or message
+    at_targets = _extract_onebot_at_targets(raw_message_for_addressing)
+    bot_self_id = str(getattr(event, "self_id", None) or getattr(bot, "self_id", "") or "").strip()
+    at_bot = bool(bot_self_id and bot_self_id in at_targets)
+    at_others = sorted(target for target in at_targets if target != bot_self_id)
+
+    if isinstance(event, GroupMessageEvent) and at_others and not at_bot:
+        logger.info(
+            f"codex_chat_trigger_skip reason=addressed_to_other "
+            f"at_targets={sorted(at_targets)} bot_self_id={bot_self_id} "
+            f"message_id={getattr(event, 'message_id', '')}"
+        )
+        return
+
+    if at_bot:
+        logger.info(
+            f"codex_chat_trigger_allow reason=mentioned_bot "
+            f"at_targets={sorted(at_targets)} bot_self_id={bot_self_id} "
+            f"message_id={getattr(event, 'message_id', '')}"
+        )
+
     _remember_target(event, bot)
     _record_inbound_route(event, bot)
 
@@ -596,7 +640,10 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
         components=components,
         raw_segments=raw_segments,
         raw_event=event,
-        bot_self_id=str(getattr(event, "self_id", None) or getattr(bot, "self_id", "") or ""),
+        bot_self_id=bot_self_id,
+        at_targets=sorted(at_targets),
+        at_bot=at_bot,
+        at_others=at_others,
     )
     result = await handle_inbound_message(inbound)
     if not result.should_reply or not result.replies:
