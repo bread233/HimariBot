@@ -32,7 +32,7 @@ class ConfigModel(BaseModel):
     codex_chat_timeout: int = Field(default=120)
     codex_chat_workdir: str = Field(default="/opt/codex")
     codex_chat_docker_container: str = Field(default="codexcli")
-    codex_chat_model: str = Field(default="gpt-5.4-mini")
+    codex_chat_model: str = Field(default="gpt-5.6-luna")
     codex_chat_allowed_groups: list[int] | str = Field(default_factory=list)
 
     class Config:
