@@ -214,7 +214,7 @@ def is_mentioned_bot_in_message(message: SessionMessage) -> tuple[bool, bool, fl
             ):
                 is_mentioned = True
 
-    # 6) 名称/别名 提及（去除 @/回复标记后再匹配）
+    # 6) 名称/别名只做普通语义提示，不作为直接寻址信号
     if not is_mentioned and keywords:
         msg_content = text
         # 去除各种 @ 与 回复标记，避免误判
@@ -222,10 +222,31 @@ def is_mentioned_bot_in_message(message: SessionMessage) -> tuple[bool, bool, fl
         msg_content = re.sub(r"@<(.+?)(?=:(\d+))\:(\d+)>", "", msg_content)
         msg_content = re.sub(r"\[回复 (.+?)\(((\d+)|未知id|你)\)：(.+?)\]，说：", "", msg_content)
         msg_content = re.sub(r"\[回复<(.+?)(?=:(\d+))\:(\d+)>：(.+?)\]，说：", "", msg_content)
+        # 纯文本昵称/别名默认只表示“谈到了机器人”，不能自动当作直接寻址信号。
+        # 保留正文供后续模型理解，但不要把第三人称讨论升级成 is_mentioned。
+        direct_address_cues = (
+            "你", "帮", "请", "告诉", "看看", "看下", "觉得", "知道", "能", "可以", "会", "要不要",
+            "怎么", "为什么", "为啥", "啥", "什么", "是不是", "有没有", "在吗", "来", "说",
+        )
+        saw_name_mention = False
         for kw in keywords:
-            if kw and kw in msg_content:
+            if not kw:
+                continue
+            start = msg_content.find(kw)
+            if start < 0:
+                continue
+            saw_name_mention = True
+            before = msg_content[:start].rstrip()
+            after = msg_content[start + len(kw):].lstrip()
+            vocative_position = not before or before[-1:] in "，,。.!！?？：:、~～"
+            after = after.lstrip("，,。.!！?？：:、~～ ")
+            direct_dialogue = not after or after.startswith(direct_address_cues)
+            if vocative_position and direct_dialogue:
                 is_mentioned = True
+                logger.debug(f"检测到正文昵称/别名直接呼叫: {kw}")
                 break
+        if saw_name_mention and not is_mentioned:
+            logger.debug("正文包含机器人昵称/别名，但未视为直接寻址")
 
     # 7) 概率设置
     if is_at and getattr(global_config.chat, "inevitable_at_reply", 1):
