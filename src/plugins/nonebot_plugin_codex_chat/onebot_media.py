@@ -479,6 +479,57 @@ async def convert_onebot_segments_to_maibot_components(
             if target_message_id:
                 components.append(ReplyComponent(target_message_id=target_message_id))
                 append_plain(f"[回复:{target_message_id}]")
+
+                # reply 段通常只有目标消息 ID；主动展开一层引用内容，让模型
+                # 同时看到被回复的文字和图片。引用消息中的 reply 不再递归展开。
+                if bot is not None:
+                    try:
+                        reply_payload = await bot.call_api("get_msg", message_id=int(target_message_id))
+                        reply_message = reply_payload.get("message") if isinstance(reply_payload, dict) else None
+                        reply_sender = reply_payload.get("sender") if isinstance(reply_payload, dict) else None
+                        reply_user_id = ""
+                        reply_nickname = ""
+                        if isinstance(reply_sender, dict):
+                            reply_user_id = str(reply_sender.get("user_id") or "").strip()
+                            reply_nickname = str(reply_sender.get("card") or reply_sender.get("nickname") or "").strip()
+
+                        if reply_message is not None:
+                            quoted_segments = [
+                                quoted_segment
+                                for quoted_segment in normalize_onebot_segments(reply_message)
+                                if str(quoted_segment.get("type") or "").strip().lower() != "reply"
+                            ]
+                            quoted = await convert_onebot_segments_to_maibot_components(
+                                quoted_segments,
+                                group_id=group_id,
+                                user_id=reply_user_id or user_id,
+                                message_id=f"reply_{target_message_id}",
+                                self_id=self_id,
+                                bot=None,
+                                download_media=download_media,
+                            )
+                            sender_label = reply_nickname or reply_user_id or "未知用户"
+                            append_plain(f"[引用消息开始 sender={sender_label}]")
+                            components.extend(quoted.components)
+                            if quoted.plain_text:
+                                append_plain(quoted.plain_text)
+                            append_plain("[引用消息结束]")
+                            media.extend(quoted.media)
+                            LOGGER.info(
+                                "onebot_media_reply_expand_ok target_message_id=%s sender=%s components=%s media=%s",
+                                target_message_id,
+                                sender_label,
+                                len(quoted.components),
+                                len(quoted.media),
+                            )
+                        else:
+                            LOGGER.warning("onebot_media_reply_expand_empty target_message_id=%s", target_message_id)
+                    except Exception as exc:
+                        LOGGER.warning(
+                            "onebot_media_reply_expand_failed target_message_id=%s error=%s",
+                            target_message_id,
+                            f"{type(exc).__name__}: {exc}",
+                        )
             else:
                 components.append(DictComponent(data=dict(_build_dict_component(segment, reason="missing_reply_target")["data"])))
             continue
