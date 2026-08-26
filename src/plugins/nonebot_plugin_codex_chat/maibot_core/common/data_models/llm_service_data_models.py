@@ -165,6 +165,7 @@ class LLMGenerationOptions(BaseDataModel):
 class LLMImageOptions(BaseDataModel):
     """LLM 图像理解选项。"""
 
+    model_name: str = ""
     temperature: float | None = None
     max_tokens: int | None = None
     interrupt_flag: asyncio.Event | None = None

@@ -337,11 +337,73 @@ _PLANNER_FALLBACK_TOOL_NAMES: frozenset[str] = frozenset(
 )
 
 
+def _normalize_planner_tool_calls_list(
+    raw_calls: list[dict],
+    valid_names: set[str],
+) -> list[Any] | None:
+    """规范化并校验 tool_calls 列表，返回 ``ToolCall`` 对象列表。
+
+    规则：
+    1. 缺 ``id`` 时生成 ``call_xxx``。
+    2. ``type`` 缺失时补 ``"function"``（不校验）。
+    3. ``function`` 缺失或 ``function.name`` 缺失则丢弃。
+    4. ``function.name`` 不在 ``valid_names`` 中则丢弃。
+    5. ``function.arguments`` 如果是 ``None`` 或空字符串 -> ``"{}"``。
+    6. ``function.arguments`` 如果是 ``dict`` -> ``json.dumps(ensure_ascii=False)``。
+    7. ``reply`` 必须有 ``msg_id``，否则丢弃。
+    """
+    if _ToolCall is None or not raw_calls:
+        return None
+
+    results: list[Any] = []
+    for item in raw_calls:
+        if not isinstance(item, dict):
+            continue
+
+        call_id = str(item.get("id") or "").strip()
+        if not call_id:
+            call_id = f"call_{uuid.uuid4().hex[:12]}"
+
+        func = item.get("function")
+        if not isinstance(func, dict):
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            func = {"name": name, "arguments": item.get("arguments")}
+
+        name = str(func.get("name") or "").strip()
+        if not name or name not in valid_names:
+            continue
+
+        args = _resolve_tool_call_args(func.get("arguments"))
+
+        if name == "reply":
+            msg_id = str((args or {}).get("msg_id") or "").strip()
+            if not msg_id:
+                logger.info("maibot_planner_normalize_reply_missing_msg_id")
+                continue
+
+        results.append(_ToolCall(
+            call_id=call_id,
+            func_name=name,
+            args=args or {},
+            extra_content=None,
+        ))
+
+    return results if results else None
+
+
 def _parse_planner_fallback_text_tool_calls(
     text: str,
     available_tool_names: set[str] | None = None,
 ) -> list[Any] | None:
-    """从 fallback LLM 文本响应中解析 Planner tool_calls。"""
+    """从 fallback LLM 文本响应中解析 Planner tool_calls。
+
+    解析链（依次尝试，任一成功即返回）：
+    1. 多策略 JSON 提取（``_extract_embedded_planner_json``）→ 规范化 tool_calls。
+    2. 从 JSON 中提取单工具（``name`` + ``arguments``）。
+    3. ``ACTION:`` + ``ARGS:`` 文本协议。
+    """
     if not text:
         logger.info("maibot_planner_fallback_text_tool_parse_failed reason=empty")
         return None
@@ -351,53 +413,67 @@ def _parse_planner_fallback_text_tool_calls(
         logger.info("maibot_planner_fallback_text_tool_parse_failed reason=no_valid_names")
         return None
 
-    json_obj = _extract_json_from_last_line(text)
-    if json_obj is None:
-        logger.info("maibot_planner_fallback_text_tool_parse_failed reason=no_json_found")
-        return None
+    # --- 1) 多策略 JSON 提取 ---
+    json_obj = _extract_embedded_planner_json(text)
+    if json_obj is not None:
+        # a) tool_calls 数组
+        raw_calls = json_obj.get("tool_calls")
+        if isinstance(raw_calls, list) and raw_calls:
+            normalized = _normalize_planner_tool_calls_list(raw_calls, valid_names)
+            if normalized:
+                logger.info(
+                    "maibot_planner_json_recovered source=embedded_json tool_count=%d",
+                    len(normalized),
+                )
+                return normalized
+            logger.info("maibot_planner_fallback_text_tool_parse_failed reason=no_valid_tool_in_list")
+            return None
 
-    raw_calls = json_obj.get("tool_calls")
-    if isinstance(raw_calls, list) and raw_calls:
-        tool_calls: list[Any] = []
-        for raw_call in raw_calls:
-            if not isinstance(raw_call, dict):
-                continue
-            call_id = raw_call.get("id") or f"planner_fb_{uuid.uuid4().hex[:12]}"
-            func = raw_call.get("function")
-            if isinstance(func, dict):
-                func_name = (func.get("name") or "").strip()
-                if func_name not in valid_names:
-                    continue
-                args = _resolve_tool_call_args(func.get("arguments"))
-            else:
-                func_name = (raw_call.get("name") or "").strip()
-                if func_name not in valid_names:
-                    continue
-                args = _resolve_tool_call_args(raw_call.get("arguments"))
+        # b) 单工具格式
+        func_name = (json_obj.get("name") or "").strip()
+        if func_name in valid_names:
+            args = _resolve_tool_call_args(json_obj.get("arguments"))
             if _ToolCall is not None:
                 if func_name == "reply":
                     msg_id = str((args or {}).get("msg_id") or "").strip()
                     if not msg_id:
                         logger.info("maibot_planner_fallback_reply_missing_msg_id name=reply")
-                        continue
-                tool_calls.append(_ToolCall(call_id=call_id, func_name=func_name, args=args))
-        if tool_calls:
-            return tool_calls
-        logger.info("maibot_planner_fallback_text_tool_parse_failed reason=no_valid_tool_in_list")
-        return None
+                        return None
+                return [_ToolCall(
+                    call_id=f"planner_fb_{uuid.uuid4().hex[:12]}",
+                    func_name=func_name,
+                    args=args,
+                )]
 
-    func_name = (json_obj.get("name") or "").strip()
-    if func_name in valid_names:
-        args = _resolve_tool_call_args(json_obj.get("arguments"))
+    # --- 2) ACTION/ARGS 文本协议 ---
+    action, parsed_args, error = _extract_planner_action_and_args(text)
+    if action is not None:
+        if error is not None:
+            logger.info(
+                "maibot_planner_fallback_text_tool_parse_failed reason=action_error action=%s error=%s",
+                action, error,
+            )
+            return None
+        if action not in valid_names:
+            logger.info(
+                "maibot_planner_fallback_text_tool_parse_failed reason=action_not_allowed action=%s",
+                action,
+            )
+            return None
         if _ToolCall is not None:
-            if func_name == "reply":
-                msg_id = str((args or {}).get("msg_id") or "").strip()
+            if action == "reply":
+                msg_id = str((parsed_args or {}).get("msg_id") or "").strip()
                 if not msg_id:
                     logger.info("maibot_planner_fallback_reply_missing_msg_id name=reply")
                     return None
-            return [_ToolCall(call_id=f"planner_fb_{uuid.uuid4().hex[:12]}", func_name=func_name, args=args)]
+            logger.info("maibot_planner_action_args_recovered action=%s", action)
+            return [_ToolCall(
+                call_id=f"planner_fb_{uuid.uuid4().hex[:12]}",
+                func_name=action,
+                args=parsed_args or {},
+            )]
 
-    logger.info("maibot_planner_fallback_text_tool_parse_failed reason=no_valid_tool")
+    logger.info("maibot_planner_fallback_text_tool_parse_failed reason=no_json_found")
     return None
 
 
@@ -606,6 +682,82 @@ def _extract_json_from_last_line(text: str) -> dict | None:
     return None
 
 
+def _find_balanced_braces_fragments(text: str) -> list[str]:
+    """从文本中提取所有顶层 ``{...}`` 片段，字符串感知（跳过字符串内的括号）。"""
+    fragments: list[str] = []
+    depth = 0
+    start = -1
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == '"':
+            i += 1
+            while i < len(text):
+                if text[i] == '\\':
+                    i += 2
+                    continue
+                if text[i] == '"':
+                    break
+                i += 1
+        elif ch == '{':
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0 and start >= 0:
+                fragments.append(text[start:i + 1])
+                start = -1
+        i += 1
+    return fragments
+
+
+def _extract_embedded_planner_json(text: str) -> dict | None:
+    """多策略从 Planner 文本中提取 JSON 对象。
+
+    1) 尝试整段纯文本（含 code-fence 清理后）为 JSON。
+    2) 尝试最后一个非空行为 JSON。
+    3) 字符串感知的平衡括号扫描：取所有 ``{...}`` 片段，从后往前尝试 ``json.loads``。
+    """
+    if not text:
+        return None
+
+    # 策略 1：整段（先清理 code-fence）
+    candidate = _strip_code_fence(text)
+    if candidate.startswith("{"):
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+    # 策略 2：最后一个非空行
+    for raw_line in reversed(text.splitlines()):
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
+        break
+
+    # 策略 3：平衡括号片段（从后往前）
+    for fragment in reversed(_find_balanced_braces_fragments(text)):
+        try:
+            parsed = json.loads(fragment)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            continue
+
+    return None
+
+
 def _extract_planner_tool_calls_json(
     text: str,
 ) -> list[Any] | None:
@@ -729,10 +881,21 @@ def _normalize_planner_output(text: str, *, extra: dict | None) -> list[Any]:
         return []
 
     anchor_message_id = ""
+    latest_at_bot_msg_id = ""
     if isinstance(extra, dict):
         raw_anchor = extra.get("anchor_message_id")
         if raw_anchor is not None:
             anchor_message_id = str(raw_anchor).strip()
+        raw_at_bot = extra.get("latest_at_current_bot_msg_id")
+        if raw_at_bot is not None:
+            latest_at_bot_msg_id = str(raw_at_bot).strip()
+    if latest_at_bot_msg_id and latest_at_bot_msg_id != anchor_message_id:
+        logger.info(
+            "maisaka_reply_anchor_corrected from=%s to=%s reason=at_current_bot_detected",
+            anchor_message_id,
+            latest_at_bot_msg_id,
+        )
+        anchor_message_id = latest_at_bot_msg_id
 
     # --- fix34k: 优先尝试 OpenAI-like tool_calls JSON ---
     json_calls = _extract_planner_tool_calls_json(text)

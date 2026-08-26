@@ -1,3 +1,4 @@
+import shutil
 from collections.abc import Callable, Coroutine
 from pathlib import Path
 from string import Formatter
@@ -20,6 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
 DATA_DIR = PROJECT_ROOT / "data"
 CUSTOM_PROMPTS_DIR = DATA_DIR / "custom_prompts"
+EXTERNAL_PROMPTS_DIR = Path("/app/data/nonebot_chat_agent/codex_chat_prompts")
 PROMPTS_DIR.mkdir(parents=True, exist_ok=True)
 CUSTOM_PROMPTS_DIR.mkdir(parents=True, exist_ok=True)
 SUFFIX_PROMPT = ".prompt"
@@ -30,12 +32,13 @@ def _normalize_prompt_locale(locale: str | None = None) -> str:
 
 
 def _get_prompt_locale_from_path(prompt_path: Path) -> str | None:
-    try:
-        relative_path = prompt_path.resolve().relative_to(PROMPTS_DIR.resolve())
-    except ValueError:
-        return None
-
-    return relative_path.parts[0] if len(relative_path.parts) > 1 else None
+    for root in (PROMPTS_DIR, EXTERNAL_PROMPTS_DIR):
+        try:
+            relative_path = prompt_path.resolve().relative_to(root.resolve())
+            return relative_path.parts[0] if len(relative_path.parts) > 1 else None
+        except ValueError:
+            continue
+    return None
 
 
 def _custom_prompt_path(prompt_name: str, locale: str | None = None) -> Path:
@@ -312,6 +315,19 @@ class PromptManager:
                 logger.error(f"保存 Prompt '{prompt_name}' 时出错，文件路径: '{file_path}'，错误信息: {exc}")
                 raise
 
+    def _bootstrap_external_prompts_dir(self) -> bool:
+        if EXTERNAL_PROMPTS_DIR.exists() and any(EXTERNAL_PROMPTS_DIR.rglob(f"*{SUFFIX_PROMPT}")):
+            return False
+        EXTERNAL_PROMPTS_DIR.mkdir(parents=True, exist_ok=True)
+        for item in PROMPTS_DIR.iterdir():
+            src = PROMPTS_DIR / item.name
+            dst = EXTERNAL_PROMPTS_DIR / item.name
+            if src.is_dir():
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src, dst)
+        return True
+
     def _load_prompt_template(self, prompt_name: str, source_path: Path) -> tuple[str, bool, str | None]:
         prompt_locale = _get_prompt_locale_from_path(source_path)
         for custom_prompt_path in _iter_custom_prompt_candidates(prompt_name, prompt_locale):
@@ -321,11 +337,21 @@ class PromptManager:
 
     def load_prompts(self) -> None:
         """
-        加载全部 Prompt 实例，优先加载自定义目录下的文件，支持覆盖加载
+        加载全部 Prompt 实例，优先从外部目录加载，缺失时自动从 bundled 复制。
         Raises:
             Exception: 如果在加载过程中出现任何文件操作错误则引发该异常
         """
-        prompt_templates = list_prompt_templates(prompts_root=PROMPTS_DIR)
+        bootstrapped = self._bootstrap_external_prompts_dir()
+        if EXTERNAL_PROMPTS_DIR.exists() and any(EXTERNAL_PROMPTS_DIR.rglob(f"*{SUFFIX_PROMPT}")):
+            prompts_root = EXTERNAL_PROMPTS_DIR
+            if bootstrapped:
+                logger.info(f"codex_chat_prompt_dir_bootstrapped source=bundled target={prompts_root}")
+            else:
+                logger.info(f"codex_chat_prompt_dir_selected source=external path={prompts_root}")
+        else:
+            prompts_root = PROMPTS_DIR
+            logger.info(f"codex_chat_prompt_dir_selected source=bundled path={prompts_root}")
+        prompt_templates = list_prompt_templates(prompts_root=prompts_root)
         for prompt_name, prompt_template in prompt_templates.items():
             try:
                 template, need_save, prompt_locale = self._load_prompt_template(prompt_name, prompt_template.path)
