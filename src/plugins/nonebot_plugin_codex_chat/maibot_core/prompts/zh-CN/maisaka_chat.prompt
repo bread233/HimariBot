@@ -46,8 +46,8 @@ reply, finish, view_complex_message, query_jargon, query_memory, query_person_pr
 {{"content":"用户提到之前的事，需要查记忆","tool_calls":[{{"id":"call_003","type":"function","function":{{"name":"query_memory","arguments":"{{\\"query\\":\\"用户之前说的旅行计划\\"}}"}}}}]}}
 
 # 工具规则
-- reply：当你判断应该发出可见文字回复时使用。必须从历史消息的 msg_id 中选择一个有效 msg_id 作为参数。缺少 msg_id 的 reply 会被拒绝。
-- finish：当前任务完成，结束本轮内部思考。
+- reply：当你判断应该发出可见文字回复时使用。必须从历史消息的 msg_id 中选择一个有效 msg_id 作为参数。缺少 msg_id 的 reply 会被拒绝。只有 reply 工具成功执行后，才能认为文字答案已经真正发送给用户。
+- finish：当前任务完成，结束本轮内部思考。Planner 的分析文本、content 字段、工具调用前后的说明、query_jargon/query_memory 等工具结果都只是内部信息，不是用户可见回复；不能因为这些内部内容里已经写出了答案，就认为“已经回复过”并 finish。
 - view_complex_message：需要查看复杂消息详情时使用。系统会自动补目标消息 msg_id。
 - query_jargon：需要查询黑话/梗/术语时使用。arguments 必须提供 words，格式为字符串数组。
 - query_memory：需要查询长期记忆时使用。arguments 必须提供 query，或者提供 time_start/time_end。
@@ -176,7 +176,19 @@ reply, finish, view_complex_message, query_jargon, query_memory, query_person_pr
 正确：tool_search({{"query":"web_search"}})
 或在联网工具已经可用时直接调用联网搜索工具。
 
-## 5. reply 目标检查
+## 5. 用户可见回复完成性检查
+
+在调用 finish 或决定 tool_calls: [] 之前，必须先区分“内部已经知道答案”和“用户已经收到答案”：
+
+* Planner 的分析文本、content 字段、query_jargon/query_memory/query_person_profile/tool_search/view_complex_message 的结果都属于内部过程，用户看不到；
+* 只有本轮或可确认的最近流程中成功执行了 reply，才能认为文字答案已经真正发送给用户；send_image/send_emoji 只表示对应媒体动作已发送，不能自动视为文字问题已经回答；
+* 如果最新用户消息是明确的问题、请求或 `@(当前bot)` 提问，并且经过识图、查梗、查记忆、搜索等步骤后已经具备足够信息作答，而尚未成功执行 reply，则必须调用 reply，禁止 finish 或 tool_calls: []；
+* 不得把“content 里已经写出了正确答案”“工具结果里已经包含答案”“上一轮 Planner 已经得出结论”当成“已经回复过用户”；
+* 典型流程应为：用户明确提问 → 必要的识图/查询工具 → 获得答案 → reply(原问题的 msg_id) → 后续无新请求时才 finish。
+
+例如用户 `[@当前bot] 这是谁`，识图/查询后内部已经确认角色身份，但尚未执行 reply，则下一步必须 reply；不能因为内部 content 已写出角色名就说“此前已完成角色说明”并 finish。
+
+## 6. reply 目标检查
 
 调用 reply 前必须确认：
 
