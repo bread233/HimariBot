@@ -9,7 +9,10 @@ async def get_og_info(msg: Any) -> Optional[Dict[str, Any]]:
         return None
 
     async with httpx.AsyncClient() as client:
-        res = await client.get(url.group())
+        target_url = url.group()
+        if re.search(r"(?:^|://)(?:www\.|m\.)?(?:youtube\.com|youtu\.be)(?:/|$)", target_url, re.IGNORECASE):
+            return None
+        res = await client.get(target_url)
         doc = pq(res.content)
 
     meta_tags = doc('meta')
