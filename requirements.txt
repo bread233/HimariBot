@@ -80,6 +80,7 @@ nb-cli>=1.4,<2.0
 # Vendored nonebot_plugin_parser runtime dependencies
 bilibili-api-python>=17.3.0,<18.0.0
 curl-cffi>=0.13.0,<1.0.0
+yt-dlp
 apilmoji
 beautifulsoup4>=4.12,<5.0
 hikari-core>=1.2.0,<2.0.0
