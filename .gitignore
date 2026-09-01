@@ -155,5 +155,6 @@ src/plugins/nonebot_plugin_codex_chat/data/
 *token*
 *secret*
 *cookie*
+!src/plugins/nonebot_plugin_parser/parsers/cookie.py
 *.tmp
 *.cache
