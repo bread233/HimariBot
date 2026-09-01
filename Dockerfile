@@ -57,6 +57,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     docker.io \
+    ffmpeg \
     locales \
     locales-all \
     fontconfig \

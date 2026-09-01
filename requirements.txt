@@ -71,11 +71,17 @@ sketchbook>=0.3.0,<0.4.0
 sketchbook-py>=0.2.1,<0.3.0
 nonebot-plugin-alconna>=0.57.1
 nonebot-plugin-argot>=0.2.1
-nonebot-plugin-localstore>=0.7.3
+nonebot-plugin-localstore>=0.7.4,<1.0.0
 nonebot-plugin-orm>=0.7.6
 nonebot-plugin-user>=0.5.0
 nonebot-plugin-skland==0.6.9
 nb-cli>=1.4,<2.0
+
+# Vendored nonebot_plugin_parser runtime dependencies
+bilibili-api-python>=17.3.0,<18.0.0
+curl-cffi>=0.13.0,<1.0.0
+apilmoji
+beautifulsoup4>=4.12,<5.0
 hikari-core>=1.2.0,<2.0.0
 nonebot-plugin-guild-patch>=0.2.3,<0.3.0
 rich>=13.9.4,<14.0.0
