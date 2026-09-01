@@ -70,6 +70,13 @@ revchatgpt>=6.8.6,<7.0.0
 sketchbook>=0.3.0,<0.4.0
 sketchbook-py>=0.2.1,<0.3.0
 nonebot-plugin-alconna>=0.54,<0.55
+
+# Vendored nonebot_plugin_parser runtime dependencies
+nonebot-plugin-localstore>=0.7.4,<1.0.0
+bilibili-api-python>=17.3.0,<18.0.0
+curl-cffi>=0.13.0,<1.0.0
+apilmoji
+beautifulsoup4>=4.12,<5.0
 hikari-core>=1.2.0,<2.0.0
 nonebot-plugin-guild-patch>=0.2.3,<0.3.0
 rich>=13.9.4,<14.0.0
