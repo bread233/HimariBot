@@ -6,7 +6,7 @@ tinydb==4.7.0
 aiofile==3.8.7
 qrcode[pil]>=7.4.2
 ujson>=5.8.0,<6.0.0
-aiofiles>=24.1.0,<25.0.0
+aiofiles>=25.1.0,<26.0.0
 nonebot-plugin-hammer-core>=0.3.2,<0.4.0
 nonebot-plugin-cesaa>=0.5.0,<0.6.0
 jieba>=0.42.1,<0.43.0
