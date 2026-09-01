@@ -34,6 +34,16 @@ class ConfigModel(BaseModel):
     codex_chat_docker_container: str = Field(default="codexcli")
     codex_chat_model: str = Field(default="gpt-5.6-luna")
     codex_chat_allowed_groups: list[int] | str = Field(default_factory=list)
+    codex_chat_searxng_url: str = Field(default="")
+    codex_chat_searxng_timeout: int = Field(default=8)
+    codex_chat_web_search_max_results: int = Field(default=5)
+    codex_chat_web_search_fallback_codexcli: bool = Field(default=True)
+    codex_chat_ocr_url: str = Field(default="")
+    codex_chat_ocr_timeout: int = Field(default=30)
+    codex_chat_vision_caption_url: str = Field(default="http://vision-caption:23339/DESCRIBE/")
+    codex_chat_vision_caption_timeout: int = Field(default=60)
+    codex_chat_vision_caption_enabled: bool = Field(default=True)
+    codex_chat_vision_caption_fallback_codex: bool = Field(default=False)
 
     class Config:
         extra = "ignore"

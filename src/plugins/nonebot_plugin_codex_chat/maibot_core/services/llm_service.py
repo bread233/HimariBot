@@ -275,6 +275,7 @@ class LLMServiceClient:
         options: LLMGenerationOptions | None = None,
         *,
         anchor_message_id: Optional[str] = None,
+        latest_at_current_bot_msg_id: Optional[str] = None,
     ) -> LLMResponseResult:
         """基于消息工厂生成响应。
 
@@ -304,6 +305,8 @@ class LLMServiceClient:
         }
         if anchor_message_id:
             extra["anchor_message_id"] = str(anchor_message_id).strip()
+        if latest_at_current_bot_msg_id:
+            extra["latest_at_current_bot_msg_id"] = str(latest_at_current_bot_msg_id).strip()
 
         # Phase 1: Codex CLI
         reason: str | None = None

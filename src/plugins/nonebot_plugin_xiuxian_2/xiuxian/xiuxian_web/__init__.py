@@ -46,7 +46,38 @@ from ..xiuxian_impart.impart_uitls import get_impart_card_display_info
 from ..xiuxian_impart.impart_data import impart_data_json
 from ..xiuxian_impart_pk.impart_pk import impart_pk
 from ..xiuxian_impart_pk import impart_pk_uitls
+from ..xiuxian_impart_pk.xu_world import xu_world
+from .gameplay_impart import (
+    world_status as _ws_world_status,
+    project as _ws_project,
+    projections as _ws_projections,
+    rankings as _ws_rankings,
+    validate_challenge as _ws_validate_challenge,
+    challenge as _ws_challenge,
+    train as _ws_train,
+    explore as _ws_explore,
+    retreat_start as _ws_retreat_start,
+    retreat_finish as _ws_retreat_finish,
+)
+from .gameplay_reincarnation import (
+    status as _lh_status,
+    advance as _lh_advance,
+    infinite as _lh_infinite,
+    reset_cultivation as _lh_reset_cultivation,
+    rankings as _lh_rankings,
+)
 from .. import NICKNAME
+from .auth_password import (
+    is_valid_user_id as _auth_is_valid_user_id,
+    validate_password as _auth_validate_password,
+    has_password as _auth_has_password,
+    verify_password as _auth_verify_password,
+    set_password as _auth_set_password,
+    mark_password_login as _auth_mark_password_login,
+    check_rate_limit as _auth_check_rate_limit,
+    record_failure as _auth_record_failure,
+    clear_failures as _auth_clear_failures,
+)
 from ..xiuxian_back.back_util import (
     check_equipment_can_use,
     get_use_equipment_sql,
@@ -665,6 +696,36 @@ def _current_player_id():
         return int(player_id) if player_id is not None else None
     except (TypeError, ValueError):
         return None
+
+
+# Token 登录后免旧密码重置的临时权限时长（秒）
+TOKEN_AUTH_TTL_SECONDS = 600
+
+
+def _has_fresh_token_auth():
+    """判断当前会话是否有效且仍处于 Token 登录后的短期高权限窗口内。"""
+    if session.get('player_auth_via') != 'token':
+        return False
+    until = session.get('player_token_auth_until')
+    try:
+        until = int(until)
+    except (TypeError, ValueError):
+        return False
+    if until <= 0:
+        return False
+    return time.time() <= until
+
+
+def _grant_token_auth(user_id):
+    """Token 登录成功后标记短期免旧密码重置权限。"""
+    session['player_auth_via'] = 'token'
+    session['player_token_auth_until'] = int(time.time()) + TOKEN_AUTH_TTL_SECONDS
+
+
+def _consume_token_auth():
+    """消费/清除 token 高权限标记，回到常规密码登录语义。"""
+    session['player_auth_via'] = 'password'
+    session.pop('player_token_auth_until', None)
 
 
 def _ok(**kwargs):
@@ -1570,6 +1631,14 @@ def _consume_stamina(user_id, cost=1):
         return False, f"体力不足，本次操作需要 {cost} 点体力。"
     game_sql.update_user_stamina(user_id, cost, 2)
     return True, ""
+
+
+def _restore_stamina(user_id, amount=1):
+    """回补体力，不超出上限。用于预验证后仍失败的保守回滚。"""
+    try:
+        game_sql.update_user_stamina(user_id, -abs(amount), 2)
+    except Exception:
+        pass
 
 
 def _run_async(coro):
@@ -2574,6 +2643,7 @@ def game_home():
             session.clear()
             session.permanent = False
             session['player_id'] = str(user_id)
+            _grant_token_auth(user_id)
             return redirect(url_for('game_home'))
 
     player = None
@@ -2581,31 +2651,74 @@ def game_home():
     if token:
         token_error = "登录令无效、已过期或已使用"
     player_id = _current_player_id()
+    password_configured = False
+    auth_via = None
+    fresh_token_auth = False
     if player_id:
         player = game_sql.get_user_info_with_id(player_id)
-    return render_template('game.html', player=player, token_error=token_error)
+        password_configured = _auth_has_password(player_id)
+        auth_via = session.get('player_auth_via')
+        fresh_token_auth = _has_fresh_token_auth()
+    return render_template('game.html', player=player, token_error=token_error,
+                           password_configured=password_configured, auth_via=auth_via,
+                           fresh_token_auth=fresh_token_auth,
+                           login_tab='token')
 
 
 @app.route('/game/login', methods=['POST'])
 def game_login():
-    # 强制使用一次性 token 登录，确保安全性
     token = request.form.get('token', '').strip()
-    if not token:
-        return render_template('game.html', player=None, error="请输入一次性登录令")
-        
-    user_id, err = _consume_login_token(token)
-    if not user_id:
-        return render_template('game.html', player=None, error=err or "登录令无效或已过期")
-        
+    if token:
+        # 一次性 Token 登录
+        user_id, err = _consume_login_token(token)
+        if not user_id:
+            return render_template('game.html', player=None, error=err or "登录令无效或已过期", login_tab='token')
+        session.clear()
+        session.permanent = False
+        session['player_id'] = str(user_id)
+        _grant_token_auth(user_id)
+        return redirect(url_for('game_home'))
+
+    # QQ号 + Web 密码登录
+    user_id_raw = (request.form.get('user_id', '') or '').strip()
+    password = request.form.get('password', '') or ''
+    if not user_id_raw or not password:
+        return render_template('game.html', player=None, error="请输入 QQ 号与密码", login_tab='password')
+
+    if not _auth_is_valid_user_id(user_id_raw):
+        return render_template('game.html', player=None, error="账号或密码错误", login_tab='password')
+
+    user_id = int(user_id_raw)
+    client_key = request.remote_addr or 'unknown'
+    if not _auth_check_rate_limit(user_id, client_key):
+        return render_template('game.html', player=None, error="尝试过于频繁，请稍后再试", login_tab='password'), 429
+
+    # 先执行 credential verify（无凭证会走 dummy scrypt），再确认玩家真实存在；
+    # 避免通过“玩家是否存在”与“是否配置密码”的响应差异枚举账号
+    if not _auth_verify_password(user_id, password):
+        _auth_record_failure(user_id, client_key)
+        return render_template('game.html', player=None, error="账号或密码错误", login_tab='password')
+
+    player_info = game_sql.get_user_info_with_id(user_id)
+    if not player_info:
+        _auth_record_failure(user_id, client_key)
+        return render_template('game.html', player=None, error="账号或密码错误", login_tab='password')
+
+    _auth_clear_failures(user_id, client_key)
+    _auth_mark_password_login(user_id)
     session.clear()
     session.permanent = False
     session['player_id'] = str(user_id)
+    session['player_auth_via'] = 'password'
+    session.pop('player_token_auth_until', None)
     return redirect(url_for('game_home'))
 
 
 @app.route('/game/logout')
 def game_logout():
     session.pop('player_id', None)
+    session.pop('player_auth_via', None)
+    session.pop('player_token_auth_until', None)
     return redirect(url_for('game_home'))
 
 
@@ -3942,7 +4055,7 @@ def game_api_shop_buy():
 
     payload = request.get_json(silent=True) or {}
     item_id_raw = payload.get('item_id')
-    quantity_raw = payload.get('quantity')
+    quantity_raw = payload.get('quantity', 1)
 
     if not isinstance(item_id_raw, int):
         return _err("item_id 必须是整数")
@@ -3969,7 +4082,8 @@ def game_api_shop_buy():
         return _err("未找到角色信息")
     current_stone = int((user_rows[0] or {}).get("stone") or 0)
     if current_stone < total_cost:
-        return _err(f"灵石不足，需要 {total_cost}")
+        max_qty = current_stone // price
+        return _err(f"灵石不足！需要 {total_cost} 灵石，当前持有 {current_stone} 灵石，最多可购买 {max_qty} 个")
 
     deduct_res = execute_sql(
         DATABASE,
@@ -4054,14 +4168,12 @@ def game_api_impart_pk_challenge():
         return _err("未登录", status_code=401, login_required=True)
 
     daily_limit = 7
-    try:
-        user = game_sql.get_user_info_with_id(player_id)
-        if not user:
-            return _err("未找到角色信息")
 
-        user_data = impart_pk.find_user_data(player_id) or {}
-        pk_num = int(user_data.get("pk_num") or 0)
-        if pk_num <= 0:
+    # 统一走新虚神界对决的体力规则：校验 -> 扣 3 体力 -> 实际对决（单机器人/1 次失败）
+    validation = _ws_validate_challenge(player_id, None, 1)
+    if not validation.get('success'):
+        pk_num_left = int((impart_pk.find_user_data(player_id) or {}).get("pk_num") or 0)
+        if pk_num_left <= 0:
             return _ok(
                 message="今日虚神界对决次数已用尽",
                 result="none",
@@ -4070,44 +4182,319 @@ def game_api_impart_pk_challenge():
                 remaining=0,
                 daily_limit=daily_limit,
             )
-
-        user_name = user.get("user_name") or str(player_id)
-        logs, win = _run_async(impart_pk_uitls.impart_pk_now_msg_to_bot(user_name, NICKNAME))
-        if isinstance(logs, str):
-            logs = [line for line in logs.split("\n") if line.strip()]
-        elif not isinstance(logs, list):
-            logs = [str(logs)] if logs else []
-
-        stones_gained = 0
-        result = "none"
-        if int(win) == 1:
-            impart_pk.update_user_data(player_id, True)
-            xiuxian_impart.update_stone_num(20, player_id, 1)
-            stones_gained = 20
-            result = "win"
-            message = "对决胜利，获得 20 思恋结晶"
-        elif int(win) == 2:
-            impart_pk.update_user_data(player_id, False)
-            xiuxian_impart.update_stone_num(10, player_id, 1)
-            stones_gained = 10
-            result = "lose"
-            message = "对决失败，获得 10 思恋结晶"
-        else:
-            message = "对决结束"
-
-        latest_user_data = impart_pk.find_user_data(player_id) or {}
-        remaining = int(latest_user_data.get("pk_num") or 0)
         return _ok(
-            message=message,
-            result=result,
-            logs=logs,
-            stones_gained=stones_gained,
-            remaining=remaining,
+            message=validation.get('message') or "暂时无法进行虚神界对决",
+            result="none",
+            logs=[],
+            stones_gained=0,
+            remaining=pk_num_left,
             daily_limit=daily_limit,
         )
+
+    ok, msg = _consume_stamina(player_id, 3)
+    if not ok:
+        return _ok(
+            message=msg,
+            result="none",
+            logs=[],
+            stones_gained=0,
+            remaining=int((impart_pk.find_user_data(player_id) or {}).get("pk_num") or 0),
+            daily_limit=daily_limit,
+        )
+
+    try:
+        result = _ws_challenge(player_id, None, 1)
     except Exception as e:
-        logger.error(f"虚神界对决失败: {e}")
+        logger.exception(f"虚神界对决执行异常: {e}")
         return _err("虚神界对决失败，请稍后重试")
+
+    if not result.get('success'):
+        return _ok(
+            message=result.get('message') or "暂时无法进行虚神界对决",
+            result="none",
+            logs=[],
+            stones_gained=0,
+            remaining=int((impart_pk.find_user_data(player_id) or {}).get("pk_num") or 0),
+            daily_limit=daily_limit,
+        )
+
+    battles = result.get('battles') or []
+    last = battles[-1] if battles else {}
+    result_str = "none"
+    stones = 0
+    logs = []
+    for b in battles:
+        stones += int(b.get('stones_gained') or 0)
+        for line in (b.get('logs') or []):
+            logs.append(line)
+    first_res = battles[0].get('result') if battles else None
+    if first_res in ("win", "lose"):
+        result_str = first_res
+    message = result.get('message') or (last.get('summary') or "对决结束")
+    return _ok(
+        message=message,
+        result=result_str,
+        logs=logs,
+        stones_gained=stones,
+        remaining=int((impart_pk.find_user_data(player_id) or {}).get("pk_num") or 0),
+        daily_limit=daily_limit,
+    )
+
+
+# =========================
+# 虚神界 Web API（对齐 QQ 端 xiuxian_impart_pk，全部复用其数据/计算）
+# =========================
+
+@app.route('/game/api/impart/world/status')
+@game_login_required
+def game_api_impart_world_status():
+    player_id = _current_player_id()
+    try:
+        return _ok(world=_ws_world_status(player_id))
+    except Exception as e:
+        logger.error(f"虚神界状态读取失败: {e}")
+        return _err("虚神界状态读取失败，请稍后重试")
+
+
+@app.route('/game/api/impart/world/project', methods=['POST'])
+@game_login_required
+def game_api_impart_world_project():
+    player_id = _current_player_id()
+    try:
+        result = _ws_project(player_id)
+    except Exception as e:
+        logger.error(f"虚神界投影失败: {e}")
+        return _err("虚神界投影失败，请稍后重试")
+
+    # QQ matcher Cooldown(stamina_cost=1)：仅在实际投影成功后扣除 1 体力，
+    # 失败场景（已投影/次数用尽等）不误扣体力。
+    if result.get('success'):
+        ok, msg = _consume_stamina(player_id, 1)
+        if not ok:
+            _safe_undo_project(player_id)
+            return _err(msg)
+    return _ok(result=result, message=result.get('message') or '')
+
+
+@app.route('/game/api/impart/world/projections')
+@game_login_required
+def game_api_impart_world_projections():
+    player_id = _current_player_id()
+    try:
+        return _ok(projections=_ws_projections(player_id))
+    except Exception as e:
+        logger.error(f"虚神界投影列表读取失败: {e}")
+        return _err("虚神界投影列表读取失败，请稍后重试")
+
+
+@app.route('/game/api/impart/world/rankings')
+@game_login_required
+def game_api_impart_world_rankings():
+    try:
+        return _ok(rankings=_ws_rankings())
+    except Exception as e:
+        logger.error(f"虚神界排行榜读取失败: {e}")
+        return _err("虚神界排行榜读取失败，请稍后重试")
+
+
+@app.route('/game/api/impart/world/challenge', methods=['POST'])
+@game_login_required
+def game_api_impart_world_challenge():
+    player_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    target_number = payload.get('target_number')
+    max_losses = payload.get('max_losses', 1)
+    if target_number in (None, ''):
+        target_number = None
+
+    # 1) 无副作用的规则校验；失败直接返回，不扣体力
+    validation = _ws_validate_challenge(player_id, target_number=target_number,
+                                        max_loss_count=max_losses)
+    if not validation.get('success'):
+        return _err(validation.get('message') or '虚神界对决条件不满足')
+
+    max_losses = validation.get('max_loss_count', max_losses)
+
+    # 2) 先扣体力，体力不足直接失败，绝不调用 _ws_challenge
+    ok, ok_msg = _consume_stamina(player_id, 3)
+    if not ok:
+        return _err(ok_msg)
+
+    # 3) 体力已扣，执行实际对决；异常时若无法确认是否已产生副作用，
+    #    不回滚体力，记录并返回通用错误，避免被利用造成账目不一致。
+    try:
+        result = _ws_challenge(player_id, target_number=target_number,
+                               max_loss_count=max_losses)
+    except Exception as e:
+        logger.exception(f"虚神界对决执行异常: {e}")
+        return _err("虚神界对决失败，请稍后重试")
+
+    if not result.get('success'):
+        # 已预验证，正常不应走到这里；若确为校验类失败则退还体力，其余保守处理
+        if result.get('message') and _ws_validate_challenge(
+                player_id, target_number=target_number,
+                max_loss_count=max_losses).get('success') is False:
+            _restore_stamina(player_id, 3)
+        return _err(result.get('message') or '虚神界对决失败')
+    return _ok(message=result.get('message') or '', result=result,
+               profile=_build_player_profile(player_id))
+
+
+@app.route('/game/api/impart/world/train', methods=['POST'])
+@game_login_required
+def game_api_impart_world_train():
+    player_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    try:
+        minutes = int(payload.get('minutes') or 0)
+    except (TypeError, ValueError):
+        minutes = 0
+    if minutes <= 0:
+        return _err("请输入正整数修炼分钟数")
+    try:
+        result = _ws_train(player_id, minutes)
+    except Exception as e:
+        logger.error(f"虚神界修炼失败: {e}")
+        return _err("虚神界修炼失败，请稍后重试")
+    if not result.get('success'):
+        return _err(result.get('message') or '虚神界修炼失败')
+    return _ok(message=result.get('message') or '', result=result,
+               profile=_build_player_profile(player_id))
+
+
+@app.route('/game/api/impart/world/explore', methods=['POST'])
+@game_login_required
+def game_api_impart_world_explore():
+    player_id = _current_player_id()
+    try:
+        result = _ws_explore(player_id)
+    except Exception as e:
+        logger.error(f"虚神界探索失败: {e}")
+        return _err("虚神界探索失败，请稍后重试")
+    if not result.get('success'):
+        return _ok(result=result, message=result.get('message') or '')
+    return _ok(result=result, message=result.get('message') or '',
+               profile=_build_player_profile(player_id))
+
+
+@app.route('/game/api/impart/world/retreat/start', methods=['POST'])
+@game_login_required
+def game_api_impart_world_retreat_start():
+    player_id = _current_player_id()
+    try:
+        result = _ws_retreat_start(player_id)
+    except Exception as e:
+        logger.error(f"虚神界闭关失败: {e}")
+        return _err("虚神界闭关失败，请稍后重试")
+    if not result.get('success'):
+        return _err(result.get('message') or '虚神界闭关失败')
+    return _ok(message=result.get('message') or '')
+
+
+@app.route('/game/api/impart/world/retreat/finish', methods=['POST'])
+@game_login_required
+def game_api_impart_world_retreat_finish():
+    player_id = _current_player_id()
+    try:
+        result = _ws_retreat_finish(player_id)
+    except Exception as e:
+        logger.error(f"虚神界出关失败: {e}")
+        return _err("虚神界出关失败，请稍后重试")
+    if not result.get('success'):
+        return _err(result.get('message') or '虚神界出关失败')
+    return _ok(message=result.get('message') or '',
+               profile=_build_player_profile(player_id))
+
+
+def _safe_undo_project(user_id):
+    """投影成功后体力扣减失败时回滚投影，避免用户被计入自界却未扣体力。"""
+    try:
+        if xu_world.check_xu_world_user_id(user_id):
+            xu_world.del_xu_world(user_id)
+    except Exception:
+        pass
+
+
+# =========================
+# 轮回 / 转生 Web API（对齐 QQ 端 xiuxian_lunhui）
+# =========================
+
+@app.route('/game/api/reincarnation/status')
+@game_login_required
+def game_api_reincarnation_status():
+    player_id = _current_player_id()
+    try:
+        return _ok(reincarnation=_lh_status(player_id))
+    except Exception as e:
+        logger.error(f"轮回状态读取失败: {e}")
+        return _err("轮回状态读取失败，请稍后重试")
+
+
+@app.route('/game/api/reincarnation/advance', methods=['POST'])
+@game_login_required
+def game_api_reincarnation_advance():
+    player_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    confirm = payload.get('confirm')
+    if confirm != '确认轮回':
+        return _err("请在二次确认后再次提交，确认文本为【确认轮回】", need_confirm=True)
+    try:
+        result = _lh_advance(player_id, confirm=True)
+    except Exception as e:
+        logger.error(f"进入轮回失败: {e}")
+        return _err("进入轮回失败，请稍后重试")
+    if not result.get('success'):
+        return _err(result.get('message') or '无法进入轮回')
+    return _ok(message=result.get('message') or '', result=result,
+               profile=_build_player_profile(player_id))
+
+
+@app.route('/game/api/reincarnation/infinite', methods=['POST'])
+@game_login_required
+def game_api_reincarnation_infinite():
+    player_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    confirm = payload.get('confirm')
+    if confirm != '确认无限轮回':
+        return _err("请在二次确认后再次提交，确认文本为【确认无限轮回】", need_confirm=True)
+    try:
+        result = _lh_infinite(player_id, confirm=True)
+    except Exception as e:
+        logger.error(f"无限轮回失败: {e}")
+        return _err("无限轮回失败，请稍后重试")
+    if not result.get('success'):
+        return _err(result.get('message') or '无法进入无限轮回')
+    return _ok(message=result.get('message') or '', result=result,
+               profile=_build_player_profile(player_id))
+
+
+@app.route('/game/api/reincarnation/reset-cultivation', methods=['POST'])
+@game_login_required
+def game_api_reincarnation_reset_cultivation():
+    player_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    confirm = payload.get('confirm')
+    if confirm != '确认自废修为':
+        return _err("请在二次确认后再次提交，确认文本为【确认自废修为】", need_confirm=True)
+    try:
+        result = _lh_reset_cultivation(player_id, confirm=True)
+    except Exception as e:
+        logger.error(f"自废修为失败: {e}")
+        return _err("自废修为失败，请稍后重试")
+    if not result.get('success'):
+        return _err(result.get('message') or '无法自废修为')
+    return _ok(message=result.get('message') or '', result=result,
+               profile=_build_player_profile(player_id))
+
+
+@app.route('/game/api/reincarnation/rankings')
+@game_login_required
+def game_api_reincarnation_rankings():
+    try:
+        return _ok(rankings=_lh_rankings())
+    except Exception as e:
+        logger.error(f"轮回排行榜读取失败: {e}")
+        return _err("轮回排行榜读取失败，请稍后重试")
 
 
 @app.route('/game/api/work/refresh', methods=['POST'])
@@ -4718,8 +5105,61 @@ def api_v1_health():
 def api_v1_auth_session():
     player_id = _current_player_id()
     if not player_id:
-        return jsonify({"success": True, "logged_in": False, "player_id": None})
-    return jsonify({"success": True, "logged_in": True, "player_id": player_id})
+        return jsonify({"success": True, "logged_in": False, "player_id": None, "password_configured": False})
+    return jsonify({"success": True, "logged_in": True, "player_id": player_id,
+                    "password_configured": _auth_has_password(player_id)})
+
+
+@api_v1.get("/auth/password")
+@api_session_required
+def api_v1_auth_password_status():
+    player_id = _current_player_id()
+    return jsonify({"success": True, "password_configured": _auth_has_password(player_id)})
+
+
+@api_v1.post("/auth/password")
+@api_session_required
+def api_v1_auth_password_set():
+    player_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    new_password = (payload.get("new_password") or "")
+    current_password = (payload.get("current_password") or "")
+
+    err = _auth_validate_password(new_password)
+    if err:
+        return jsonify({"success": False, "error": err, "code": 40120}), 400
+
+    configured = _auth_has_password(player_id)
+    if configured:
+        # 已配置密码时，普通入口永远要求当前密码正确（无论本次经 token 还是密码登录）
+        if not current_password:
+            return jsonify({"success": False, "error": "请输入当前密码", "code": 40121}), 400
+        if not _auth_verify_password(player_id, current_password):
+            return jsonify({"success": False, "error": "当前密码错误", "code": 40122}), 400
+
+    _auth_set_password(player_id, new_password)
+    _consume_token_auth()
+    return jsonify({"success": True, "message": "Web 密码已设置" if not configured else "Web 密码已更新",
+                    "password_configured": True})
+
+
+@api_v1.post("/auth/password/reset")
+@api_session_required
+def api_v1_auth_password_reset():
+    # 忘记密码：必须处于 Token 登录后的短期窗口（fresh token auth）内，才可免旧密码重设
+    if not _has_fresh_token_auth():
+        return jsonify({"success": False, "error": "请先在 QQ 中发送【网页登录令】登录后再重设密码", "code": 40123}), 403
+    player_id = _current_player_id()
+    payload = request.get_json(silent=True) or {}
+    new_password = (payload.get("new_password") or "")
+
+    err = _auth_validate_password(new_password)
+    if err:
+        return jsonify({"success": False, "error": err, "code": 40120}), 400
+
+    _auth_set_password(player_id, new_password)
+    _consume_token_auth()
+    return jsonify({"success": True, "message": "Web 密码已重设", "password_configured": True})
 
 
 @api_v1.get("/player/profile")

@@ -150,6 +150,58 @@
             background: rgba(10, 5, 15, .32);
         }
 
+        .login-pane {
+            padding: 42px 38px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 16px;
+            background: rgba(10, 5, 15, .32);
+        }
+
+        .login-tabs {
+            display: flex;
+            gap: 10px;
+        }
+
+        .login-tab {
+            flex: 1;
+            padding: 10px 12px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, .04);
+            color: var(--muted);
+            border-radius: 12px;
+            cursor: pointer;
+            text-align: center;
+            transition: background .2s;
+        }
+
+        .login-tab:hover {
+            background: rgba(255, 255, 255, .09);
+        }
+
+        .login-tab.active {
+            background: linear-gradient(180deg, #ffe7a7, #bd7928);
+            color: #281400;
+            font-weight: 900;
+            border-color: transparent;
+        }
+
+        .pwd-reminder {
+            margin-top: 10px;
+            padding: 9px 12px;
+            border: 1px solid rgba(247, 211, 122, .5);
+            border-radius: 10px;
+            background: rgba(247, 211, 122, .1);
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.5;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+        }
+
         .login-form h2 {
             margin: 0 0 8px;
             font-size: 28px;
@@ -2504,16 +2556,50 @@
                 <p>将 QQ 文字修仙具象化为网页 UI：角色面板、悬赏令、背包、战斗回放。</p>
                 <div class="hero-rune"></div>
             </div>
-            <form class="login-form" action="{{ url_for('game_login') }}" method="post">
-                <h2>进入洞府</h2>
-                <div class="hint">请先在 QQ 里发送【网页登录令】获取一次性 Token（5 分钟内有效，仅可用一次）。</div>
+            <div class="login-pane">
+                <h2 style="margin:0 0 8px; font-size:28px;">进入洞府</h2>
                 {% if error %}<div class="error-box">{{ error }}</div>{% endif %}
                 {% if token_error %}<div class="error-box">{{ token_error }}</div>{% endif %}
-                <input class="input" name="token" placeholder="一次性登录令 Token" autocomplete="off" autofocus>
-                <button class="btn" type="submit">开始游戏</button>
-            </form>
+                <div class="login-tabs" id="login-tabs">
+                    <button type="button" class="login-tab active" data-login-tab="token-form">一次性 Token</button>
+                    <button type="button" class="login-tab" data-login-tab="pwd-form">QQ号 + 密码</button>
+                </div>
+                <form id="token-form" action="{{ url_for('game_login') }}" method="post" style="display:flex; flex-direction:column; gap:18px;">
+                    <div class="hint">请先在 QQ 里发送【网页登录令】获取一次性 Token（5 分钟内有效，仅可用一次）。</div>
+                    <input class="input" name="token" placeholder="一次性登录令 Token" autocomplete="off" autofocus>
+                    <button class="btn" type="submit">开始游戏</button>
+                </form>
+                <form id="pwd-form" action="{{ url_for('game_login') }}" method="post" style="display:none; flex-direction:column; gap:18px;">
+                    <div class="hint">使用你的 QQ 号与已设置的 Web 密码登录；未设置时请先用一次性 Token 登录后设置。</div>
+                    <input class="input" name="user_id" placeholder="QQ 号" autocomplete="username" inputmode="numeric">
+                    <input class="input" name="password" type="password" placeholder="Web 密码" autocomplete="current-password">
+                    <button class="btn" type="submit">开始游戏</button>
+                </form>
+            </div>
         </section>
     </main>
+    <script>
+        (function () {
+            var defaultTab = {{ (login_tab or 'token') | tojson }};
+            var tabs = document.querySelectorAll('#login-tabs .login-tab');
+            function activate(tab) {
+                tabs.forEach(function (t) { t.classList.remove('active'); });
+                tab.classList.add('active');
+                var target = tab.getAttribute('data-login-tab');
+                var tokenForm = document.getElementById('token-form');
+                var pwdForm = document.getElementById('pwd-form');
+                tokenForm.style.display = (target === 'token-form') ? 'flex' : 'none';
+                pwdForm.style.display = (target === 'pwd-form') ? 'flex' : 'none';
+            }
+            tabs.forEach(function (tab) {
+                tab.addEventListener('click', function () { activate(tab); });
+            });
+            if (defaultTab === 'password') {
+                var tab = document.querySelector('#login-tabs .login-tab[data-login-tab="pwd-form"]');
+                if (tab) activate(tab);
+            }
+        })();
+    </script>
     {% else %}
     <div class="app-shell">
         <header class="topbar">
@@ -2522,6 +2608,13 @@
                 <div class="hint">当前角色：{{ player.user_name or player.user_id }} · <a href="#" id="link-settings" style="color:var(--gold);">设置</a> · <a href="{{ url_for('game_logout') }}"
                         style="color:var(--gold);">退出登录</a></div>
                 <div class="hint top-reminder-row"><a href="#" id="top-reminder-link" class="top-reminder-link">🔔 提醒 <span id="top-reminder-summary" class="top-reminder-summary"><span id="top-reminder-summary-inner" class="top-reminder-summary-inner"></span></span><span id="top-reminder-count" class="top-reminder-count"></span></a></div>
+                {% if not password_configured %}
+                <div class="pwd-reminder" id="pwd-reminder">
+                    🔐 建议及时设置 Web 密码，Bot 离线时仍可登录。
+                    <a href="#" id="pwd-reminder-set" style="color:var(--gold);">去设置</a>
+                    <a href="#" id="pwd-reminder-dismiss" style="color:var(--muted);">暂不</a>
+                </div>
+                {% endif %}
             </div>
             <div class="resource-strip">
                 <div class="resource">灵石<strong id="res-stone">--</strong></div>
@@ -2581,6 +2674,7 @@
                         <button class="tab-btn" data-tab="alchemy">炼丹</button>
                         <button class="tab-btn" data-tab="sect">宗门</button>
                         <button class="tab-btn" data-tab="impart">传承</button>
+                        <button class="tab-btn" data-tab="reincarnation">轮回</button>
                         <button class="tab-btn" data-tab="shop">商店</button>
                         <button class="tab-btn" data-tab="backpack">背包</button>
                         <button class="tab-btn" data-tab="social">社交</button>
@@ -2679,14 +2773,47 @@
                     <div id="tab-impart" class="tab-pane">
                         <h3 class="panel-title">传承祈愿 <span class="badge">思恋结晶</span></h3>
                         <div class="quest-card" style="margin-bottom:12px;">
+                            <h4>虚神界</h4>
+                            <p class="hint" id="impart-world-desc">加载中...</p>
+                            <div class="stat-grid" style="margin:10px 0;">
+                                <div class="stat-card"><span>区域</span><strong id="impart-world-level">--</strong></div>
+                                <div class="stat-card"><span>修炼效率</span><strong id="impart-world-eff">--</strong></div>
+                                <div class="stat-card"><span>今日时间</span><strong id="impart-world-exp-day">--</strong></div>
+                            </div>
+                            <div class="action-grid">
+                                <button class="btn" id="btn-impart-project" onclick="impartWorldProject()">投影虚神界</button>
+                                <button class="btn" id="btn-impart-world-train" onclick="impartWorldTrain()">虚神界修炼</button>
+                                <button class="btn secondary" id="btn-impart-world-explore" onclick="impartWorldExplore()">探索秘境</button>
+                                <button class="btn ghost" id="btn-impart-retreat-start" onclick="impartRetreatStart()">虚神界闭关</button>
+                                <button class="btn ghost" id="btn-impart-retreat-finish" onclick="impartRetreatFinish()">出关结算</button>
+                            </div>
+                            <div id="impart-world-result" class="hint" style="margin-top:10px; white-space:pre-wrap;">暂无操作结果</div>
+                        </div>
+                        <div class="quest-card" style="margin-bottom:12px;">
                             <h4>虚神界对决</h4>
                             <p class="hint" id="impart-pk-desc">今日剩余次数：-- / 7</p>
                             <p class="hint">奖励说明：胜利 +20 思恋结晶，失败 +10 思恋结晶</p>
+                            <div class="form-row" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin:8px 0;">
+                                <label style="color:var(--text); font-size:13px;">挑战目标
+                                    <select id="impart-pk-target" style="margin-left:6px;">
+                                        <option value="">机器人（默认）</option>
+                                    </select>
+                                </label>
+                                <label style="color:var(--text); font-size:13px;">可败次数
+                                    <input type="number" id="impart-pk-max-losses" value="1" min="1" max="7" style="width:70px; margin-left:6px;">
+                                </label>
+                                <button class="btn ghost" id="btn-impart-projections-refresh" onclick="loadImpartProjections()">刷新投影列表</button>
+                            </div>
+                            <div id="impart-projections-list" class="hint" style="margin:6px 0 10px; max-height:160px; overflow-y:auto;">投影列表加载中...</div>
                             <div class="action-grid">
                                 <button class="btn" id="btn-impart-pk-challenge" onclick="challengeImpartPk()">开始对决</button>
                             </div>
                             <div id="impart-pk-result" class="hint" style="margin-top:10px;">暂无对决结果</div>
                             <div id="impart-pk-logs" class="hint" style="margin-top:8px; white-space:pre-wrap;">暂无对决日志</div>
+                        </div>
+                        <div class="quest-card" style="margin-bottom:12px;">
+                            <h4>虚神界排行</h4>
+                            <div id="impart-world-rankings" class="hint">加载中...</div>
                         </div>
                         <div class="quest-card">
                             <h4>思恋结晶传承祈愿</h4>
@@ -2706,6 +2833,35 @@
                         </div>
                     </div>
 
+                    <div id="tab-reincarnation" class="tab-pane">
+                        <h3 class="panel-title">轮回转生 <span class="badge" id="reincarnation-badge">--</span></h3>
+                        <p class="notice" id="reincarnation-message">加载中...</p>
+                        <div class="stat-grid" style="margin:10px 0;">
+                            <div class="stat-card"><span>当前阶段</span><strong id="reincarnation-stage">--</strong></div>
+                            <div class="stat-card"><span>下一阶段</span><strong id="reincarnation-next">--</strong></div>
+                            <div class="stat-card"><span>最低境界</span><strong id="reincarnation-min-level">--</strong></div>
+                            <div class="stat-card"><span>轮回等级</span><strong id="reincarnation-root-level">--</strong></div>
+                        </div>
+                        <div class="action-grid">
+                            <button class="btn" id="btn-reincarnation-advance" onclick="reincarnationAdvance()">进入轮回</button>
+                            <button class="btn secondary" id="btn-reincarnation-infinite" onclick="reincarnationInfinite()">无限轮回</button>
+                            <button class="btn danger" id="btn-reincarnation-reset" onclick="reincarnationReset()">自废修为</button>
+                        </div>
+                        <div id="reincarnation-result" class="hint" style="margin-top:10px; white-space:pre-wrap;">暂无轮回记录</div>
+                        <div class="quest-card" style="margin-top:12px;">
+                            <h4>轮回排行</h4>
+                            <div id="reincarnation-rankings" class="hint">加载中...</div>
+                        </div>
+                        <div class="card" style="margin-top:12px; padding:15px; border:1px dashed var(--line); border-radius:12px;">
+                            <h4 style="margin:0 0 8px; color:var(--gold); font-size:14px;">轮回说明</h4>
+                            <ul class="hint" style="margin-bottom:0; padding-left:18px;">
+                                <li>进入轮回会清空/重置：修为、功法、神通、灵石、攻修/元血/灵海等级、虚神界修炼时间。</li>
+                                <li>装备与物品保留，思恋结晶按规则转换为轮回碎片。</li>
+                                <li>轮回为不可逆操作，操作前请务必二次确认。</li>
+                            </ul>
+                        </div>
+                    </div>
+
                     <div id="tab-backpack" class="tab-pane">
                         <h3 class="panel-title">背包与装备 <span class="badge" id="backpack-count">0 件</span></h3>
                         <div class="tabs" style="margin-bottom: 12px; border-bottom: none;">
@@ -2722,7 +2878,7 @@
 
                     <div id="tab-shop" class="tab-pane">
                         <h3 class="panel-title">仙坊商店 <span class="badge">单价 1000 灵石</span></h3>
-                        <p class="notice">当前仅支持单次购买 1 个道具。</p>
+                        <p class="notice">输入购买数量后可批量购买，单次最多 99 个。</p>
                         <div class="item-list" id="shop-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:10px;">
                             <div class="item-card"><div class="item-name">加载中...</div></div>
                         </div>
@@ -2787,6 +2943,38 @@
                         <div class="action-grid" style="margin-top:14px;">
                             <button class="btn" id="btn-settings-save">保存设置</button>
                             <button class="btn ghost" id="btn-settings-reload">重新加载</button>
+                        </div>
+                        <h3 class="panel-title" style="margin-top:22px;">账号安全 / Web 密码</h3>
+                        <div class="stat-grid" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+                            <div class="stat-card" style="grid-column: 1 / -1;">
+                                <span>Web 密码状态</span>
+                                <strong style="display:block; margin-top:6px;" id="pwd-status">检测中...</strong>
+                                <div class="hint" style="margin-top:10px;">设置后可用「QQ号 + Web 密码」登录网页，Bot 离线时仍可登录。</div>
+                            </div>
+                            <div class="stat-card" style="grid-column: 1 / -1;">
+                                <span>新密码</span>
+                                <strong style="display:block; margin-top:6px;">
+                                    <input class="input" id="pwd-new" type="password" placeholder="8-128 位，支持中文" autocomplete="new-password">
+                                </strong>
+                            </div>
+                            <div class="stat-card" id="pwd-current-wrap" style="grid-column: 1 / -1; display:none;">
+                                <span>当前密码</span>
+                                <strong style="display:block; margin-top:6px;">
+                                    <input class="input" id="pwd-current" type="password" placeholder="验证当前密码" autocomplete="current-password">
+                                </strong>
+                                <div class="hint" style="margin-top:10px;" id="pwd-current-hint"></div>
+                            </div>
+                            {% if fresh_token_auth %}
+                            <div class="stat-card" style="grid-column: 1 / -1;">
+                                <div class="hint">你当前通过 QQ 一次性 Token 登录（短期有效），可直接重设 Web 密码（忘记密码场景）。</div>
+                                <strong style="display:block; margin-top:8px;">
+                                    <button class="btn ghost" id="btn-pwd-reset">重设 Web 密码</button>
+                                </strong>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="action-grid" style="margin-top:14px;">
+                            <button class="btn" id="btn-pwd-save">保存 Web 密码</button>
                         </div>
                         <h3 class="panel-title" style="margin-top:22px;">结识申请</h3>
                         <div id="settings-requests" class="quest-grid">
@@ -3362,7 +3550,8 @@
             if (name === 'rift') loadRiftStatus();
             if (name === 'sect') loadSectInfo();
             if (name === 'alchemy') loadAlchemy();
-            if (name === 'impart') loadImpartCards();
+            if (name === 'impart') { loadImpartCards(); loadImpartWorld(); loadImpartWorldRankings(); loadImpartProjections(); }
+            if (name === 'reincarnation') { loadReincarnation(); loadReincarnationRankings(); }
             if (name === 'shop') loadShop();
             if (name === 'social') loadPlayers();
             if (name === 'settings') loadSettings();
@@ -3488,44 +3677,72 @@
             const btn = $('btn-impart-pk-challenge');
             const resultEl = $('impart-pk-result');
             const logsEl = $('impart-pk-logs');
+            const targetSel = $('impart-pk-target');
+            const maxLossInput = $('impart-pk-max-losses');
+            let targetNumber = null;
+            if (targetSel) {
+                const v = targetSel.value;
+                if (v !== null && v !== '' && v !== undefined) {
+                    const n = Number.parseInt(v, 10);
+                    if (!Number.isNaN(n)) targetNumber = n;
+                }
+            }
+            let maxLosses = 1;
+            if (maxLossInput) {
+                const n = Number.parseInt(maxLossInput.value, 10);
+                if (!Number.isNaN(n) && n >= 1) maxLosses = n;
+            }
             if (btn) btn.disabled = true;
             if (resultEl) resultEl.textContent = '对决中...';
             if (logsEl) logsEl.textContent = '正在生成战报...';
             try {
-                const data = await api('/game/api/impart/pk/challenge', { method: 'POST' });
-                const resultKey = data.result === 'win' ? 'win' : (data.result === 'lose' ? 'lose' : 'normal');
-                const resultTitle = resultKey === 'win' ? '对决胜利' : (resultKey === 'lose' ? '对决失败' : '对决结束');
-                const stones = Number(data.stones_gained || 0);
-                const rem = Number(data.remaining || 0);
-                const limit = Number(data.daily_limit || 7);
+                const data = await api('/game/api/impart/world/challenge', {
+                    method: 'POST',
+                    body: JSON.stringify({ target_number: targetNumber, max_losses: maxLosses })
+                });
+                const res = data.result || {};
+                const battles = Array.isArray(res.battles) ? res.battles : [];
+                const totalBattles = Number(res.total_battles || 0);
+                const totalWins = Number(res.total_wins || 0);
+                const totalLosses = Number(res.total_losses || 0);
+                const stones = Number(res.player_stones || 0);
+                const maxLossCount = Number(res.max_loss_count || maxLosses || 1);
+                const lossRemaining = Math.max(maxLossCount - totalLosses, 0);
+                const summaryLines = [];
+                if (totalBattles) summaryLines.push(`共对决 ${totalBattles} 场，胜 ${totalWins} 场，负 ${totalLosses} 场`);
+                if (stones) summaryLines.push(`共获得思恋结晶 +${stones} 颗`);
+                summaryLines.push(
+                    `本轮失败上限 ${maxLossCount} 次 · 已失败 ${totalLosses} 次 · 剩余 ${lossRemaining} 次`
+                );
                 if (resultEl) {
+                    const summary = summaryLines.join(' · ') || (data.message || '对决完成');
                     resultEl.innerHTML = `
-                        <div class="impart-pk-result-card ${resultKey}">
-                            <div class="title">${resultTitle}</div>
-                            <div class="meta">${data.message || '对决完成'}</div>
-                            <div class="meta">获得 +${stones} 思恋结晶</div>
-                            <div class="meta">今日剩余 ${rem} / ${limit}</div>
+                        <div class="impart-pk-result-card ${battles.length ? (battles[0].result === 'win' ? 'win' : (battles[0].result === 'lose' ? 'lose' : 'normal')) : 'normal'}">
+                            <div class="title">${escapeGachaHtml((data.message || '对决完成').split('\n')[0])}</div>
+                            <div class="meta">${escapeGachaHtml(summary)}</div>
                         </div>
                     `;
                 }
-                const logs = Array.isArray(data.logs) ? data.logs : [];
                 if (logsEl) {
-                    if (!logs.length) {
-                        logsEl.innerHTML = '<div class="impart-pk-log-list"><div class="impart-pk-log-line normal">本次无详细日志</div></div>';
+                    if (!battles.length) {
+                        logsEl.innerHTML = '<div class="impart-pk-log-list"><div class="impart-pk-log-line normal">本次无详细战报</div></div>';
                     } else {
-                        const lines = logs.map((line) => {
-                            const text = String(line || '');
-                            let cls = 'normal';
-                            if (/(胜利|获胜|赢)/.test(text)) cls = 'win';
-                            else if (/(失败|暴毙|输)/.test(text)) cls = 'lose';
-                            return `<div class="impart-pk-log-line ${cls}">${text}</div>`;
+                        const lines = battles.map((b) => {
+                            const head = b.opponent ? `对战对手：${escapeGachaHtml(b.opponent)}` : '';
+                            const logsHtml = (Array.isArray(b.logs) ? b.logs : [])
+                                .map((line) => `<div class="impart-pk-log-line normal">${escapeGachaHtml(line)}</div>`)
+                                .join('');
+                            const summ = b.summary ? `<div class="impart-pk-log-line ${b.result === 'win' ? 'win' : (b.result === 'lose' ? 'lose' : 'normal')}">${escapeGachaHtml(b.summary)}</div>` : '';
+                            return `<div class="impart-pk-log-list" style="margin-bottom:6px;">${head ? `<div class="impart-pk-log-line normal">${head}</div>` : ''}${logsHtml}${summ}</div>`;
                         }).join('');
-                        logsEl.innerHTML = `<div class="impart-pk-log-list">${lines}</div>`;
+                        logsEl.innerHTML = lines;
                     }
                 }
                 await loadProfileOnly();
                 await loadDailyStatus();
                 renderImpartPkStatus();
+                await loadImpartWorld();
+                await loadImpartProjections();
                 toast(data.message || '对决完成');
             } catch (err) {
                 if (resultEl) resultEl.textContent = err.message || '对决失败';
@@ -3539,6 +3756,224 @@
             switchTab('impart');
             const target = $('impart-pk-result') || $('impart-pk-desc') || $('tab-impart');
             scrollToVisibleTarget(target, { block: 'center', delay: 90 });
+        }
+        async function loadImpartWorld() {
+            try {
+                const data = await api('/game/api/impart/world/status');
+                renderImpartWorld(data.world);
+            } catch (err) {
+                const desc = $('impart-world-desc');
+                if (desc) desc.textContent = err.message || '虚神界状态加载失败';
+            }
+        }
+        function renderImpartWorld(w) {
+            if (!w) return;
+            $('impart-world-level').textContent = `${w.level_name} (${w.impart_lv})`;
+            $('impart-world-eff').textContent = `+${w.efficiency_percent || 0}%`;
+            $('impart-world-exp-day').textContent = `${w.exp_day} 分钟`;
+            const desc = $('impart-world-desc');
+            if (!desc) return;
+            const parts = [];
+            parts.push(`传承等级：${w.impart_lv} · 今日对决次数：${w.pk_num} 次 · 探索次数：${w.impart_num} 次`);
+            parts.push(`思恋结晶：${w.stone_num} · 闭关状态：${w.in_retreat ? '进行中' : '空闲'} · 投影：${w.projected ? '已投影' : '未投影'}`);
+            if (w.in_retreat && w.elapsed_minutes >= 0) parts.push(`已闭关 ${w.elapsed_minutes} 分钟`);
+            desc.textContent = parts.join('\n');
+        }
+        async function impartWorldProject() {
+            const btn = $('btn-impart-project');
+            const out = $('impart-world-result');
+            if (btn) btn.disabled = true;
+            try {
+                const data = await api('/game/api/impart/world/project', { method: 'POST' });
+                out.innerHTML = `<div class="impart-pk-log-line normal">${escapeGachaHtml(data.message || '投影成功')}</div>`;
+                await loadImpartWorld();
+                toast(data.message || '投影成功');
+            } catch (err) {
+                out.textContent = err.message || '投影失败';
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+        async function loadImpartProjections() {
+            const list = $('impart-projections-list');
+            const select = $('impart-pk-target');
+            try {
+                const data = await api('/game/api/impart/world/projections');
+                const projs = Array.isArray(data.projections) ? data.projections : [];
+                if (!select) return;
+                const current = select.value;
+                let opts = '<option value="">机器人（默认）</option>';
+                projs.forEach((p) => {
+                    if (p.is_self) return;
+                    opts += `<option value="${Number(p.index) + 1}" ${String(current) === String(Number(p.index) + 1) ? 'selected' : ''}>${escapeGachaHtml(p.name || ('修士' + p.user_id))}（第${Number(p.index) + 1}号 · 胜${Number(p.win_num || 0)}场 · 剩${Number(p.pk_num || 0)}次）</option>`;
+                });
+                select.innerHTML = opts;
+                if (list) {
+                    if (!projs.length) {
+                        list.textContent = '虚神界暂无其他道友投影';
+                    } else {
+                        list.innerHTML = projs.map((p) => {
+                            const selfMark = p.is_self ? '（自己）' : '';
+                            return `<div class="impart-pk-log-line ${p.is_self ? 'lose' : 'normal'}">第${Number(p.index) + 1}号 · ${escapeGachaHtml(p.name || ('修士' + p.user_id))} · 胜${Number(p.win_num || 0)}场 · 剩${Number(p.pk_num || 0)}次${selfMark}</div>`;
+                        }).join('');
+                    }
+                }
+            } catch (err) {
+                if (list) list.textContent = err.message || '投影列表加载失败';
+            }
+        }
+
+        async function impartWorldTrain() {
+            const minutes = window.prompt('请输入虚神界修炼分钟数（正整数）：', '60');
+            if (minutes === null) return;
+            const n = Number.parseInt(minutes, 10);
+            if (!Number.isInteger(n) || n <= 0) { toast('请输入正整数分钟数'); return; }
+            const out = $('impart-world-result');
+            try {
+                const data = await api('/game/api/impart/world/train', { method: 'POST', body: JSON.stringify({ minutes: n }) });
+                out.innerHTML = `<div class="impart-pk-log-line normal">${escapeGachaHtml(data.message || '修炼完成')}</div>`;
+                await loadProfileOnly();
+                await loadImpartWorld();
+                toast(data.message || '修炼完成');
+            } catch (err) {
+                out.textContent = err.message || '修炼失败';
+            }
+        }
+        async function impartWorldExplore() {
+            const out = $('impart-world-result');
+            try {
+                const data = await api('/game/api/impart/world/explore', { method: 'POST' });
+                out.innerHTML = `<div class="impart-pk-log-line win">${escapeGachaHtml(data.message || '探索完成').replace(/\n/g, '<br>')}</div>`;
+                await loadProfileOnly();
+                await loadImpartWorld();
+                toast('探索完成');
+            } catch (err) {
+                out.textContent = err.message || '探索失败';
+            }
+        }
+        async function impartRetreatStart() {
+            const out = $('impart-world-result');
+            try {
+                const data = await api('/game/api/impart/world/retreat/start', { method: 'POST' });
+                out.innerHTML = `<div class="impart-pk-log-line normal">${escapeGachaHtml(data.message || '开始闭关')}</div>`;
+                await loadImpartWorld();
+                toast(data.message || '开始闭关');
+            } catch (err) {
+                out.textContent = err.message || '闭关失败';
+            }
+        }
+        async function impartRetreatFinish() {
+            const out = $('impart-world-result');
+            try {
+                const data = await api('/game/api/impart/world/retreat/finish', { method: 'POST' });
+                out.innerHTML = `<div class="impart-pk-log-line win">${escapeGachaHtml(data.message || '出关结算完成').replace(/\n/g, '<br>')}</div>`;
+                await loadProfileOnly();
+                await loadImpartWorld();
+                toast(data.message || '出关结算完成');
+            } catch (err) {
+                out.textContent = err.message || '出关失败';
+            }
+        }
+        async function loadImpartWorldRankings() {
+            const box = $('impart-world-rankings');
+            try {
+                const data = await api('/game/api/impart/world/rankings');
+                const rows = data.rankings || [];
+                box.innerHTML = rows.length
+                    ? rows.map((r, i) => `<div class="impart-pk-log-line normal">${i + 1}. ${escapeGachaHtml(r.name)} · ${escapeGachaHtml(r.level_name)} (Lv.${Number(r.impart_lv || 0)})</div>`).join('')
+                    : '<div class="impart-pk-log-line normal">虚神界暂无人登榜</div>';
+            } catch (err) {
+                box.innerHTML = '<div class="impart-pk-log-line normal">排行加载失败</div>';
+            }
+        }
+        async function loadReincarnation() {
+            try {
+                const data = await api('/game/api/reincarnation/status');
+                renderReincarnation(data.reincarnation);
+            } catch (err) {
+                const msg = $('reincarnation-message');
+                if (msg) msg.textContent = err.message || '轮回状态加载失败';
+            }
+        }
+        function renderReincarnation(r) {
+            if (!r) return;
+            $('reincarnation-badge').textContent = r.root_name || r.next_stage || '--';
+            $('reincarnation-stage').textContent = r.current_stage || '--';
+            $('reincarnation-next').textContent = r.next_stage || '已至最高阶段';
+            $('reincarnation-min-level').textContent = r.next_min_level || '--';
+            $('reincarnation-root-level').textContent = Number(r.root_level || 0);
+            $('reincarnation-message').textContent =
+                `当前灵根：${r.root_type || '未转生'} · 境界：${r.level} · 轮回等级/次数：${Number(r.root_level || 0)} · 无限轮回就绪：${r.infinite_ready ? '是' : '否'}`;
+        }
+        function confirmReincarnation(kind) {
+            const plan = {
+                '确认轮回': '进入下一阶段轮回将重置修为、功法、神通与灵石，且不可逆',
+                '确认无限轮回': '将重置修为、功法、神通与耐药性，且不可逆',
+                '确认自废修为': '将把修为清空并降为凡人，且不可逆'
+            };
+            const required = kind;
+            if (!window.confirm(`【${required}】${plan[required] || ''}。确认继续？`)) return null;
+            const typed = window.prompt(`请手动输入【${required}】以完成二次确认：`);
+            if (typed === null) return null;
+            if (typed.trim() !== required) {
+                window.alert('确认文本不匹配，已取消操作');
+                return null;
+            }
+            return required;
+        }
+        async function reincarnationAdvance() {
+            const confirmText = confirmReincarnation('确认轮回');
+            if (!confirmText) return;
+            const out = $('reincarnation-result');
+            try {
+                const data = await api('/game/api/reincarnation/advance', { method: 'POST', body: JSON.stringify({ confirm: confirmText }) });
+                out.innerHTML = `<div class="impart-pk-log-line win">${escapeGachaHtml(data.message || '轮回成功')}</div>`;
+                await loadProfileOnly();
+                await loadReincarnation();
+                toast(data.message || '轮回成功');
+            } catch (err) {
+                out.textContent = err.message || '轮回失败';
+            }
+        }
+        async function reincarnationInfinite() {
+            const confirmText = confirmReincarnation('确认无限轮回');
+            if (!confirmText) return;
+            const out = $('reincarnation-result');
+            try {
+                const data = await api('/game/api/reincarnation/infinite', { method: 'POST', body: JSON.stringify({ confirm: confirmText }) });
+                out.innerHTML = `<div class="impart-pk-log-line win">${escapeGachaHtml(data.message || '无限轮回成功')}</div>`;
+                await loadProfileOnly();
+                await loadReincarnation();
+                toast(data.message || '无限轮回成功');
+            } catch (err) {
+                out.textContent = err.message || '无限轮回失败';
+            }
+        }
+        async function reincarnationReset() {
+            const confirmText = confirmReincarnation('确认自废修为');
+            if (!confirmText) return;
+            const out = $('reincarnation-result');
+            try {
+                const data = await api('/game/api/reincarnation/reset-cultivation', { method: 'POST', body: JSON.stringify({ confirm: confirmText }) });
+                out.innerHTML = `<div class="impart-pk-log-line win">${escapeGachaHtml(data.message || '自废修为成功')}</div>`;
+                await loadProfileOnly();
+                await loadReincarnation();
+                toast(data.message || '自废修为成功');
+            } catch (err) {
+                out.textContent = err.message || '自废修为失败';
+            }
+        }
+        async function loadReincarnationRankings() {
+            const box = $('reincarnation-rankings');
+            try {
+                const data = await api('/game/api/reincarnation/rankings');
+                const rows = data.rankings || [];
+                box.innerHTML = rows.length
+                    ? rows.map((r, i) => `<div class="impart-pk-log-line normal">${i + 1}. ${escapeGachaHtml(r.name)} · 轮回等级 ${Number(r.root_level || 0)}</div>`).join('')
+                    : '<div class="impart-pk-log-line normal">轮回排行暂无数据</div>';
+            } catch (err) {
+                box.innerHTML = '<div class="impart-pk-log-line normal">排行加载失败</div>';
+            }
         }
 
         function renderImpartCards() {
@@ -3563,6 +3998,47 @@
             renderImpartPkStatus();
         }
 
+        /* 商店数量辅助函数 */
+        function normalizeShopQuantity(input, max) {
+            let val = parseInt(input.value);
+            if (isNaN(val) || val < 1) val = 1;
+            if (val > max) val = max;
+            input.value = val;
+            updateShopTotal(input);
+            return val;
+        }
+        function updateShopTotal(input) {
+            const card = input.closest('.item-card');
+            if (!card) return;
+            const price = parseInt(card.dataset.price) || parseInt(card.dataset.cost) || 0;
+            const qty = parseInt(input.value) || 1;
+            const el = card.querySelector('.shop-total');
+            if (el) el.textContent = `总 ${number_to(price * qty)}`;
+        }
+        function setShopMaxQuantity(btn) {
+            const card = btn.closest('.item-card');
+            if (!card) return;
+            const price = parseInt(card.dataset.price) || 0;
+            const cost = parseInt(card.dataset.cost) || 0;
+            const unitPrice = price || cost;
+            const input = card.querySelector('.shop-qty-input');
+            if (!input || !unitPrice) return;
+            let max = 99;
+            if (price > 0) {
+                const stone = Number((state.profile || {}).stone || 0);
+                max = Math.min(Math.floor(stone / price) || 0, 99);
+            }
+            if (cost > 0) {
+                const shop = state.worldBossShop || {};
+                const integral = Number(shop.boss_integral || 0);
+                max = Math.min(Math.floor(integral / cost) || 0, 99);
+                const weeklyLeft = parseInt(card.dataset.weeklyLeft);
+                if (weeklyLeft > 0 && weeklyLeft < max) max = weeklyLeft;
+            }
+            input.value = Math.max(max, 1);
+            updateShopTotal(input);
+        }
+
         function renderShop() {
             const list = $('shop-list');
             const goods = state.shop || [];
@@ -3571,15 +4047,24 @@
                 list.innerHTML = `<div class="item-card"><div class="item-name">暂无可购买商品</div></div>`;
                 return;
             }
-            list.innerHTML = goods.map(item => `
-                <div class="item-card">
-                    <div class="item-name" title="${item.name}">${item.name}</div>
-                    <div class="item-meta">${item.type} · ${item.level}</div>
-                    <div class="item-meta">${item.desc || '暂无描述'}</div>
-                    <div class="item-count"><span>价格</span><b>${number_to(item.price || 1000)} 灵石</b></div>
-                    <button class="btn" onclick="buyShopItem(${item.id}, this)">购买</button>
-                </div>
-            `).join('');
+            const stone = Number((state.profile || {}).stone || 0);
+            list.innerHTML = goods.map(item => {
+                const price = item.price || 1000;
+                return `
+                    <div class="item-card" data-price="${price}">
+                        <div class="item-name" title="${item.name}">${item.name}</div>
+                        <div class="item-meta">${item.type} · ${item.level}</div>
+                        <div class="item-meta">${item.desc || '暂无描述'}</div>
+                        <div class="item-count"><span>单价</span><b>${number_to(price)} 灵石</b></div>
+                        <div class="shop-qty-row" style="display:flex;align-items:center;gap:4px;margin:6px 0;">
+                            <input class="shop-qty-input" type="number" value="1" min="1" max="99" style="width:50px;padding:2px 4px;text-align:center;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--text);" oninput="updateShopTotal(this)">
+                            <button style="font-size:11px;padding:2px 8px;border-radius:8px;border:0;cursor:pointer;color:#2b1500;font-weight:700;background:var(--gold);" onclick="setShopMaxQuantity(this)" title="最大可购买数量">最大</button>
+                            <span class="shop-total" style="font-size:12px;color:var(--gold);">总 ${number_to(price)}</span>
+                        </div>
+                        <button class="btn" onclick="buyShopItem(${item.id}, this)">购买</button>
+                    </div>
+                `;
+            }).join('');
         }
 
         function renderWorldBossShop() {
@@ -3612,16 +4097,24 @@
                 const limitText = weeklyLimit > 0
                     ? `本周 ${weeklyPurchased}/${weeklyLimit}，剩余 ${weeklyLeft}`
                     : '本周不限购';
-                const disabledText = canExchange ? '' : 'disabled';
+                const btnDisabled = !canExchange || (weeklyLeft <= 0 && weeklyLimit > 0);
                 const btnText = weeklyLeft <= 0 && weeklyLimit > 0 ? '本周已售罄' : '兑换';
+                const inpDisabled = btnDisabled;
                 return `
-                    <div class="item-card">
+                    <div class="item-card" data-cost="${cost}" data-weekly-left="${weeklyLeft}">
                         <div class="item-name" title="${item.name || ''}">${item.name || '未知商品'}</div>
                         <div class="item-meta">${item.type || '未知'} · ${item.level || '凡品'}</div>
                         <div class="item-meta">${item.desc || '暂无描述'}</div>
                         <div class="item-count"><span>消耗</span><b>${number_to(cost)} 世界积分</b></div>
                         <div class="item-meta">${limitText}</div>
-                        <button class="btn" ${disabledText} onclick="exchangeWorldBossItem(${Number(item.shop_id || 0)}, this)">${btnText}</button>
+                        ${!inpDisabled ? `
+                        <div class="shop-qty-row" style="display:flex;align-items:center;gap:4px;margin:6px 0;">
+                            <input class="shop-qty-input" type="number" value="1" min="1" max="${Math.min(99, weeklyLeft || 99)}" style="width:50px;padding:2px 4px;text-align:center;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--text);" oninput="updateShopTotal(this)">
+                            <button style="font-size:11px;padding:2px 8px;border-radius:8px;border:0;cursor:pointer;color:#2b1500;font-weight:700;background:var(--gold);" onclick="setShopMaxQuantity(this)" title="最大可兑换数量">最大</button>
+                            <span class="shop-total" style="font-size:12px;color:var(--gold);">总 ${number_to(cost)}</span>
+                        </div>
+                        ` : ''}
+                        <button class="btn" ${btnDisabled ? 'disabled' : ''} onclick="exchangeWorldBossItem(${Number(item.shop_id || 0)}, this)">${btnText}</button>
                     </div>
                 `;
             }).join('');
@@ -3705,13 +4198,16 @@
 
         async function buyShopItem(itemId, btn) {
             if (!itemId || !btn) return;
+            const card = btn.closest('.item-card');
+            const qtyInput = card ? card.querySelector('.shop-qty-input') : null;
+            const quantity = qtyInput ? normalizeShopQuantity(qtyInput, 99) : 1;
             btn.disabled = true;
             const oldText = btn.textContent;
             btn.textContent = '购买中...';
             try {
                 const data = await api('/game/api/shop/buy', {
                     method: 'POST',
-                    body: JSON.stringify({ item_id: itemId, quantity: 1 })
+                    body: JSON.stringify({ item_id: itemId, quantity })
                 });
                 toast(data.message || '购买成功');
                 await loadProfileOnly();
@@ -3727,13 +4223,16 @@
 
         async function exchangeWorldBossItem(shopId, btn) {
             if (!shopId || !btn) return;
+            const card = btn.closest('.item-card');
+            const qtyInput = card ? card.querySelector('.shop-qty-input') : null;
+            const quantity = qtyInput ? normalizeShopQuantity(qtyInput, 99) : 1;
             btn.disabled = true;
             const oldText = btn.textContent;
             btn.textContent = '兑换中...';
             try {
                 const data = await api('/game/api/world-boss/exchange', {
                     method: 'POST',
-                    body: JSON.stringify({ shop_id: shopId, quantity: 1 })
+                    body: JSON.stringify({ shop_id: shopId, quantity })
                 });
                 toast(data.message || '兑换成功');
                 state.worldBossShop = data.shop || state.worldBossShop;
@@ -4040,10 +4539,66 @@
                     dual === 'refusal' ? 'refusal' : 'direct';
                 $('settings-friend').value = data.settings.friend_request_policy || 'all';
                 await loadFriendRequests();
+                loadPasswordStatus();
             } catch (err) {
                 $('settings-status').textContent = '加载失败';
                 toast(err.message);
             }
+        }
+
+        async function loadPasswordStatus() {
+            try {
+                const data = await api('/api/v1/auth/password');
+                const configured = !!data.password_configured;
+                $('pwd-status').textContent = configured ? '已设置' : '未设置';
+                const wrap = $('pwd-current-wrap');
+                if (wrap) {
+                    wrap.style.display = configured ? '' : 'none';
+                    $('pwd-current-hint').textContent = configured
+                        ? '修改密码需要验证当前密码；忘记密码时请重新通过 QQ 一次性 Token 登录后重设。'
+                        : '';
+                }
+            } catch (err) {
+                $('pwd-status').textContent = '状态获取失败';
+            }
+        }
+
+        async function saveWebPassword() {
+            const newPassword = $('pwd-new').value;
+            if (!newPassword) { toast('请输入新密码'); return; }
+            const currentPassword = ($('pwd-current') ? $('pwd-current').value : '');
+            try {
+                const data = await api('/api/v1/auth/password', {
+                    method: 'POST',
+                    body: JSON.stringify({ new_password: newPassword, current_password: currentPassword })
+                });
+                toast(data.message || 'Web 密码已保存');
+                $('pwd-new').value = '';
+                if ($('pwd-current')) $('pwd-current').value = '';
+                hidePasswordReminder();
+                loadPasswordStatus();
+            } catch (err) { toast(err.message); }
+        }
+
+        async function resetWebPassword() {
+            const newPassword = $('pwd-new').value;
+            if (!newPassword) { toast('请输入新密码'); return; }
+            if (!confirm('确认通过本次 Token 会话重设 Web 密码？')) return;
+            try {
+                const data = await api('/api/v1/auth/password/reset', {
+                    method: 'POST',
+                    body: JSON.stringify({ new_password: newPassword })
+                });
+                toast(data.message || 'Web 密码已重设');
+                $('pwd-new').value = '';
+                hidePasswordReminder();
+                loadPasswordStatus();
+            } catch (err) { toast(err.message); }
+        }
+
+        function hidePasswordReminder() {
+            const el = $('pwd-reminder');
+            if (el) el.style.display = 'none';
         }
 
         async function saveSettings() {
@@ -5319,6 +5874,19 @@
         });
         $('btn-settings-save').addEventListener('click', saveSettings);
         $('btn-settings-reload').addEventListener('click', loadSettings);
+        $('btn-pwd-save').addEventListener('click', saveWebPassword);
+        const pwdResetBtn = $('btn-pwd-reset');
+        if (pwdResetBtn) pwdResetBtn.addEventListener('click', resetWebPassword);
+        const pwdReminderSet = $('pwd-reminder-set');
+        if (pwdReminderSet) pwdReminderSet.addEventListener('click', (e) => {
+            e.preventDefault();
+            switchTab('settings');
+        });
+        const pwdReminderDismiss = $('pwd-reminder-dismiss');
+        if (pwdReminderDismiss) pwdReminderDismiss.addEventListener('click', (e) => {
+            e.preventDefault();
+            hidePasswordReminder();
+        });
         $('btn-dual-accept').addEventListener('click', () => {
             if (!pendingDualToken) return;
             $('dual-modal').classList.remove('show');

@@ -45,25 +45,25 @@ async def pic2txt_byOCR(img_path, filename):
         return ''
 
 
-async def upload_OcrResult(result_text, filename):
+async def upload_OcrResult(result_text, filename, UserModel):
     try:
         params = {
             'md5': filename,
             'text': b64encode(result_text.encode('utf-8')).decode('utf-8'),
         }
-        client = await get_client_yuyuko()
+        client = await get_client_yuyuko(UserModel)
         resp = await client.post(upload_url, json=params)
         result = orjson.loads(resp.content)
         if result['code'] == 200:
-            await downlod_OcrResult()
+            await downlod_OcrResult(UserModel)
     except Exception:
         logger.error(traceback.format_exc())
 
 
-async def downlod_OcrResult():
+async def downlod_OcrResult(UserModel):
     try:
         global ocr_filename_data
-        client = await get_client_yuyuko()
+        client = await get_client_yuyuko(UserModel)
         resp = await client.get(download_url)
         result = orjson.loads(resp.content)
         with open(ocr_data_path, 'w', encoding='UTF-8') as f:
