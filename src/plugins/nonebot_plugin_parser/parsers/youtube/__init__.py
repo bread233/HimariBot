@@ -21,8 +21,11 @@ class YouTubeParser(BaseParser):
                 "youtube.com",
             )
 
-    @handle("youtu", r"youtu\.be/[A-Za-z\d\._\?%&\+\-=/#]+")
-    @handle("youtube", r"youtube\.com/(?:watch|shorts)(?:/[A-Za-z\d_\-]+|\?v=[A-Za-z\d_\-]+)")
+    @handle("youtu", r"(?:www\.)?youtu\.be/[A-Za-z\d_-]+(?:\?[^\s]*)?")
+    @handle(
+        "youtube",
+        r"(?:www\.|m\.)?youtube\.com/(?:watch\?v=|shorts/|live/|embed/)[A-Za-z\d_-]+(?:[^\s]*)?",
+    )
     async def _parse_video(self, searched: re.Match[str]):
         url = f"https://{searched.group(0)}"
         return await self.parse_video(url)
