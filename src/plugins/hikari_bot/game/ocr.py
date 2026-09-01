@@ -60,29 +60,34 @@ async def upload_OcrResult(result_text, filename, UserModel):
         logger.error(traceback.format_exc())
 
 
-async def downlod_OcrResult(UserModel):
+def _load_local_ocr_cache():
     try:
-        global ocr_filename_data
+        with open(ocr_data_path, 'rb') as f:
+            raw = f.read().strip()
+        return orjson.loads(raw) if raw else {}
+    except (FileNotFoundError, orjson.JSONDecodeError):
+        return {}
+
+
+async def downlod_OcrResult(UserModel):
+    global ocr_filename_data
+
+    try:
         client = await get_client_yuyuko(UserModel)
         resp = await client.get(download_url)
         result = orjson.loads(resp.content)
-        with open(ocr_data_path, 'w', encoding='UTF-8') as f:
-            if result['code'] == 200 and result['data']:
-                f.write(orjson.dumps(result['data']).decode())
-                ocr_filename_data = result['data']
-            else:
-                logger.error(result)
-                with open(ocr_data_path, 'rb') as f:  # noqa: PLW2901
-                    ocr_filename_data = orjson.loads(f.read())
-        return
+
+        if result['code'] == 200 and result['data']:
+            with open(ocr_data_path, 'wb') as f:
+                f.write(orjson.dumps(result['data']))
+            ocr_filename_data = result['data']
+        else:
+            logger.error(result)
+            ocr_filename_data = _load_local_ocr_cache()
     except Exception:
         logger.error('请检查token是否配置正确，如无问题请尝试重启，可能是网络波动或服务器原因')
         logger.error(traceback.format_exc())
-        try:
-            with open(ocr_data_path, 'rb') as f:
-                ocr_filename_data = orjson.loads(f.read())
-        except Exception:
-            ocr_filename_data = None
+        ocr_filename_data = _load_local_ocr_cache()
 
 
 async def get_Random_Ocr_Pic():

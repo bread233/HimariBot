@@ -4,7 +4,7 @@ import nonebot
 
 import sys
 
-sys.modules.setdefault("nonebot_plugin_alconna", sys.modules[__name__])
+# Keep the official `nonebot_plugin_alconna` package authoritative; do not alias this vendored copy into sys.modules.
 
 #nonebot.load_plugin("nonebot_plugin_alconna.uniseg")
 
