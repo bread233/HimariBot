@@ -34,6 +34,8 @@ class Config(BaseModel):
     """视频/音频最大时长"""
     parser_append_url: bool = False
     """是否在解析结果中附加原始URL"""
+    parser_send_video: bool = False
+    """是否下载并发送视频内容，默认关闭"""
     parser_disabled_platforms: list[PlatformEnum] = []
     """禁止的解析器"""
     parser_bili_video_codes: list[VideoCodecs] = [
@@ -143,6 +145,11 @@ class Config(BaseModel):
     def append_url(self) -> bool:
         """是否在解析结果中附加原始URL"""
         return self.parser_append_url
+
+    @property
+    def send_video(self) -> bool:
+        """是否下载并发送视频内容"""
+        return self.parser_send_video
 
     @property
     def custom_font(self) -> Path | None:

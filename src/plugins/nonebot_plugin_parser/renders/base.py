@@ -47,6 +47,11 @@ class BaseRenderer(ABC):
             self.result.contents,
             self.result.repost.contents if self.result.repost else (),
         ):
+            # 普通视频默认不下载也不发送；该开关对所有平台统一生效。
+            # GIF 仍按图片内容处理，不受此开关影响。
+            if isinstance(cont, VideoContent) and not cont.is_gif and not pconfig.send_video:
+                continue
+
             path = await cont.path_task.safe_get(on_error)
             if path is None:
                 continue
