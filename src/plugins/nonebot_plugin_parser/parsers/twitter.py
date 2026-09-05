@@ -57,7 +57,8 @@ decoder = Decoder(VxTwitterResponse)
 class TwitterParser(BaseParser):
     platform: ClassVar[Platform] = Platform(name=PlatformEnum.TWITTER, display_name="小蓝鸟")
 
-    @handle("x.com", r"x.com/[0-9-a-zA-Z_]{1,20}/status/([0-9]+)")
+    @handle("x.com", r"(?:www\.)?x\.com/[0-9-a-zA-Z_]{1,20}/status/([0-9]+)")
+    @handle("twitter.com", r"(?:www\.)?twitter\.com/[0-9-a-zA-Z_]{1,20}/status/([0-9]+)")
     async def _parse(self, searched: re.Match[str]) -> ParseResult:
         url = f"https://{searched.group(0)}"
         return await self.parse_by_vxapi(url)
@@ -65,7 +66,7 @@ class TwitterParser(BaseParser):
     async def parse_by_vxapi(self, url: str):
         """使用 vxtwitter API 解析 Twitter 链接"""
 
-        api_url = url.replace("x.com", "api.vxtwitter.com")
+        api_url = re.sub(r"(?:www\.)?(?:x|twitter)\.com", "api.vxtwitter.com", url, count=1)
         async with AsyncClient(headers=self.headers, timeout=self.timeout) as client:
             response = await client.get(api_url)
             response.raise_for_status()

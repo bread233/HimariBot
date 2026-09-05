@@ -15,7 +15,9 @@ EMOJI_SOURCE = EmojiCDNSource(
     base_url=pconfig.emoji_cdn,
     style=pconfig.emoji_style,
     cache_dir=pconfig.cache_dir / "emojis",
-    show_progress=True,
+    # Bot 进程已有全局 Rich Progress；apilmoji 再启动 Live 会触发 LiveError。
+    # 关闭这里只影响终端进度显示，不影响 emoji 下载和缓存。
+    show_progress=False,
 )
 
 DEFAULT_THEME = CardTheme(
