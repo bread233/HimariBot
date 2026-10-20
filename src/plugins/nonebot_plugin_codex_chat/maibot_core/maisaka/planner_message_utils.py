@@ -8,7 +8,7 @@ from typing import Optional, Sequence
 
 from ..chat.message_receive.message import SessionMessage
 from ..common.data_models.message_component_data_model import (
-
+    MessageSequence,
     ReplyComponent,
     TextComponent,
 )
