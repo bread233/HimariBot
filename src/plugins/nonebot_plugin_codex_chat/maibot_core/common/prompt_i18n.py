@@ -327,6 +327,19 @@ def load_prompt(
     **kwargs: object,
 ) -> str:
     normalized_name = normalize_prompt_name(name)
+    external_root = Path("/app/data/nonebot_chat_agent/codex_chat_prompts")
+    if prompts_root is None and external_root.is_dir():
+        try:
+            return _format_prompt_template(
+                normalized_name,
+                _read_prompt_template(resolve_prompt_path(
+                    normalized_name, locale, category, external_root,
+                    custom_prompts_root or CUSTOM_PROMPTS_ROOT,
+                )),
+                **kwargs,
+            )
+        except FileNotFoundError:
+            pass
     prompt_path = resolve_prompt_path(
         name=normalized_name,
         locale=locale,
