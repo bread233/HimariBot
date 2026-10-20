@@ -112,7 +112,7 @@ class MaisakaExpressionSelector:
             for expression in expressions
             if expression.id is not None and expression.situation and expression.style
         ]
-        if len(all_candidates) < 10:
+        if not all_candidates:
             return []
 
         high_count_candidates = [item for item in all_candidates if (item.get("count", 1) or 1) > 1]
