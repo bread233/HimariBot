@@ -1,4 +1,4 @@
-﻿"""Maisaka 非 CLI 运行时。"""
+"""Maisaka 非 CLI 运行时。"""
 
 from collections import deque
 from datetime import datetime
@@ -91,6 +91,7 @@ class MaisakaHeartFlowChatting:
             session_id=session_id,
             is_group_chat=self.chat_stream.is_group_session,
         )
+        self._chat_loop_service._reply_frequency_provider = self._get_effective_reply_frequency
         self._chat_history: list[LLMContextMessage] = []
         self.history_loop: list[CycleDetail] = []
 

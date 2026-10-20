@@ -507,6 +507,7 @@ class MaisakaChatLoopService:
         self._interrupt_flag: asyncio.Event | None = None
         self._tool_registry: ToolRegistry | None = None
         self._custom_chat_system_prompt = chat_system_prompt
+        self._reply_frequency_provider = None
         self._prompt_load_lock = asyncio.Lock()
         self._llm_chat_clients: dict[str, LLMServiceClient] = {}
 
@@ -738,12 +739,21 @@ class MaisakaChatLoopService:
     def build_prompt_template_context(self, tools_section: str = "") -> dict[str, str]:
         """构造 Maisaka prompt 模板的公共渲染参数。"""
 
+        if self._reply_frequency_provider is not None:
+            frequency = self._reply_frequency_provider()
+        else:
+            frequency = ChatConfigUtils.get_talk_value(
+                self._session_id,
+                is_group_chat=self._is_group_chat,
+            )
+
         return {
             "bot_name": global_config.bot.nickname,
             "file_tools_section": tools_section,
             "group_chat_attention_block": self._build_group_chat_attention_block(),
             "identity": self.personality_prompt,
             "timing_gate_wait_rule": self._build_timing_gate_wait_rule(),
+            "reply_frequency": f"{max(0.0, float(frequency)):.3f}",
         }
 
     _TOOL_RENDER_ORDER: tuple[str, ...] = (
