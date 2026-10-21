@@ -12,6 +12,13 @@ from .config import get_config
 from .maibot_core.bridge import MaibotInboundMessage, handle_inbound_message
 from .maibot_core.time_utils import normalize_unix_timestamp
 from .maibot_core.bootstrap import bootstrap_src_alias
+from .onebot_reply import (
+    build_onebot_message,
+    call_onebot_send,
+    resolve_reply_message_id,
+    send_captured_reply,
+    validate_reply_route,
+)
 
 bootstrap_src_alias()
 
@@ -273,13 +280,6 @@ def _build_onebot_message_text(message: Any) -> tuple[Optional[str], list[str]]:
     return None, []
 
 
-def _get_component_kind(component: Any) -> str:
-    """获取组件的格式名称。"""
-
-    format_name = getattr(component, "format_name", None)
-    return format_name() if callable(format_name) else (format_name or type(component).__name__)
-
-
 async def _build_onebot_message(
     message: Any,
     validated_reply_message_id: str = "",
@@ -292,63 +292,11 @@ async def _build_onebot_message(
     - 失败时返回 (None, unsupported_kinds)
     """
 
-    from nonebot.adapters.onebot.v11 import Message, MessageSegment
-
-    raw_message = getattr(message, "raw_message", None)
-    components = getattr(raw_message, "components", None) if raw_message is not None else None
-    if not components:
-        plain_text = str(getattr(message, "processed_plain_text", "") or "").strip()
-        if plain_text:
-            return Message(plain_text), []
+    try:
+        return await build_onebot_message(message, validated_reply_message_id)
+    except Exception as exc:
+        logger.warning(f"codex_chat_host_send_message_build_failed error={type(exc).__name__}: {exc}")
         return None, []
-
-    message_parts: list = []
-    unsupported_kinds: list[str] = []
-    reply_added = False
-
-    for component in components:
-        kind = _get_component_kind(component)
-
-        if kind == "reply":
-            if validated_reply_message_id and not reply_added:
-                message_parts.append(MessageSegment.reply(validated_reply_message_id))
-                reply_added = True
-            continue
-
-        if kind == "text":
-            text_val = str(getattr(component, "text", "") or "").strip()
-            if text_val:
-                message_parts.append(MessageSegment.text(text_val))
-            continue
-
-        if kind in ("image", "emoji"):
-            binary_data: Optional[bytes] = getattr(component, "binary_data", None) or b""
-            if not binary_data:
-                try:
-                    if kind == "image":
-                        await component.load_image_binary()
-                    else:
-                        await component.load_emoji_binary()
-                    binary_data = getattr(component, "binary_data", None) or b""
-                except Exception as exc:
-                    logger.warning(
-                        f"codex_chat_host_send_media_load_failed kind={kind} "
-                        f"error={type(exc).__name__}: {exc}"
-                    )
-                    continue
-            if binary_data:
-                message_parts.append(MessageSegment.image(binary_data))
-            continue
-
-        unsupported_kinds.append(kind)
-        logger.warning(
-            f"codex_chat_host_send_unsupported_component kind={kind}"
-        )
-
-    if not message_parts:
-        return None, unsupported_kinds
-
-    return Message(message_parts), unsupported_kinds
 
 
 async def _codex_chat_host_send_interceptor(
@@ -434,28 +382,20 @@ async def _codex_chat_host_send_interceptor(
         )
         return False
 
-    validated_reply_message_id = ""
-    requested_reply_message_id = str(reply_message_id or "").strip()
-    if requested_reply_message_id:
-        reply_route = _inbound_route_by_message_id.get(requested_reply_message_id)
-        route_age = time.time() - float((reply_route or {}).get("ts", 0))
-        reply_route_valid = bool(
-            reply_route
-            and route_age <= _HOST_TARGET_TTL_SECONDS
-            and bool(reply_route.get("is_group")) == is_group
-            and str(reply_route.get("target_id", "") or "").strip() == target_id
-            and (
-                not str(reply_route.get("bot_self_id", "") or "").strip()
-                or str(reply_route.get("bot_self_id", "") or "").strip() == bot_self_id
-            )
+    requested_reply_message_id = resolve_reply_message_id(reply_message_id, message, reply_message)
+    validated_reply_message_id, quote_downgrade_reason = validate_reply_route(
+        _inbound_route_by_message_id,
+        requested_reply_message_id,
+        is_group=is_group,
+        target_id=target_id,
+        bot_self_id=bot_self_id,
+        ttl_seconds=_HOST_TARGET_TTL_SECONDS,
+    )
+    if requested_reply_message_id and quote_downgrade_reason:
+        logger.warning(
+            f"codex_chat_reply_quote_downgraded requested_reply_message_id={requested_reply_message_id} "
+            f"target_id={target_id} is_group={is_group} reason={quote_downgrade_reason}"
         )
-        if reply_route_valid:
-            validated_reply_message_id = requested_reply_message_id
-        else:
-            logger.warning(
-                f"codex_chat_reply_quote_downgraded reply_message_id={requested_reply_message_id} "
-                f"target_id={target_id} is_group={is_group} reason=invalid_or_cross_session"
-            )
 
     # 5. 构建 OneBot Message（支持文本 + 图片 + 表情及已验证的引用组件）
     onebot_msg, unsupported_kinds = await _build_onebot_message(
@@ -477,24 +417,21 @@ async def _codex_chat_host_send_interceptor(
         f"resolved_via={resolved_via} "
         f"message_group_id={message_group_id} "
         f"reply_message_id={reply_message_id} "
+        f"requested_reply_message_id={requested_reply_message_id or '-'} "
+        f"validated_reply_message_id={validated_reply_message_id or '-'} "
+        f"native_reply_segment={int(bool(validated_reply_message_id))} "
         f"bot_self_id={bot_self_id} "
         f"parts={len(onebot_msg)} "
         f"non_text_kinds={','.join(unsupported_kinds) if unsupported_kinds else '-'}"
     )
 
     try:
-        if is_group:
-            api_response = await bot.call_api(
-                "send_group_msg",
-                group_id=int(target_id),
-                message=onebot_msg,
-            )
-        else:
-            api_response = await bot.call_api(
-                "send_private_msg",
-                user_id=int(target_id),
-                message=onebot_msg,
-            )
+        api_response = await call_onebot_send(
+            bot,
+            is_group=is_group,
+            target_id=target_id,
+            message=onebot_msg,
+        )
     except Exception as exc:
         logger.error(
             f"codex_chat_host_send_failed message_id={message_id} "
@@ -708,9 +645,35 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
             logger.debug(f"codex_chat_send_from_maibot skip_empty index={index}")
             continue
         try:
-            await bot.send(event, reply.text)
+            is_group = isinstance(event, GroupMessageEvent)
+            target_id = str(
+                getattr(event, "group_id" if is_group else "user_id", "") or ""
+            ).strip()
+            requested_reply_message_id = str(reply.reply_to_message_id or "").strip()
+            _, validated_reply_message_id, downgrade_reason, onebot_message = await send_captured_reply(
+                bot,
+                reply,
+                _inbound_route_by_message_id,
+                is_group=is_group,
+                target_id=target_id,
+                bot_self_id=str(getattr(bot, "self_id", "") or "").strip(),
+                ttl_seconds=_HOST_TARGET_TTL_SECONDS,
+            )
+            if requested_reply_message_id and downgrade_reason:
+                logger.warning(
+                    f"codex_chat_capture_reply_quote_downgraded "
+                    f"requested_reply_message_id={requested_reply_message_id} "
+                    f"reason={downgrade_reason}"
+                )
+            if onebot_message is None:
+                continue
             sent_count += 1
-            logger.info(f"codex_chat_send_from_maibot sent index={index}")
+            logger.info(
+                f"codex_chat_send_from_maibot sent index={index} "
+                f"requested_reply_message_id={requested_reply_message_id or '-'} "
+                f"validated_reply_message_id={validated_reply_message_id or '-'} "
+                f"native_reply_segment={int(bool(validated_reply_message_id))}"
+            )
         except Exception as exc:
             logger.exception(f"codex_chat_send_from_maibot failed index={index} error={exc}")
     logger.info(

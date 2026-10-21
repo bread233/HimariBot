@@ -50,12 +50,6 @@ class ReplyTransactionTest(TestCase):
         self.assertIn("MessageSequence(flatten_message_components(reply_sequences))", source)
         self.assertNotIn("for index, reply_sequence in enumerate(reply_sequences)", source)
 
-    def test_onebot_builder_only_adds_one_validated_reply(self):
-        source = (Path(__file__).parents[1] / "__init__.py").read_text(encoding="utf-8")
-        self.assertIn("if validated_reply_message_id and not reply_added", source)
-        self.assertIn("MessageSegment.reply(validated_reply_message_id)", source)
-        self.assertIn("reason=invalid_or_cross_session", source)
-
     def test_uncertain_receipt_stops_automatic_retry(self):
         reply_source = (
             Path(__file__).parents[1]

@@ -74,7 +74,7 @@ def get_tool_spec() -> ToolSpec:
                 "set_quote": {
                     "type": "boolean",
                     "description": "以引用回复的方式发送这条回复，不用每句都引用。",
-                    "default": True,
+                    "default": False,
                 },
                 "reference_info": {
                     "type": "string",
@@ -136,7 +136,7 @@ async def handle_tool(
     latest_thought = context.reasoning if context is not None else invocation.reasoning
     reference_info = str(invocation.arguments.get("reference_info") or "").strip()
     target_message_id = str(invocation.arguments.get("msg_id") or "").strip()
-    set_quote = bool(invocation.arguments.get("set_quote", True))
+    set_quote = bool(invocation.arguments.get("set_quote", False))
     reply_tool_args = {
         key: value
         for key, value in dict(invocation.arguments or {}).items()
@@ -158,6 +158,12 @@ async def handle_tool(
         )
     force_quote = _should_force_quote(target_message)
     effective_set_quote = enable_reply_quote and (set_quote or force_quote)
+    logger.info(
+        f"{tool_ctx.runtime.log_prefix} reply_quote_decision "
+        f"requested_reply_message_id={target_message_id} set_quote={set_quote} "
+        f"force_quote={force_quote} enable_reply_quote={enable_reply_quote} "
+        f"effective_set_quote={effective_set_quote}"
+    )
 
     try:
         replyer = replyer_manager.get_replyer(
