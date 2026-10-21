@@ -49,7 +49,12 @@ from .context_messages import (
 from .history_post_processor import process_chat_history_after_cycle
 from .history_utils import build_prefixed_message_sequence, build_session_message_visible_text
 from .reply_transaction import all_send_results_confirmed
-from .reply_target_guard import evaluate_reply_target
+from .reply_target_guard import (
+    clear_active_reply_request_ids,
+    collect_active_reply_request_ids,
+    evaluate_reply_target,
+    is_active_direct_reply_target,
+)
 from .mid_term_memory import build_mid_term_memory_message, insert_mid_term_memory_message
 from .monitor_events import (
     emit_cycle_end,
@@ -507,7 +512,13 @@ class MaisakaReasoningEngine:
             now_epoch=time.time(),
             max_age_seconds=float(global_config.chat.reply_target_max_age_seconds),
             candidate_messages=self._runtime.message_cache,
+            allow_expired_direct=is_active_direct_reply_target(self._runtime, target_message),
         )
+        if result.allowed and result.reason.startswith("active_direct_expired:"):
+            logger.info(
+                f"{self._runtime.log_prefix} maibot_visible_target_expiry_bypassed "
+                f"target_msg_id={target_message_id} age={result.age_seconds:.3f} reason={result.reason}"
+            )
         return target_message_id, target_message, "" if result.allowed else result.reason
 
     @staticmethod
@@ -582,6 +593,8 @@ class MaisakaReasoningEngine:
                     )
                     continue
 
+                self._runtime._active_reply_request_ids = collect_active_reply_request_ids(cached_messages)
+                self._runtime._active_web_search_queries.clear()
                 try:
                     timing_gate_required = self._is_independent_timing_gate_enabled()
                     if not timing_gate_required:
@@ -596,6 +609,9 @@ class MaisakaReasoningEngine:
                                 await self._ingest_messages(pending_round_messages)
                                 cached_messages = pending_round_messages
                                 anchor_message = pending_round_messages[-1]
+                                self._runtime._active_reply_request_ids.update(
+                                    collect_active_reply_request_ids(pending_round_messages)
+                                )
                                 logger.info(
                                     f"{self._runtime.log_prefix} 内部轮次开始前已合并新消息: "
                                     f"消息数={len(pending_round_messages)} 回合={round_index + 1}"
@@ -960,6 +976,8 @@ class MaisakaReasoningEngine:
                             if not planner_interrupted:
                                 round_index += 1
                 finally:
+                    clear_active_reply_request_ids(self._runtime)
+                    self._runtime._active_web_search_queries.clear()
                     if self._runtime._agent_state == self._runtime._STATE_RUNNING:
                         self._runtime._agent_state = self._runtime._STATE_STOP
                     if self._runtime._running:
@@ -2119,6 +2137,15 @@ class MaisakaReasoningEngine:
         total_tool_count = len(tool_calls)
         for tool_index, tool_call in enumerate(tool_calls, start=1):
             invocation = self._build_tool_invocation(tool_call, latest_thought)
+            if invocation.tool_name == "web_search":
+                query = " ".join(str(invocation.arguments.get("query") or "").split()).casefold()
+                if query and query in self._runtime._active_web_search_queries:
+                    logger.warning(
+                        f"{self._runtime.log_prefix} codex_chat_web_search_duplicate "
+                        f"query={query!r} active_request=1"
+                    )
+                elif query:
+                    self._runtime._active_web_search_queries.add(query)
             self._runtime._update_stage_status(
                 f"工具执行 · {invocation.tool_name}",
                 f"第 {tool_index}/{total_tool_count} 个工具",
