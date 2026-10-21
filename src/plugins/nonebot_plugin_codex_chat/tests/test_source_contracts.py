@@ -31,6 +31,9 @@ class SourceContractTest(unittest.TestCase):
         self.assertIn("return True", engine)
         self.assertIn("_visible_delivery_succeeded", engine)
         self.assertIn("_check_visible_target", engine)
+        self.assertIn("clear_active_reply_request_ids(self._runtime)", engine)
+        self.assertNotIn("active_request_ids.add(anchor_message_id)", engine)
+        self.assertIn("codex_chat_web_search_duplicate", engine)
 
     def test_new_config_fields_have_defaults(self):
         config = self.read("maibot_core/config/official_configs.py")
