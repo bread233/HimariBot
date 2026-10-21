@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 
-QUESTION_CUES = ("?", "？", "吗", "呢", "怎么", "为什么", "为啥", "什么", "谁", "哪", "多少", "能不能", "可以吗")
+QUESTION_CUES = ("吗", "怎么", "为什么", "为啥", "什么", "谁", "哪", "多少", "能不能", "可以吗")
 
 
 @dataclass(frozen=True)

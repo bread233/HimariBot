@@ -1077,7 +1077,7 @@ def _build_planner_tool_call(
 
     - ``action == "none"`` -> ``[]``（明确不调用任何工具）
     - ``action == "reply"`` -> 必须有 ``anchor_message_id``；自动注入 ``msg_id`` 和
-      ``set_quote=True``（除非调用方已经显式给出 ``set_quote``）。
+      ``set_quote=False``（除非调用方已经显式给出 ``set_quote``）；明确寻址和具体问题由 reply 工具强制引用。
     - ``action == "view_complex_message"`` -> 必须有 ``anchor_message_id``；
       自动注入 ``msg_id``。
     - ``action == "query_jargon"`` -> 必须有非空 ``words`` 列表；``str`` 会被归一为单元素列表。
@@ -1106,7 +1106,7 @@ def _build_planner_tool_call(
             return []
         merged: dict[str, Any] = dict(args or {})
         merged["msg_id"] = anchor_message_id
-        merged.setdefault("set_quote", True)
+        merged.setdefault("set_quote", False)
         return [
             _ToolCall(
                 call_id=f"codex_planner_reply_{uuid.uuid4().hex[:12]}",
