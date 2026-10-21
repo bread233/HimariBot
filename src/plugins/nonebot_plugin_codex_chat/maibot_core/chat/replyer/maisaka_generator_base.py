@@ -106,7 +106,7 @@ class BaseMaisakaReplyGenerator:
 
             return f"你的名字是{bot_name}{bot_aliases}。\n{prompt_personality}"
         except Exception as exc:
-            logger.warning(f"构建 Maisaka 人设提示词失败: {exc}")
+            logger.warning(f"构建 Himari 人设提示词失败: {exc}")
             return "你的名字是麦麦。\n是人类。"
 
     @staticmethod
@@ -587,7 +587,7 @@ class BaseMaisakaReplyGenerator:
                 reply_tool_args=dict(reply_tool_args),
             )
         except Exception as exc:
-            logger.warning(f"Maisaka 回复器 before_model_request Hook 调用失败，将继续使用当前请求消息: {exc}")
+            logger.warning(f"Himari 回复器 before_model_request Hook 调用失败，将继续使用当前请求消息: {exc}")
             return request_messages
 
         raw_messages = hook_result.kwargs.get("messages")
@@ -723,7 +723,7 @@ class BaseMaisakaReplyGenerator:
     ) -> MaisakaReplyContext:
         session_id = self._resolve_session_id(stream_id)
         if not session_id:
-            logger.warning("构建 Maisaka 回复上下文失败：缺少会话标识")
+            logger.warning("构建 Himari 回复上下文失败：缺少会话标识")
             return MaisakaReplyContext()
 
         if sub_agent_runner is None:
@@ -867,7 +867,7 @@ class BaseMaisakaReplyGenerator:
                 if isinstance(before_request_kwargs.get("reply_tool_args"), dict):
                     active_reply_tool_args = dict(before_request_kwargs["reply_tool_args"])
             except Exception as exc:
-                logger.warning(f"Maisaka 回复器 before_request Hook 调用失败，将继续使用当前请求参数: {exc}")
+                logger.warning(f"Himari 回复器 before_request Hook 调用失败，将继续使用当前请求参数: {exc}")
                 before_request_kwargs = {}
 
             active_task_name = str(before_request_kwargs.get("task_name") or default_task_name).strip()
@@ -956,7 +956,7 @@ class BaseMaisakaReplyGenerator:
                     options=LLMGenerationOptions(model_name=active_model_name),
                 )
             except Exception as exc:
-                logger.exception("Maisaka 回复器调用失败")
+                logger.exception("Himari 回复器调用失败")
                 result.error_message = str(exc)
                 result.metrics = GenerationMetrics(
                     prompt_ms=prompt_ms,
@@ -1019,7 +1019,7 @@ class BaseMaisakaReplyGenerator:
                 )
                 after_response_kwargs = after_response_result.kwargs
             except Exception as exc:
-                logger.warning(f"Maisaka 回复器 after_response Hook 调用失败，将继续使用当前回复: {exc}")
+                logger.warning(f"Himari 回复器 after_response Hook 调用失败，将继续使用当前回复: {exc}")
                 after_response_kwargs = {}
             if "response" in after_response_kwargs:
                 hook_modified_response = str(after_response_kwargs.get("response") or "").strip()
@@ -1031,7 +1031,7 @@ class BaseMaisakaReplyGenerator:
                     }
                     hook_rewrite_events.append(rewrite_event)
                     logger.warning(
-                        "Maisaka 回复器回复被 Hook 改写: "
+                        "Himari 回复器回复被 Hook 改写: "
                         f"session={preview_chat_id} attempt={retry_count + 1} "
                         f"before={self._normalize_content(hook_original_response, limit=300)!r} "
                         f"after={self._normalize_content(hook_modified_response, limit=300)!r}"
@@ -1069,7 +1069,7 @@ class BaseMaisakaReplyGenerator:
                     retry_constraints.append(retry_constraint)
                 retry_count += 1
                 logger.warning(
-                    "Maisaka 回复器触发重生成: "
+                    "Himari 回复器触发重生成: "
                     f"session={preview_chat_id} attempt={retry_count} "
                     f"retry={retry_count}/{REPLYER_MAX_HOOK_RETRIES} "
                     f"constraint={'有' if retry_reason else '无'} "
@@ -1081,7 +1081,7 @@ class BaseMaisakaReplyGenerator:
                 continue
             if retry_requested:
                 logger.warning(
-                    f"Maisaka 回复器已达到重生成上限，将使用最后一次回复: "
+                    f"Himari 回复器已达到重生成上限，将使用最后一次回复: "
                     f"session={preview_chat_id} retry={retry_count}/{REPLYER_MAX_HOOK_RETRIES} "
                     f"rule={matched_regex or 'unknown'} "
                     f"pattern={matched_regex_pattern or 'unknown'} "
@@ -1164,21 +1164,21 @@ class BaseMaisakaReplyGenerator:
         )
 
         if show_replyer_reasoning and result.completion.reasoning_text:
-            logger.info(f"Maisaka 回复器思考内容:\n{result.completion.reasoning_text}")
+            logger.info(f"Himari 回复器思考内容:\n{result.completion.reasoning_text}")
 
         if not result.success:
             result.error_message = "回复器返回了空内容"
-            logger.warning("Maisaka 回复器返回了空内容")
+            logger.warning("Himari 回复器返回了空内容")
             return finalize(False)
 
         logger.info(
-            f"Maisaka 回复器生成成功 文本={response_text!r} "
+            f"Himari 回复器生成成功 文本={response_text!r} "
             f"总耗时ms={result.metrics.overall_ms} 重生成次数={retry_count} "
             f"已选表达={result.selected_expression_ids!r}"
         )
         if retry_count > 0:
             logger.info(
-                "Maisaka 回复器重生成完成: "
+                "Himari 回复器重生成完成: "
                 f"session={preview_chat_id} attempts={retry_count + 1} "
                 f"retry_count={retry_count} final={self._normalize_content(response_text, limit=300)!r}"
             )
@@ -1213,7 +1213,7 @@ class BaseMaisakaReplyGenerator:
             console.print(
                 Panel(
                     Group(*renderables),
-                    title="MaiSaka 回复器",
+                    title="Himari 回复器",
                     border_style="bright_yellow",
                     padding=(0, 1),
                 )

@@ -94,7 +94,7 @@ def create_app(
         port: 服务器端口
         enable_static: 是否启用静态文件服务
     """
-    app = FastAPI(title="MaiBot WebUI")
+    app = FastAPI(title="Himari WebUI")
 
     _setup_anti_crawler(app)
     _setup_cors(app, port)

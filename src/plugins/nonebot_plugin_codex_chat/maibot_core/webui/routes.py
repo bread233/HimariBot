@@ -117,7 +117,7 @@ class ResetSetupResponse(BaseModel):
 @router.get("/health")
 async def health_check():
     """健康检查"""
-    return {"status": "healthy", "service": "MaiBot WebUI"}
+    return {"status": "healthy", "service": "Himari WebUI"}
 
 
 @router.post("/auth/verify", response_model=TokenVerifyResponse)

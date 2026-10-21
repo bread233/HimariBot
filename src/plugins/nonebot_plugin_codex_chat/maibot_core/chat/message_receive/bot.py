@@ -649,10 +649,10 @@ class ChatBot:
 
             async def preprocess():
                 if group_info is None:
-                    logger.debug("[私聊]检测到私聊消息，路由到 Maisaka")
+                    logger.debug("[私聊]检测到私聊消息，路由到 Himari")
                     await self.heartflow_message_receiver.process_message(message)
                 else:
-                    logger.debug("[群聊]检测到群聊消息，路由到 Maisaka")
+                    logger.debug("[群聊]检测到群聊消息，路由到 Himari")
                     await self.heartflow_message_receiver.process_message(message)
 
             await preprocess()

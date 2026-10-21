@@ -461,7 +461,7 @@ class BuiltinToolRuntimeContext:
     def append_guided_reply_to_chat_history(self, reply_text: str) -> None:
         """将引导回复写回 Maisaka 历史。"""
 
-        bot_name = global_config.bot.nickname.strip() or "MaiSaka"
+        bot_name = global_config.bot.nickname.strip() or "Himari"
         reply_timestamp = datetime.now()
         history_message = build_session_backed_text_message(
             speaker_name=bot_name,
@@ -539,7 +539,7 @@ class BuiltinToolRuntimeContext:
     ) -> None:
         """将 bot 主动发送的表情包同步到 Maisaka 历史。"""
 
-        bot_name = global_config.bot.nickname.strip() or "MaiSaka"
+        bot_name = global_config.bot.nickname.strip() or "Himari"
         reply_timestamp = datetime.now()
         planner_prefix = build_planner_prefix(
             timestamp=reply_timestamp,

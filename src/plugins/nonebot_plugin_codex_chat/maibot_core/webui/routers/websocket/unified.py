@@ -149,7 +149,7 @@ async def _handle_maisaka_monitor_subscribe(connection_id: str, request_id: Opti
         request_id: 请求 ID。
     """
     logger.info(
-        f"MaiSaka 监控订阅请求: connection_id={connection_id} "
+        f"Himari 监控订阅请求: connection_id={connection_id} "
         f"manager_id={id(websocket_manager)}"
     )
     websocket_manager.subscribe(connection_id, domain="maisaka_monitor", topic="main")

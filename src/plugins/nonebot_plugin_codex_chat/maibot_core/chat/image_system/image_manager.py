@@ -201,7 +201,7 @@ class ImageManager:
 
             log_tracked_image_recognition_completed(image_hash)
         except Exception as exc:
-            logger.debug(f"通知 MaiSaka 图片识别完成状态失败，image_hash={image_hash}: {exc}")
+            logger.debug(f"通知 Himari 图片识别完成状态失败，image_hash={image_hash}: {exc}")
 
     def get_image_from_db(self, image_hash: str) -> Optional[MaiImage]:
         """
