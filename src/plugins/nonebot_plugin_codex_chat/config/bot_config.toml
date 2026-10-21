@@ -33,6 +33,9 @@ enable_reply_quote = true # 是否启用回复时附带引用回复
 typing_speed = 1.0 # 模拟打字时间倍乘，0 表示不等待，1 保持默认等待时间，2 表示等待时间变为默认的两倍
 planner_interrupt_max_consecutive_count = 0 # planner如果遇到新消息，重新开始思考的次数
 timing_gate_non_continue_cooldown_seconds = 8 # 这个值决定了Timing Gate判断的最低时间间隔
+visible_send_cooldown_seconds = 3 # 同一会话连续发送可见消息的最小间隔，发送失败不计入冷却
+reply_target_max_age_seconds = 180 # 可见回复目标的最大消息年龄，单位秒
+talk_value_timezone = "Asia/Tokyo" # 动态发言频率时间段使用的时区
 group_chat_prompt = "你正在qq群里聊天，下面是群里正在聊的内容，其中包含聊天记录和聊天中的图片和表情包。\n回复尽量简短一些。最好一次对一个话题进行回复，但必须考虑不同群友发言之间的交互，免得啰嗦或者回复内容太乱。请注意把握聊天内容。\n不要总是提及自己的身份背景，根据聊天内容自由发挥，但是要日常不浮夸，不要刻意找话题，。\n不用刻意回复其他人发送的表情包，只要关注表情包表达的含义。你可以适当发送表情包表达情绪。控制回复的频率，不要每个人的消息都回复，优先回复你感兴趣的或者主动提及你的，适当回复其他话题。\n"
 # 群聊通用注意事项
 

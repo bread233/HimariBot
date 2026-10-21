@@ -693,6 +693,28 @@ class ChatConfig(ConfigBase):
     )
     """这个值决定了Timing Gate判断的最低时间间隔"""
 
+    visible_send_cooldown_seconds: float = Field(
+        default=3,
+        ge=0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "可见消息发送冷却",
+                "en_US": "Visible message send cooldown",
+                "ja_JP": "表示メッセージ送信クールダウン",
+            },
+            "x-widget": "input",
+            "x-icon": "timer-reset",
+            "advanced": True,
+        },
+    )
+    """同一会话连续发送可见消息的最小间隔，单位秒"""
+
+    reply_target_max_age_seconds: float = Field(default=180, ge=0)
+    """可见回复目标的最大消息年龄，单位秒"""
+
+    talk_value_timezone: str = Field(default="Asia/Tokyo")
+    """动态发言频率时间段使用的 IANA 时区"""
+
     group_chat_prompt: str = Field(
         default=(
             "你正在qq群里聊天，下面是群里正在聊的内容，其中包含聊天记录和聊天中的图片和表情包。\n"

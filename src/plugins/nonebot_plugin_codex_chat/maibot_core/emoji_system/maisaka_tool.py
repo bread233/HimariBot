@@ -26,6 +26,7 @@ EmojiSelector = Callable[
     [str, str, Sequence[str] | None, int],
     Awaitable[tuple[MaiEmoji | None, str]],
 ]
+SendGuard = Callable[[], str]
 
 
 @dataclass(slots=True)
@@ -126,6 +127,7 @@ async def send_emoji_for_maisaka(
     requested_emotion: str = "",
     reasoning: str = "",
     context_texts: Sequence[str] | None = None,
+    send_guard: SendGuard | None = None,
 ) -> MaisakaEmojiSendResult:
     """为 Maisaka 选择并发送一个表情。"""
 
@@ -221,6 +223,9 @@ async def send_emoji_for_maisaka(
         )
 
     try:
+        guard_error = send_guard() if send_guard is not None else ""
+        if guard_error:
+            return MaisakaEmojiSendResult(success=False, message=f"发送目标已失效：{guard_error}")
         target_session = chat_manager.get_session_by_session_id(stream_id)
         sent_message = None
         if target_session is not None and target_session.platform == CLI_PLATFORM_NAME:

@@ -48,6 +48,8 @@ from .context_messages import (
 )
 from .history_post_processor import process_chat_history_after_cycle
 from .history_utils import build_prefixed_message_sequence, build_session_message_visible_text
+from .reply_transaction import all_send_results_confirmed
+from .reply_target_guard import evaluate_reply_target
 from .mid_term_memory import build_mid_term_memory_message, insert_mid_term_memory_message
 from .monitor_events import (
     emit_cycle_end,
@@ -471,10 +473,42 @@ class MaisakaReasoningEngine:
         )
 
     @staticmethod
-    def _mark_timing_gate_completed(timing_action: str) -> bool:
-        """根据门控动作决定下一轮是否还需要重新执行 timing。"""
+    def _mark_timing_gate_completed(_timing_action: str) -> bool:
+        """当前 Planner 回合结束后，下一轮重新执行 Timing Gate。"""
 
-        return timing_action != "continue"
+        return True
+
+    @staticmethod
+    def _visible_delivery_succeeded(result: ToolExecutionResult) -> bool:
+        """仅在工具结果包含真实发送成功证据时确认可见消息已送达。"""
+
+        if not result.success or not isinstance(result.structured_content, dict):
+            return False
+        structured = result.structured_content
+        if structured.get("success") is True:
+            return True
+        send_results = structured.get("send_results")
+        return all_send_results_confirmed(send_results)
+
+    def _check_visible_target(self, invocation: ToolInvocation, anchor_message: SessionMessage):
+        media_index = str(invocation.arguments.get("media_index") or "").strip()
+        raw_target_id = invocation.arguments.get("msg_id") or media_index or anchor_message.message_id
+        target_message_id = str(raw_target_id or "").strip()
+        if media_index.startswith("tool_result:"):
+            target_message_id = str(anchor_message.message_id or "").strip()
+        target_message = self._runtime.find_source_message_by_id(target_message_id)
+        if target_message is None and target_message_id == str(anchor_message.message_id or ""):
+            target_message = anchor_message
+        if target_message is None:
+            return target_message_id, None, "target_not_found"
+        result = evaluate_reply_target(
+            target_message,
+            current_session_id=self._runtime.session_id,
+            now_epoch=time.time(),
+            max_age_seconds=float(global_config.chat.reply_target_max_age_seconds),
+            candidate_messages=self._runtime.message_cache,
+        )
+        return target_message_id, target_message, "" if result.allowed else result.reason
 
     @staticmethod
     def _should_retry_planner_after_interrupt(
@@ -2111,6 +2145,30 @@ class MaisakaReasoningEngine:
                     self._remove_tool_call_from_history(tool_call)
                     return True, "finish", tool_result_summaries, tool_monitor_results
 
+                guarded_msg_id, _, guard_error = self._check_visible_target(invocation, anchor_message)
+                if guard_error:
+                    logger.info(
+                        f"{self._runtime.log_prefix} maibot_visible_target_rejected "
+                        f"tool={invocation.tool_name} target_msg_id={guarded_msg_id or '-'} reason={guard_error}"
+                    )
+                    guard_result = ToolExecutionResult(
+                        tool_name=invocation.tool_name,
+                        success=False,
+                        error_message=f"发送目标已失效：{guard_error}",
+                        structured_content={"msg_id": guarded_msg_id, "guard_reason": guard_error},
+                        metadata={"pause_execution": True},
+                    )
+                    self._append_tool_execution_result(tool_call, guard_result)
+                    tool_result_summaries.append(self._build_tool_result_summary(tool_call, guard_result))
+                    tool_monitor_results.append(
+                        self._build_tool_monitor_result(
+                            tool_call, invocation, guard_result, duration_ms=0.0,
+                            tool_spec=tool_spec_map.get(invocation.tool_name),
+                        )
+                    )
+                    return True, "finish", tool_result_summaries, tool_monitor_results
+                invocation.arguments["_guard_target_msg_id"] = guarded_msg_id
+
             if invocation.tool_name == "ocr_image":
                 target_msg_id = invocation.arguments.get("message_id", "")
                 if target_msg_id:
@@ -2136,10 +2194,20 @@ class MaisakaReasoningEngine:
                                         args={"msg_id": guard_msg_id},
                                     )
                                     reply_invocation = self._build_tool_invocation(reply_tool_call, latest_thought)
-                                    reply_result = await self._runtime._tool_registry.invoke(
-                                        reply_invocation, execution_context
-                                    )
-                                    if reply_result.success:
+                                    _, _, guard_error = self._check_visible_target(reply_invocation, anchor_message)
+                                    if guard_error:
+                                        reply_result = ToolExecutionResult(
+                                            tool_name="reply",
+                                            success=False,
+                                            error_message=f"发送目标已失效：{guard_error}",
+                                            metadata={"pause_execution": True},
+                                        )
+                                    else:
+                                        reply_invocation.arguments["_guard_target_msg_id"] = guard_msg_id
+                                        reply_result = await self._runtime._tool_registry.invoke(
+                                            reply_invocation, execution_context
+                                        )
+                                    if self._visible_delivery_succeeded(reply_result):
                                         self._runtime._answered_msg_ids.add(guard_msg_id)
                                     self._append_tool_execution_result(reply_tool_call, reply_result)
                                     tool_result_summaries.append(
@@ -2154,6 +2222,8 @@ class MaisakaReasoningEngine:
                                             tool_spec=tool_spec_map.get("reply"),
                                         )
                                     )
+                                    if self._visible_delivery_succeeded(reply_result):
+                                        return True, "finish", tool_result_summaries, tool_monitor_results
                                     if bool(reply_result.metadata.get("pause_execution", False)):
                                         return True, invocation.tool_name, tool_result_summaries, tool_monitor_results
                                 else:
@@ -2201,10 +2271,19 @@ class MaisakaReasoningEngine:
             if not result.success and tool_call.func_name == "reply":
                 logger.warning(f"{self._runtime.log_prefix} 回复工具未生成可见消息，将继续下一轮循环")
 
-            if result.success and invocation.tool_name in VISIBLE_TOOL_NAMES:
+            visible_delivery_succeeded = (
+                invocation.tool_name in VISIBLE_TOOL_NAMES
+                and self._visible_delivery_succeeded(result)
+            )
+            if visible_delivery_succeeded:
                 answered_target = str(invocation.arguments.get("msg_id") or "").strip()
                 if answered_target:
                     self._runtime._answered_msg_ids.add(answered_target)
+                logger.info(
+                    f"{self._runtime.log_prefix} maibot_visible_delivery_completed "
+                    f"tool={invocation.tool_name} target_msg_id={answered_target or '-'}"
+                )
+                return True, "finish", tool_result_summaries, tool_monitor_results
 
             if bool(result.metadata.get("pause_execution", False)):
                 if invocation.tool_name == "finish":
@@ -2224,10 +2303,20 @@ class MaisakaReasoningEngine:
                             args={"msg_id": guard_msg_id},
                         )
                         reply_invocation = self._build_tool_invocation(reply_tool_call, latest_thought)
-                        reply_result = await self._runtime._tool_registry.invoke(
-                            reply_invocation, execution_context
-                        )
-                        if reply_result.success:
+                        _, _, guard_error = self._check_visible_target(reply_invocation, anchor_message)
+                        if guard_error:
+                            reply_result = ToolExecutionResult(
+                                tool_name="reply",
+                                success=False,
+                                error_message=f"发送目标已失效：{guard_error}",
+                                metadata={"pause_execution": True},
+                            )
+                        else:
+                            reply_invocation.arguments["_guard_target_msg_id"] = guard_msg_id
+                            reply_result = await self._runtime._tool_registry.invoke(
+                                reply_invocation, execution_context
+                            )
+                        if self._visible_delivery_succeeded(reply_result):
                             self._runtime._answered_msg_ids.add(guard_msg_id)
                         self._append_tool_execution_result(reply_tool_call, reply_result)
                         tool_result_summaries.append(
@@ -2242,6 +2331,8 @@ class MaisakaReasoningEngine:
                                 tool_spec=tool_spec_map.get("reply"),
                             )
                         )
+                        if self._visible_delivery_succeeded(reply_result):
+                            return True, "finish", tool_result_summaries, tool_monitor_results
                         if bool(reply_result.metadata.get("pause_execution", False)):
                             return True, invocation.tool_name, tool_result_summaries, tool_monitor_results
                         continue

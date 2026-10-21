@@ -437,6 +437,8 @@ class MaibotInboundMessage:
     at_targets: list[str] = field(default_factory=list)
     at_bot: bool = False
     at_others: list[str] = field(default_factory=list)
+    event_timestamp_epoch: float | None = None
+    event_timestamp_source: str = "received_at_fallback"
 
 
 @dataclass(slots=True)
@@ -489,9 +491,10 @@ async def handle_inbound_message(
 
         receiver = HeartFCMessageReceiver()
 
+    event_timestamp_epoch = inbound.event_timestamp_epoch or datetime.now().timestamp()
     session_message = SessionMessage(
         message_id=inbound.message_id,
-        timestamp=datetime.now(),
+        timestamp=datetime.fromtimestamp(event_timestamp_epoch),
         platform=inbound.platform,
     )
     session_message.platform = inbound.platform
@@ -511,6 +514,8 @@ async def handle_inbound_message(
             "at_bot": inbound.at_bot,
             "at_targets": list(inbound.at_targets),
             "at_others": list(inbound.at_others),
+            "event_timestamp_epoch": event_timestamp_epoch,
+            "event_timestamp_source": inbound.event_timestamp_source,
         },
     )
     if inbound.components:

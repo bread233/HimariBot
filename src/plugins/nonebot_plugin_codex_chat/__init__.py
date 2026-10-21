@@ -10,6 +10,7 @@ from nonebot.params import EventMessage
 
 from .config import get_config
 from .maibot_core.bridge import MaibotInboundMessage, handle_inbound_message
+from .maibot_core.time_utils import normalize_unix_timestamp
 from .maibot_core.bootstrap import bootstrap_src_alias
 
 bootstrap_src_alias()
@@ -279,7 +280,10 @@ def _get_component_kind(component: Any) -> str:
     return format_name() if callable(format_name) else (format_name or type(component).__name__)
 
 
-async def _build_onebot_message(message: Any) -> tuple[Optional[Any], list[str]]:
+async def _build_onebot_message(
+    message: Any,
+    validated_reply_message_id: str = "",
+) -> tuple[Optional[Any], list[str]]:
     """从 SessionMessage 构建 NoneBot Message，支持文本 + 图片 + 表情组件。
 
     返回 (Message | None, unsupported_kinds)。
@@ -300,9 +304,16 @@ async def _build_onebot_message(message: Any) -> tuple[Optional[Any], list[str]]
 
     message_parts: list = []
     unsupported_kinds: list[str] = []
+    reply_added = False
 
     for component in components:
         kind = _get_component_kind(component)
+
+        if kind == "reply":
+            if validated_reply_message_id and not reply_added:
+                message_parts.append(MessageSegment.reply(validated_reply_message_id))
+                reply_added = True
+            continue
 
         if kind == "text":
             text_val = str(getattr(component, "text", "") or "").strip()
@@ -423,8 +434,34 @@ async def _codex_chat_host_send_interceptor(
         )
         return False
 
-    # 5. 构建 OneBot Message（支持文本 + 图片 + 表情组件）
-    onebot_msg, unsupported_kinds = await _build_onebot_message(message)
+    validated_reply_message_id = ""
+    requested_reply_message_id = str(reply_message_id or "").strip()
+    if requested_reply_message_id:
+        reply_route = _inbound_route_by_message_id.get(requested_reply_message_id)
+        route_age = time.time() - float((reply_route or {}).get("ts", 0))
+        reply_route_valid = bool(
+            reply_route
+            and route_age <= _HOST_TARGET_TTL_SECONDS
+            and bool(reply_route.get("is_group")) == is_group
+            and str(reply_route.get("target_id", "") or "").strip() == target_id
+            and (
+                not str(reply_route.get("bot_self_id", "") or "").strip()
+                or str(reply_route.get("bot_self_id", "") or "").strip() == bot_self_id
+            )
+        )
+        if reply_route_valid:
+            validated_reply_message_id = requested_reply_message_id
+        else:
+            logger.warning(
+                f"codex_chat_reply_quote_downgraded reply_message_id={requested_reply_message_id} "
+                f"target_id={target_id} is_group={is_group} reason=invalid_or_cross_session"
+            )
+
+    # 5. 构建 OneBot Message（支持文本 + 图片 + 表情及已验证的引用组件）
+    onebot_msg, unsupported_kinds = await _build_onebot_message(
+        message,
+        validated_reply_message_id=validated_reply_message_id,
+    )
     if onebot_msg is None:
         if unsupported_kinds:
             logger.info(
@@ -474,7 +511,11 @@ async def _codex_chat_host_send_interceptor(
             f"codex_chat_host_send_no_message_id message_id={message_id} "
             f"target_id={target_id} is_group={is_group} response={api_response!r}"
         )
-        return None
+        from src.services.send_service import DeliveryUncertainError
+
+        raise DeliveryUncertainError(
+            f"OneBot API 已返回但缺少 message_id: target_id={target_id} is_group={is_group}"
+        )
 
     synthetic_message: Any
     try:
@@ -628,6 +669,16 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
         return
 
     sender = getattr(event, "sender", None)
+    received_at = time.time()
+    event_timestamp_epoch, event_timestamp_source, timestamp_fallback_reason = normalize_unix_timestamp(
+        getattr(event, "time", None),
+        received_at=received_at,
+    )
+    if timestamp_fallback_reason:
+        logger.warning(
+            f"codex_chat_event_timestamp_fallback message_id={getattr(event, 'message_id', '')} "
+            f"reason={timestamp_fallback_reason} received_at={received_at:.3f}"
+        )
     inbound = MaibotInboundMessage(
         platform="onebot.v11",
         message_id=str(getattr(event, "message_id", "") or "").strip() or f"codex_chat_{getattr(event, 'message_id', '')}",
@@ -644,6 +695,8 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
         at_targets=sorted(at_targets),
         at_bot=at_bot,
         at_others=at_others,
+        event_timestamp_epoch=event_timestamp_epoch,
+        event_timestamp_source=event_timestamp_source,
     )
     result = await handle_inbound_message(inbound)
     if not result.should_reply or not result.replies:
