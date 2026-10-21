@@ -681,7 +681,7 @@ class MaisakaChatLoopService:
             else 0
         )
         logger.info(
-            "Maisaka KV cache usage - "
+            "Himari KV cache usage - "
             f"request_kind={request_kind}, "
             f"hit_tokens={prompt_cache_hit_tokens}, "
             f"miss_tokens={prompt_cache_miss_tokens}, "

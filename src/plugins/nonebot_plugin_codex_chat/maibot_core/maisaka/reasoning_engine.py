@@ -969,13 +969,13 @@ class MaisakaReasoningEngine:
             raise
         except RespNotOkException as exc:
             logger.error(
-                f"{self._runtime.log_prefix} Maisaka 内部循环发生异常: "
+                f"{self._runtime.log_prefix} Himari 内部循环发生异常: "
                 f"模型响应异常 HTTP {exc.status_code} - {exc}\n{traceback.format_exc()}"
             )
             raise
         except Exception as e:
             logger.error(
-                f"{self._runtime.log_prefix} Maisaka 内部循环发生异常: "
+                f"{self._runtime.log_prefix} Himari 内部循环发生异常: "
                 f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
             )
             raise
@@ -1149,7 +1149,7 @@ class MaisakaReasoningEngine:
         results = await asyncio.gather(*load_tasks, return_exceptions=True)
         for result in results:
             if isinstance(result, Exception):
-                logger.warning(f"{self._runtime.log_prefix} 回填图片或表情二进制数据失败，Maisaka 将退化为文本占位: {result}")
+                logger.warning(f"{self._runtime.log_prefix} 回填图片或表情二进制数据失败，Himari 将退化为文本占位: {result}")
 
     async def _refresh_chat_history_visual_placeholders(self) -> int:
         """在进入新一轮规划前，尝试用已完成的识图结果刷新历史占位。"""

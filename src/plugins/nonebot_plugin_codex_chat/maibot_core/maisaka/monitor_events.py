@@ -342,7 +342,7 @@ async def _broadcast(event: str, data: Dict[str, Any]) -> None:
             data=data,
         )
     except Exception as exc:
-        logger.warning(f"MaiSaka 监控事件广播失败: {exc}", exc_info=True)
+        logger.warning(f"Himari 监控事件广播失败: {exc}", exc_info=True)
 
 
 async def emit_session_start(

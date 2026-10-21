@@ -19,7 +19,7 @@ def render_cli_message(content: str, *, title: str = "") -> None:
     console.print(
         Panel(
             Markdown(preview_text),
-            title=title or global_config.bot.nickname.strip() or "MaiSaka",
+            title=title or global_config.bot.nickname.strip() or "Himari",
             border_style="magenta",
             padding=(1, 2),
         )

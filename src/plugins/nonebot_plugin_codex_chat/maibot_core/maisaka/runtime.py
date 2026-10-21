@@ -81,7 +81,7 @@ class MaisakaHeartFlowChatting:
         self.session_id = session_id
         chat_stream = chat_manager.get_session_by_session_id(session_id)
         if chat_stream is None:
-            raise ValueError(f"未找到会话 {session_id} 对应的 Maisaka 运行时")
+            raise ValueError(f"未找到会话 {session_id} 对应的 Himari 运行时")
         self.chat_stream: BotChatSession = chat_stream
 
         session_name = chat_manager.get_session_name(session_id) or session_id
@@ -199,7 +199,7 @@ class MaisakaHeartFlowChatting:
                 )
             )
         except RuntimeError:
-            logger.debug("MaiSaka 监控会话开始事件未发送：当前没有运行中的事件循环")
+            logger.debug("Himari 监控会话开始事件未发送：当前没有运行中的事件循环")
 
     @staticmethod
     def _is_reply_effect_tracking_enabled() -> bool:
@@ -233,7 +233,7 @@ class MaisakaHeartFlowChatting:
         self._ensure_background_tasks_running()
         self._schedule_message_turn()
         self._update_stage_status("空闲", "等待消息触发")
-        logger.info(f"{self.log_prefix} Maisaka 运行时已启动")
+        logger.info(f"{self.log_prefix} Himari 运行时已启动")
 
     async def _restore_recent_context_from_db(self) -> None:
         """启动时从消息库恢复最近上下文，避免重启后丢失短期对话窗口。"""
@@ -333,7 +333,7 @@ class MaisakaHeartFlowChatting:
         self._mcp_host_bridge = None
         remove_stage_status(self.session_id)
 
-        logger.info(f"{self.log_prefix} Maisaka 运行时已停止")
+        logger.info(f"{self.log_prefix} Himari 运行时已停止")
 
     def adjust_talk_frequency(self, frequency: float) -> None:
         """调整当前会话的回复频率倍率。"""
@@ -382,7 +382,7 @@ class MaisakaHeartFlowChatting:
             return True
         except Exception as exc:
             logger.warning(
-                f"{self.log_prefix} 同步已发送消息到 Maisaka 历史失败: "
+                f"{self.log_prefix} 同步已发送消息到 Himari 历史失败: "
                 f"message_id={message.message_id} error={exc}"
             )
             return False
@@ -792,7 +792,7 @@ class MaisakaHeartFlowChatting:
         del self.message_cache[:removable_count]
         self._last_processed_index = max(0, self._last_processed_index - removable_count)
         logger.debug(
-            f"{self.log_prefix} 已清理 Maisaka 旧消息缓存: "
+            f"{self.log_prefix} 已清理 Himari 旧消息缓存: "
             f"清理数量={removable_count} 保留数量={len(self.message_cache)}"
         )
 
@@ -982,9 +982,9 @@ class MaisakaHeartFlowChatting:
                     logger.error(f"{self.log_prefix} 内部循环任务异常退出: {exc}")
             self._internal_loop_task = asyncio.create_task(self._reasoning_engine.run_loop())
             if is_restart:
-                logger.warning(f"{self.log_prefix} 已重新拉起 Maisaka 内部循环任务")
+                logger.warning(f"{self.log_prefix} 已重新拉起 Himari 内部循环任务")
             else:
-                logger.debug(f"{self.log_prefix} 已启动 Maisaka 内部循环任务")
+                logger.debug(f"{self.log_prefix} 已启动 Himari 内部循环任务")
 
     def _register_tool_providers(self) -> None:
         """注册 Maisaka 运行时默认启用的工具 Provider。"""
@@ -1420,7 +1420,7 @@ class MaisakaHeartFlowChatting:
             if self._pending_wait_tool_call_id != tool_call_id:
                 return
 
-            logger.debug(f"{self.log_prefix} Maisaka 等待已超时")
+            logger.debug(f"{self.log_prefix} Himari 等待已超时")
             self._agent_state = self._STATE_RUNNING
             await self._internal_turn_queue.put("timeout")
         except asyncio.CancelledError:
@@ -1508,7 +1508,7 @@ class MaisakaHeartFlowChatting:
     async def _init_mcp(self) -> None:
         """初始化 MCP 工具并注册到统一工具层。"""
         if not build_mcp_server_runtime_configs(global_config.mcp):
-            logger.debug(f"{self.log_prefix} 未配置可用的 MCP 服务，跳过 Maisaka MCP 初始化")
+            logger.debug(f"{self.log_prefix} 未配置可用的 MCP 服务，跳过 Himari MCP 初始化")
             return
 
         self._mcp_host_bridge = MCPHostLLMBridge(
@@ -1519,17 +1519,17 @@ class MaisakaHeartFlowChatting:
             host_callbacks=self._mcp_host_bridge.build_callbacks(),
         )
         if self._mcp_manager is None:
-            logger.warning(f"{self.log_prefix} Maisaka MCP 管理器初始化失败，MCP 工具不会注册")
+            logger.warning(f"{self.log_prefix} Himari MCP 管理器初始化失败，MCP 工具不会注册")
             return
 
         mcp_tool_specs = self._mcp_manager.get_tool_specs()
         if not mcp_tool_specs:
-            logger.info(f"{self.log_prefix} Maisaka 没有可供使用的 MCP 工具")
+            logger.info(f"{self.log_prefix} Himari 没有可供使用的 MCP 工具")
             return
 
         self._tool_registry.register_provider(MCPToolProvider(self._mcp_manager))
         logger.info(
-            f"{self.log_prefix} 已向 Maisaka 加载 {len(mcp_tool_specs)} 个 MCP 工具。\n"
+            f"{self.log_prefix} 已向 Himari 加载 {len(mcp_tool_specs)} 个 MCP 工具。\n"
             f"{self._mcp_manager.get_feature_summary()}"
         )
 
@@ -1592,7 +1592,7 @@ class MaisakaHeartFlowChatting:
             f"当前回复频率：{self._format_reply_frequency_for_display(self._get_effective_reply_frequency())}",
         ]
 
-        panel_title = "MaiSaka 循环"
+        panel_title = "Himari 循环"
         if cycle_id is not None:
             panel_title = f"{panel_title} [{cycle_id}]"
         panel_subtitle = self._build_cycle_time_records_text(time_records or {})
@@ -1698,7 +1698,7 @@ class MaisakaHeartFlowChatting:
             renderables.append(
                 Panel(
                     Text(normalized_response),
-                    title="Maisaka 返回",
+                    title="Himari 返回",
                     border_style=border_style,
                     padding=(0, 1),
                 )
@@ -2178,7 +2178,7 @@ class MaisakaHeartFlowChatting:
 
     def _log_cycle_started(self, cycle_detail: CycleDetail, round_index: int) -> None:
         logger.debug(
-            f"{self.log_prefix} MaiSaka 轮次开始: 循环编号={cycle_detail.cycle_id} "
+            f"{self.log_prefix} Himari 轮次开始: 循环编号={cycle_detail.cycle_id} "
             f"回合={round_index + 1}/{self._max_internal_rounds} "
             f"上下文消息数={len(self._chat_history)}"
         )
@@ -2186,7 +2186,7 @@ class MaisakaHeartFlowChatting:
     def _log_cycle_completed(self, cycle_detail: CycleDetail, timer_strings: list[str]) -> None:
         end_time = cycle_detail.end_time if cycle_detail.end_time is not None else cycle_detail.start_time
         logger.debug(
-            f"{self.log_prefix} MaiSaka 轮次结束: 循环编号={cycle_detail.cycle_id} "
+            f"{self.log_prefix} Himari 轮次结束: 循环编号={cycle_detail.cycle_id} "
             f"总耗时={end_time - cycle_detail.start_time:.2f} 秒; "
             f"阶段耗时={', '.join(timer_strings) if timer_strings else '无'}"
         )
@@ -2198,4 +2198,4 @@ class MaisakaHeartFlowChatting:
         )
 
     def _log_internal_loop_cancelled(self) -> None:
-        logger.info(f"{self.log_prefix} Maisaka 内部循环已取消")
+        logger.info(f"{self.log_prefix} Himari 内部循环已取消")

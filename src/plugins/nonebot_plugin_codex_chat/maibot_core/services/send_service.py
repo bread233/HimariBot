@@ -812,7 +812,7 @@ def _sync_sent_message_to_maisaka_history(
             return
         runtime.append_sent_message_to_chat_history(message, source_kind=source_kind)
     except Exception as exc:
-        logger.warning(f"[SendService] 同步消息到 Maisaka 历史失败: session_id={session_id} error={exc}")
+        logger.warning(f"[SendService] 同步消息到 Himari 历史失败: session_id={session_id} error={exc}")
 
 
 def _log_platform_io_failures(delivery_batch: DeliveryBatch) -> None:

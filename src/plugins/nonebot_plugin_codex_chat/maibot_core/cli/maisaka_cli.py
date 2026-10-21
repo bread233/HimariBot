@@ -48,7 +48,7 @@ class BufferCLI:
     def _show_banner(self) -> None:
         """渲染启动横幅。"""
         banner = Text()
-        banner.append("MaiSaka", style="bold cyan")
+        banner.append("Himari", style="bold cyan")
         banner.append(" v2.0\n", style="muted")
         banner.append(f"模型: {self._get_current_model_name()}\n", style="muted")
         banner.append("输入内容开始对话 | Ctrl+C 退出", style="muted")

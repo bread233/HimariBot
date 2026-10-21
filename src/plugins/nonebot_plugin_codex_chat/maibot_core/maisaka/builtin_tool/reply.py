@@ -178,14 +178,14 @@ async def handle_tool(
         logger.info(traceback.format_exc())
         return tool_ctx.build_failure_result(
             invocation.tool_name,
-            "获取 Maisaka 回复生成器时发生异常。",
+            "获取 Himari 回复生成器时发生异常。",
         )
 
     if replyer is None:
-        logger.error(f"{tool_ctx.runtime.log_prefix} 获取 Maisaka 回复生成器失败")
+        logger.error(f"{tool_ctx.runtime.log_prefix} 获取 Himari 回复生成器失败")
         return tool_ctx.build_failure_result(
             invocation.tool_name,
-            "Maisaka 回复生成器当前不可用。",
+            "Himari 回复生成器当前不可用。",
         )
 
     replyer_chat_history = list(tool_ctx.runtime._chat_history)
@@ -381,7 +381,7 @@ async def handle_tool(
 
     target_user_info = target_message.message_info.user_info
     target_user_name = target_user_info.user_cardname or target_user_info.user_nickname or target_user_info.user_id
-    bot_name = config_module.global_config.bot.nickname.strip() or "MaiSaka"
+    bot_name = config_module.global_config.bot.nickname.strip() or "Himari"
 
     if tool_ctx.runtime.chat_stream.platform == CLI_PLATFORM_NAME:
         tool_ctx.append_guided_reply_to_chat_history(combined_reply_text)
