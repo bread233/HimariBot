@@ -3,6 +3,7 @@
 from datetime import datetime
 from io import BytesIO
 import json
+import time
 from json import dumps
 from random import sample
 from typing import Any, Dict, Optional
@@ -28,6 +29,7 @@ from src.maisaka.context_messages import (
     ReferenceMessageType,
     SessionBackedMessage,
 )
+from src.maisaka.reply_target_guard import evaluate_runtime_target
 from src.plugin_runtime.hook_payloads import serialize_prompt_messages
 from src.prompt.prompt_manager import prompt_manager
 
@@ -475,6 +477,19 @@ async def handle_tool(
 
     logger.info(f"{tool_ctx.runtime.log_prefix} 触发表情包发送工具")
 
+    def send_guard() -> str:
+        target_id = str(invocation.arguments.get("_guard_target_msg_id") or "").strip()
+        target = tool_ctx.runtime.find_source_message_by_id(target_id)
+        if target is None:
+            return "target_not_found"
+        result = evaluate_runtime_target(
+            tool_ctx.runtime,
+            target,
+            float(global_config.chat.reply_target_max_age_seconds),
+            time.time(),
+        )
+        return "" if result.allowed else result.reason
+
     try:
         send_result = await send_emoji_for_maisaka(
             stream_id=tool_ctx.runtime.session_id,
@@ -488,6 +503,7 @@ async def handle_tool(
                 sample_size,
                 selection_metadata,
             ),
+            send_guard=send_guard,
         )
     except Exception as exc:
         logger.exception(f"{tool_ctx.runtime.log_prefix} 发送表情包时发生异常: {exc}")
@@ -533,6 +549,12 @@ async def handle_tool(
     structured_result["emotion"] = list(send_result.emotions)
     structured_result["matched_emotion"] = send_result.matched_emotion
     structured_result["message"] = send_result.message
+    failure_metadata = _build_send_emoji_monitor_metadata(
+        selection_metadata,
+        send_result=send_result,
+    )
+    if send_result.message.startswith("发送目标已失效："):
+        failure_metadata["pause_execution"] = True
 
     logger.warning(
         f"{tool_ctx.runtime.log_prefix} 表情包发送失败 "
@@ -542,8 +564,5 @@ async def handle_tool(
         invocation.tool_name,
         structured_result["message"],
         structured_content=structured_result,
-        metadata=_build_send_emoji_monitor_metadata(
-            selection_metadata,
-            send_result=send_result,
-        ),
+        metadata=failure_metadata,
     )

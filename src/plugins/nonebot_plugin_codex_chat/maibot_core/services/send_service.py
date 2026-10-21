@@ -44,8 +44,19 @@ from src.plugin_runtime.hook_payloads import deserialize_session_message, serial
 from src.plugin_runtime.hook_schema_utils import build_object_schema
 from src.plugin_runtime.host.hook_dispatcher import HookDispatchResult
 from src.plugin_runtime.host.hook_spec_registry import HookSpec, HookSpecRegistry
+from src.services.send_cooldown import SessionSendCooldown
 
 logger = get_logger("send_service")
+
+_session_send_cooldown = SessionSendCooldown()
+
+
+class DeliveryUncertainError(RuntimeError):
+    """平台发送调用已完成，但无法取得可靠成功回执。"""
+
+
+def _visible_send_cooldown_seconds() -> float:
+    return max(0.0, float(global_config.chat.visible_send_cooldown_seconds))
 
 
 def register_send_service_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]:
@@ -877,6 +888,8 @@ async def _send_via_platform_io(
                 normalized_reply_message_id,
                 reply_message,
             )
+        except DeliveryUncertainError:
+            raise
         except Exception as exc:
             logger.warning(
                 f"[SendService] host_send_interceptor 执行异常: {type(exc).__name__}: {exc}，"
@@ -987,15 +1000,31 @@ async def send_session_message_with_message(
         logger.error("[SendService] 消息缺少 message_id，无法发送")
         raise ValueError("消息缺少 message_id，无法发送")
 
-    sent_message = await _send_via_platform_io(
-        message,
-        typing=typing,
-        set_reply=set_reply,
-        reply_message_id=reply_message_id,
-        reply_message=reply_message,
-        storage_message=storage_message,
-        show_log=show_log,
+    session_id = str(message.session_id or "").strip()
+    if not session_id:
+        logger.error("[SendService] 消息缺少 session_id，无法执行会话级发送冷却")
+        return None
+
+    async def _send() -> Optional[SessionMessage]:
+        return await _send_via_platform_io(
+            message,
+            typing=typing,
+            set_reply=set_reply,
+            reply_message_id=reply_message_id,
+            reply_message=reply_message,
+            storage_message=storage_message,
+            show_log=show_log,
+        )
+    sent_message, remaining = await _session_send_cooldown.send(
+        session_id,
+        _visible_send_cooldown_seconds(),
+        _send,
     )
+    if remaining > 0:
+        logger.info(
+            f"[SendService] 会话可见消息发送冷却中: session_id={session_id} "
+            f"remaining={remaining:.3f}s"
+        )
     if sent_message is not None and sync_to_maisaka_history:
         _sync_sent_message_to_maisaka_history(
             sent_message,
@@ -1171,6 +1200,8 @@ async def _send_to_target_with_message(
 
         logger.error("[SendService] 发送消息失败")
         return None
+    except DeliveryUncertainError:
+        raise
     except Exception as exc:
         logger.error(f"[SendService] 发送消息时出错: {exc}")
         traceback.print_exc()

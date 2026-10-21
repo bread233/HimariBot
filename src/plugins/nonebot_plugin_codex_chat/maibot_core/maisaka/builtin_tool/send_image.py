@@ -1,12 +1,15 @@
 """图片发送内置动作。"""
 
 from base64 import b64encode
+import time
 from typing import Any, Optional
 
 from src.common.data_models.message_component_data_model import ImageComponent, MessageSequence
 from src.common.logger import get_logger
+from src.config.config import global_config
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.maisaka.context_messages import SessionBackedMessage
+from src.maisaka.reply_target_guard import evaluate_runtime_target
 from src.services import send_service
 
 from .context import BuiltinToolRuntimeContext
@@ -161,6 +164,27 @@ async def handle_tool(
         )
 
     source_message = tool_ctx.runtime.find_source_message_by_id(target_message_id)
+    guard_message_id = str(arguments.get("_guard_target_msg_id") or target_message_id).strip()
+    guard_target = tool_ctx.runtime.find_source_message_by_id(guard_message_id)
+    if guard_target is None:
+        return tool_ctx.build_failure_result(
+            invocation.tool_name,
+            "发送目标已失效：target_not_found",
+            metadata={"pause_execution": True},
+        )
+    guard_result = evaluate_runtime_target(
+        tool_ctx.runtime,
+        guard_target,
+        float(global_config.chat.reply_target_max_age_seconds),
+        time.time(),
+    )
+    if not guard_result.allowed:
+        return tool_ctx.build_failure_result(
+            invocation.tool_name,
+            f"发送目标已失效：{guard_result.reason}",
+            structured_content=structured_content,
+            metadata={"pause_execution": True},
+        )
 
     image_base64 = b64encode(images[image_index].binary_data).decode("utf-8")
     source_label = f"{target_message_id} 的第 {image_index} 张图片"

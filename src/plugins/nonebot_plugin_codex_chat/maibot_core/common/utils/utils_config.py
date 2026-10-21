@@ -4,6 +4,7 @@ import time
 
 from src.common.logger import get_logger
 from src.config.config import global_config
+from src.time_utils import wall_clock_minutes
 
 logger = get_logger("config_utils")
 
@@ -439,8 +440,10 @@ class ChatConfigUtils:
         ) or 0.0
         if not global_config.chat.enable_talk_value_rules or not global_config.chat.talk_value_rules:
             return result
-        local_time = time.localtime()
-        now_min = local_time.tm_hour * 60 + local_time.tm_min
+        timezone_name = str(getattr(global_config.chat, "talk_value_timezone", "Asia/Tokyo") or "Asia/Tokyo")
+        now_min, resolved_timezone = wall_clock_minutes(timezone_name)
+        if resolved_timezone == "process_local_fallback":
+            logger.warning(f"动态发言频率时区不可用，回退进程本地时间: timezone={timezone_name}")
 
         matched_rules = []
         for rule in global_config.chat.talk_value_rules:

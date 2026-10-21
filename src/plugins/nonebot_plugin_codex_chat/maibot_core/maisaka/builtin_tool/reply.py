@@ -1,5 +1,6 @@
 """reply 内置工具。"""
 
+import time
 from typing import Any, Optional
 
 import traceback
@@ -15,6 +16,8 @@ from src.common.logger import get_logger
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.config import config as config_module
 from src.maisaka.message_adapter import build_visible_text_from_sequence
+from src.maisaka.reply_transaction import flatten_message_components
+from src.maisaka.reply_target_guard import evaluate_runtime_target, is_direct_reply_target
 from src.services import send_service
 
 from .context import BuiltinToolRuntimeContext
@@ -39,6 +42,10 @@ def _is_all_plain_text_sequences(sequences: list[MessageSequence]) -> bool:
     if not sequences:
         return False
     return all(_is_plain_text_sequence(sequence) for sequence in sequences)
+
+
+def _should_force_quote(target_message: Any) -> bool:
+    return is_direct_reply_target(target_message)
 
 
 async def _run_expression_selector(tool_ctx: BuiltinToolRuntimeContext, system_prompt: str) -> str:
@@ -136,7 +143,6 @@ async def handle_tool(
         if key not in {"msg_id", "set_quote", "reference_info"}
     }
     enable_reply_quote = bool(config_module.global_config.chat.enable_reply_quote)
-    effective_set_quote = set_quote and enable_reply_quote
 
     if not target_message_id:
         return tool_ctx.build_failure_result(
@@ -150,6 +156,8 @@ async def handle_tool(
             invocation.tool_name,
             f"未找到要回复的目标消息，msg_id={target_message_id}",
         )
+    force_quote = _should_force_quote(target_message)
+    effective_set_quote = enable_reply_quote and (set_quote or force_quote)
 
     try:
         replyer = replyer_manager.get_replyer(
@@ -215,6 +223,18 @@ async def handle_tool(
     reply_sequences = await tool_ctx.post_process_reply_message_sequences_async(reply_text)
     reply_segments = [build_visible_text_from_sequence(sequence) for sequence in reply_sequences]
     combined_reply_text = "".join(reply_segments)
+    target_guard = evaluate_runtime_target(
+        tool_ctx.runtime,
+        target_message,
+        float(config_module.global_config.chat.reply_target_max_age_seconds),
+        time.time(),
+    )
+    if not target_guard.allowed:
+        return tool_ctx.build_failure_result(
+            invocation.tool_name,
+            f"发送目标已失效：{target_guard.reason}",
+            metadata={**reply_metadata, "pause_execution": True},
+        )
     sent_message_ids: list[str] = []
     send_results: list[dict[str, Any]] = []
     try:
@@ -283,43 +303,51 @@ async def handle_tool(
                     )
                 )
         else:
-            for index, reply_sequence in enumerate(reply_sequences):
-                segment = reply_segments[index]
-                segment_set_quote = effective_set_quote if index == 0 else False
-                sent_message = await send_service._send_to_target_with_message(
-                    message_sequence=reply_sequence,
-                    stream_id=tool_ctx.runtime.session_id,
-                    processed_plain_text=segment,
-                    set_reply=segment_set_quote,
-                    reply_message=target_message if segment_set_quote else None,
-                    selected_expressions=reply_result.selected_expression_ids or None,
-                    typing=index > 0,
-                    sync_to_maisaka_history=True,
-                    maisaka_source_kind="guided_reply",
+            merged_sequence = MessageSequence(flatten_message_components(reply_sequences))
+            sent_message = await send_service._send_to_target_with_message(
+                message_sequence=merged_sequence,
+                stream_id=tool_ctx.runtime.session_id,
+                processed_plain_text=combined_reply_text,
+                set_reply=effective_set_quote,
+                reply_message=target_message if effective_set_quote else None,
+                selected_expressions=reply_result.selected_expression_ids or None,
+                typing=False,
+                sync_to_maisaka_history=True,
+                maisaka_source_kind="guided_reply",
+            )
+            sent = sent_message is not None
+            sent_message_id = str(getattr(sent_message, "message_id", "") or "").strip() if sent else ""
+            if sent_message_id:
+                sent_message_ids.append(sent_message_id)
+            send_results.append(
+                _build_send_result(
+                    index=0,
+                    segment=combined_reply_text,
+                    set_quote=effective_set_quote,
+                    success=sent,
+                    message_id=sent_message_id,
                 )
-                sent = sent_message is not None
-                if not sent:
-                    send_results.append(
-                        _build_send_result(
-                            index=index,
-                            segment=segment,
-                            set_quote=segment_set_quote,
-                            success=False,
-                        )
-                    )
-                    break
-                sent_message_id = str(getattr(sent_message, "message_id", "") or "").strip()
-                if sent_message_id:
-                    sent_message_ids.append(sent_message_id)
-                send_results.append(
-                    _build_send_result(
-                        index=index,
-                        segment=segment,
-                        set_quote=segment_set_quote,
-                        success=True,
-                        message_id=sent_message_id,
-                    )
-                )
+            )
+    except send_service.DeliveryUncertainError as exc:
+        logger.warning(
+            f"{tool_ctx.runtime.log_prefix} 可见回复发送结果不确定，停止自动重试: "
+            f"目标消息编号={target_message_id} error={exc}"
+        )
+        reply_metadata["delivery_uncertain"] = True
+        reply_metadata["pause_execution"] = True
+        return tool_ctx.build_failure_result(
+            invocation.tool_name,
+            "平台可能已收到回复，但未返回可靠回执；本轮停止自动重试。",
+            structured_content={
+                "msg_id": target_message_id,
+                "set_quote": set_quote,
+                "effective_set_quote": effective_set_quote,
+                "reply_segments": reply_segments,
+                "send_results": send_results,
+                "delivery_uncertain": True,
+            },
+            metadata=reply_metadata,
+        )
     except Exception as exc:
         logger.error(
             f"{tool_ctx.runtime.log_prefix} 发送文字消息时发生异常，目标消息编号={target_message_id}: "
