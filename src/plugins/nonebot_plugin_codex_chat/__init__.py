@@ -547,7 +547,7 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
         if plugin_config.allowed_groups_list and int(group_id or 0) not in plugin_config.allowed_groups_list:
             return
 
-    raw_message_for_addressing = getattr(event, "original_message", None) or getattr(event, "message", None) or message
+    raw_message_for_addressing = getattr(message, "message", None) or message
     at_targets = _extract_onebot_at_targets(raw_message_for_addressing)
     bot_self_id = str(getattr(event, "self_id", None) or getattr(bot, "self_id", "") or "").strip()
     at_bot = bool(bot_self_id and bot_self_id in at_targets)

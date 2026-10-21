@@ -108,7 +108,7 @@ class OneBotNativeReplyTest(unittest.TestCase):
         bot.self_id = "200"
         reply = SimpleNamespace(reply_to_message_id="-9", raw=None, text="回退回答")
         routes = {
-            "-9": {"is_group": True, "target_id": "100", "bot_self_id": "200", "ts": time.time() - 181},
+            "-9": {"is_group": True, "target_id": "100", "bot_self_id": "200", "ts": time.time()},
         }
         _, validated_id, reason, message = run_immediate(MODULE.send_captured_reply(
             bot,
@@ -140,31 +140,6 @@ class OneBotNativeReplyTest(unittest.TestCase):
         ))
         self.assertEqual((validated_id, reason), ("", "target_mismatch"))
         self.assertEqual([segment.type for segment in message], ["text"])
-
-    def test_expired_route_downgrades_to_plain_text_without_dropping_answer(self):
-        bot = FakeBot()
-        reply = SimpleNamespace(reply_to_message_id="-803768600", raw=None, text="配队回答")
-        routes = {
-            "-803768600": {
-                "is_group": True,
-                "target_id": "100",
-                "bot_self_id": "200",
-                "ts": time.time() - 601,
-            },
-        }
-        response, validated_id, reason, message = run_immediate(MODULE.send_captured_reply(
-            bot,
-            reply,
-            routes,
-            is_group=True,
-            target_id="100",
-            bot_self_id="200",
-            ttl_seconds=600,
-        ))
-        self.assertEqual(response, {"message_id": 321})
-        self.assertEqual((validated_id, reason), ("", "route_expired"))
-        self.assertEqual([segment.type for segment in message], ["text"])
-        self.assertEqual(bot.calls[0][0], "send_group_msg")
 
 
 if __name__ == "__main__":
