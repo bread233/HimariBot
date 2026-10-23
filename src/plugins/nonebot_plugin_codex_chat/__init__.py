@@ -42,6 +42,7 @@ _codex_poke = on_notice(
 )
 driver = get_driver()
 _superusers = {str(x) for x in (getattr(driver.config, "superusers", set()) or set())}
+_poke_cooldowns: dict[tuple[int, int], float] = {}  # 每个群内的每位用户独立冷却 30 秒
 
 
 def _ensure_maibot_prompts_loaded() -> None:
@@ -554,14 +555,21 @@ async def _handle_poke(event: PokeNotifyEvent, bot: Bot):
     if plugin_config.allowed_groups_list and int(event.group_id) not in plugin_config.allowed_groups_list:
         return
     group_id, user_id = int(event.group_id), int(event.user_id)
+    cooldown_key = (group_id, user_id)
+    now = time.monotonic()
+    if now < _poke_cooldowns.get(cooldown_key, 0):
+        return
+    _poke_cooldowns[cooldown_key] = now + 30  # 在首次 await 前占位，避免并发重复触发
     try:
         member = await bot.get_group_member_info(group_id=group_id, user_id=user_id)
         nickname = str(member.get("card") or member.get("nickname") or "").strip()
         if not nickname:
             logger.info(f"codex_chat_poke_skip reason=no_nickname group_id={group_id} user_id={user_id}")
+            _poke_cooldowns.pop(cooldown_key, None)
             return
     except Exception as exc:
         logger.warning(f"codex_chat_poke_skip reason=member_lookup_failed error={type(exc).__name__}: {exc}")
+        _poke_cooldowns.pop(cooldown_key, None)
         return
 
     identity = f"你的名字是{global_config.bot.nickname}。\n{global_config.personality.personality}"
@@ -577,14 +585,17 @@ async def _handle_poke(event: PokeNotifyEvent, bot: Bot):
         result = await generate_text(prompt, system_prompt=system_prompt, request_type="poke_reply")
         if not result.ok or not (reply := result.text.strip()):
             logger.info(f"codex_chat_poke_skip reason=empty_generation group_id={group_id} user_id={user_id}")
+            _poke_cooldowns.pop(cooldown_key, None)
             return
         reply = reply.strip(' \n\r\t\"“”')[:20].strip()
         if not reply:
+            _poke_cooldowns.pop(cooldown_key, None)
             return
         await bot.send_group_msg(group_id=group_id, message=MessageSegment.at(user_id) + MessageSegment.text(f" {reply}"))
         logger.info(f"codex_chat_poke_sent group_id={group_id} user_id={user_id} chars={len(reply)}")
     except Exception as exc:
         logger.warning(f"codex_chat_poke_skip reason=generate_or_send_failed error={type(exc).__name__}: {exc}")
+        _poke_cooldowns.pop(cooldown_key, None)
 
 
 @_codex_chat.handle()
