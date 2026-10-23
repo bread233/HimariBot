@@ -201,6 +201,8 @@ async def message_checker(
         else None
     )
 
+    if isinstance(event, PokeNotifyEvent) and not config.autoreply_poke_enabled:
+        return False
     state_reply: List[Tuple[ReplyType, Optional[Dict[str, Any]]]] = []
     for reply in replies:
         filter_checks = [(reply.groups, group), (reply.users, event.user_id)]
