@@ -12,9 +12,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .maibot_core.codex_llm_adapter import generate_text
-from .maibot_core.common.database.affinity_store import get_or_create_affinity
-from .maibot_core.common.database.database import get_db_session
-from .maibot_core.common.database.database_model import HimariBotAffinity
+from src.common.database.affinity_store import get_or_create_affinity
+from src.common.database.database import get_db_session
+from src.common.database.database_model import HimariBotAffinity
 from .mood_state import get_affinity_mood_multiplier
 
 log = logging.getLogger(__name__)

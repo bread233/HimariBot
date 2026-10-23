@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Callable
 
-from .maibot_core.common.database.affinity_store import get_or_create_affinity
+from src.common.database.affinity_store import get_or_create_affinity
 
 _QUERY = re.compile(r"^查看好感度[！!。\s]*$")
 
