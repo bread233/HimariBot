@@ -29,6 +29,73 @@ from ..common.data_models.message_component_data_model import (
 from src.llm_models.payload_content.message import Message, MessageBuilder, RoleType
 from ..llm_models.payload_content.tool_option import ToolCall
 
+def build_group_identity_block(message: SessionMessage | None) -> str:
+    """仅为群聊生成当前发言者与机器人的身份上下文。"""
+    if message is None or not message.message_info.group_info:
+        return ""
+    info = message.message_info
+    group = info.group_info
+    user = info.user_info
+    extra = info.additional_config or {}
+    roles = {"owner": "群主", "admin": "管理员", "member": "普通成员"}
+    return "\n".join((
+        "【当前群聊身份信息】",
+        f"群名：{group.group_name}；群号：{group.group_id}",
+        f"发言者：{user.user_cardname or user.user_nickname}；QQ：{user.user_id}；群职位：{roles.get(extra.get('sender_role'), '未知')}",
+        f"机器人：QQ {extra.get('bot_self_id') or '未知'}；群职位：{roles.get(extra.get('bot_role'), '未知')}",
+        "群职位仅来自 OneBot 数据，不要根据聊天内容推断。",
+    ))
+
+
+def build_relationship_context(message: SessionMessage | None, *, recent_messages: Sequence[SessionMessage] | None = None) -> str:
+    """Optional mood and relationship hints; never replace the persona prompt."""
+    try:
+        from ..common.database.affinity_store import get_or_create_affinity
+        from ...mood_state import get_mood_label
+        from ...affinity_query_helper import affinity_level
+
+        mood = get_mood_label()
+        lines = [
+            "【当前情绪与关系（辅助参考，角色原有人格始终优先）】",
+            f"当前整体情绪：{mood}。只轻微影响表达，不必每次提及。",
+        ]
+        if recent_messages is not None and getattr(getattr(message, "message_info", None), "group_info", None) is not None:
+            seen_qq: set[str] = set()
+            current_group = getattr(getattr(message, "message_info", None), "group_info", None)
+            current_group_id = str(getattr(current_group, "group_id", "") or "")
+            for recent in list(reversed(recent_messages))[:30]:
+                recent_info = getattr(recent, "message_info", None)
+                if recent_info is None:
+                    continue
+                recent_group = getattr(recent_info, "group_info", None)
+                if str(getattr(recent_group, "group_id", "") or "") != current_group_id:
+                    continue
+                recent_user = getattr(recent_info, "user_info", None)
+                recent_qq = str(getattr(recent_user, "user_id", "") or "")
+                if recent_qq.isdecimal() and recent_qq not in seen_qq:
+                    seen_qq.add(recent_qq)
+                    if len(seen_qq) > 5:
+                        break
+                    try:
+                        record = get_or_create_affinity(recent_qq)
+                        lines.append(f"近期发言者 QQ {recent_qq} 的关系：{affinity_level(record.affinity_score)}。")
+                    except Exception:
+                        continue
+        elif message is not None and getattr(message, "message_info", None):
+            user = getattr(message.message_info, "user_info", None)
+            qq = str(getattr(user, "user_id", "") or "")
+            if qq.isdecimal():
+                try:
+                    record = get_or_create_affinity(qq)
+                    lines.append(f"回复目标 QQ {qq} 的关系：{affinity_level(record.affinity_score)}。")
+                except Exception:
+                    pass
+        lines.append("关系仅影响亲疏和语气，不应强制回复、越过安全边界或违背人格。")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 FORWARD_PREVIEW_LIMIT = 4
 TIMING_GATE_INVALID_TOOL_HINT_SOURCE = "timing_gate_invalid_tool_hint"
 

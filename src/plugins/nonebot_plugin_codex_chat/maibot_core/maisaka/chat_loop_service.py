@@ -42,6 +42,7 @@ from .context_messages import (
     TIMING_GATE_INVALID_TOOL_HINT_SOURCE,
     ToolResultMessage,
     build_llm_message_from_context,
+    build_group_identity_block,
 )
 from .history_utils import drop_orphan_tool_results, normalize_tool_result_order
 from .mid_term_memory import is_mid_term_memory_message
@@ -913,9 +914,37 @@ class MaisakaChatLoopService:
             if llm_message is not None:
                 messages.append(llm_message)
 
+        latest_message = next(
+            (msg.original_message for msg in reversed(selected_history)
+             if isinstance(msg, SessionBackedMessage) and msg.original_message is not None),
+            None,
+        )
+        group_identity = build_group_identity_block(latest_message)
+        from .context_messages import build_relationship_context
+        relationship_context = build_relationship_context(
+            latest_message,
+            recent_messages=[
+                msg.original_message
+                for msg in selected_history
+                if isinstance(msg, SessionBackedMessage)
+                and msg.original_message is not None
+            ],
+        )
+        proactive_guidance = ""
+        if latest_message is not None:
+            try:
+                from src.plugins.nonebot_plugin_codex_chat.proactive_mood import planner_mood_guidance
+                group_info = latest_message.message_info.group_info
+                if group_info is not None:
+                    proactive_guidance = planner_mood_guidance(str(group_info.group_id))
+            except Exception:
+                pass
         normalized_injected_messages: List[Message] = []
         final_user_messages = [
             *(injected_user_messages or []),
+            group_identity,
+            relationship_context,
+            proactive_guidance,
             self._build_current_time_user_message(),
         ]
         for injected_message in final_user_messages:

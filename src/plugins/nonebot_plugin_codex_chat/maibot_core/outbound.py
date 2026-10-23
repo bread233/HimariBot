@@ -13,6 +13,18 @@ class CapturedOutboundMessage:
     reply_to_message_id: str | None = None
     raw: Any | None = None
     source: str = "maibot_capture"
+    mood_reservation: str | None = None
+
+
+_current_mood_reservation: ContextVar[str | None] = ContextVar("maibot_mood_reservation", default=None)
+
+
+def set_mood_reservation(value: str | None) -> Token[str | None]:
+    return _current_mood_reservation.set(value)
+
+
+def reset_mood_reservation(token: Token[str | None]) -> None:
+    _current_mood_reservation.reset(token)
 
 
 _current_outbound_buffer: ContextVar[list[CapturedOutboundMessage] | None] = ContextVar(
@@ -62,6 +74,7 @@ def capture_outbound_message(
             reply_to_message_id=reply_to_message_id,
             raw=raw,
             source=source,
+            mood_reservation=_current_mood_reservation.get(),
         )
     )
     return True

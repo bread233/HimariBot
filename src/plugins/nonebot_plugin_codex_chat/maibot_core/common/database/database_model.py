@@ -1,9 +1,24 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
 from sqlalchemy import Boolean, Column, DateTime, Enum as SQLEnum, Float, Index, Integer, Text, UniqueConstraint
 from sqlmodel import Field, LargeBinary, SQLModel
+
+
+class HimariBotAffinity(SQLModel, table=True):
+    """One persistent affinity record per QQ user, shared across groups."""
+    __tablename__ = "himaribot_affinity"
+
+    qq_id: str = Field(primary_key=True, max_length=32)
+    affinity_score: float = Field(default=10.0)
+    interaction_count: int = Field(default=0)
+    daily_change_count: int = Field(default=0)
+    daily_reset_date: Optional[str] = Field(default=None)
+    last_evaluated_at: Optional[datetime] = Field(default=None)
+    last_interaction_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ModelUser(str, Enum):

@@ -434,6 +434,8 @@ class MaibotInboundMessage:
     raw_segments: list[dict[str, Any]] | None = None
     raw_event: Any | None = None
     bot_self_id: str = ""
+    sender_role: str | None = None
+    bot_role: str | None = None
     at_targets: list[str] = field(default_factory=list)
     at_bot: bool = False
     at_others: list[str] = field(default_factory=list)
@@ -448,6 +450,7 @@ class MaibotOutboundMessage:
     reply_to_message_id: str | None = None
     raw: Any | None = None
     source: str = "maibot_capture"
+    mood_reservation: str | None = None
 
 
 @dataclass(slots=True)
@@ -470,6 +473,7 @@ def build_maibot_outbound_replies(captured_messages: list[Any]) -> list[MaibotOu
                 segments=getattr(msg, "segments", None),
                 reply_to_message_id=getattr(msg, "reply_to_message_id", None),
                 raw=getattr(msg, "raw", None),
+                mood_reservation=getattr(msg, "mood_reservation", None),
                 source=str(getattr(msg, "source", "maibot_capture") or "maibot_capture"),
             )
         )
@@ -511,6 +515,9 @@ async def handle_inbound_message(
             else None
         ),
         additional_config={
+            "sender_role": inbound.sender_role if inbound.group_id else None,
+            "bot_role": inbound.bot_role if inbound.group_id else None,
+            "bot_self_id": inbound.bot_self_id if inbound.group_id else None,
             "at_bot": inbound.at_bot,
             "at_targets": list(inbound.at_targets),
             "at_others": list(inbound.at_others),

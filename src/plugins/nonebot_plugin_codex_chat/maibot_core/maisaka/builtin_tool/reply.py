@@ -81,6 +81,11 @@ def get_tool_spec() -> ToolSpec:
                     "description": "有助于回复的信息，之前搜集得到的事实性信息，记忆等，使用平文本格式。",
                     "default": True,
                 },
+                "mood_expression": {
+                    "type": "boolean",
+                    "description": "仅主动表达情绪时为true；普通回复为false。",
+                    "default": False,
+                },
             },
             "required": ["msg_id"],
         },
@@ -140,7 +145,7 @@ async def handle_tool(
     reply_tool_args = {
         key: value
         for key, value in dict(invocation.arguments or {}).items()
-        if key not in {"msg_id", "set_quote", "reference_info"}
+        if key not in {"msg_id", "set_quote", "reference_info", "mood_expression"}
     }
     enable_reply_quote = bool(config_module.global_config.chat.enable_reply_quote)
 
@@ -156,6 +161,15 @@ async def handle_tool(
             invocation.tool_name,
             f"未找到要回复的目标消息，msg_id={target_message_id}",
         )
+    mood_expression = invocation.arguments.get("mood_expression") is True
+    group_info = getattr(target_message.message_info, "group_info", None)
+    mood_group_id = str(getattr(group_info, "group_id", "") or "")
+    if mood_expression:
+        from src.plugins.nonebot_plugin_codex_chat.proactive_mood import can_express
+        if not mood_group_id or not can_express(mood_group_id):
+            return tool_ctx.build_failure_result(
+                invocation.tool_name, "主动情绪表达受限；正常回复仍可使用。"
+            )
     force_quote = _should_force_quote(target_message)
     effective_set_quote = enable_reply_quote and (set_quote or force_quote)
     logger.info(
@@ -241,6 +255,15 @@ async def handle_tool(
             f"发送目标已失效：{target_guard.reason}",
             metadata={**reply_metadata, "pause_execution": True},
         )
+    mood_reservation = None
+    reservation_scope = None
+    if mood_expression and tool_ctx.runtime.chat_stream.platform == HOST_PLATFORM_ONEBOT_V11:
+        from src.plugins.nonebot_plugin_codex_chat.proactive_mood import reserve_expression
+        from src.plugins.nonebot_plugin_codex_chat.maibot_core.outbound import set_mood_reservation
+        mood_reservation = reserve_expression(mood_group_id)
+        if mood_reservation is None:
+            return tool_ctx.build_failure_result(invocation.tool_name, "主动情绪表达额度已被占用；正常回复不受影响。")
+        reservation_scope = set_mood_reservation(mood_reservation)
     sent_message_ids: list[str] = []
     send_results: list[dict[str, Any]] = []
     try:
@@ -364,8 +387,15 @@ async def handle_tool(
             "发送可见回复时发生异常。",
             metadata=reply_metadata,
         )
+    finally:
+        if reservation_scope is not None:
+            from src.plugins.nonebot_plugin_codex_chat.maibot_core.outbound import reset_mood_reservation
+            reset_mood_reservation(reservation_scope)
 
     if not sent:
+        if mood_reservation:
+            from src.plugins.nonebot_plugin_codex_chat.proactive_mood import release_expression
+            release_expression(mood_reservation)
         return tool_ctx.build_failure_result(
             invocation.tool_name,
             "可见回复生成成功，但发送失败。",

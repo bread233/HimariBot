@@ -45,6 +45,7 @@ from ...maisaka.context_messages import (
     SessionBackedMessage,
     ToolResultMessage,
     build_llm_message_from_context,
+    build_group_identity_block,
 )
 from ...maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from ...maisaka.message_adapter import parse_speaker_content
@@ -458,6 +459,13 @@ class BaseMaisakaReplyGenerator:
         sections: List[str] = [f"当前时间：{current_time}"]
         if expression_habits.strip():
             sections.append(expression_habits.strip())
+        group_identity = build_group_identity_block(reply_message)
+        if group_identity:
+            sections.append(group_identity)
+        from src.maisaka.context_messages import build_relationship_context
+        relationship_context = build_relationship_context(reply_message)
+        if relationship_context:
+            sections.append(relationship_context)
         target_message_block = self._build_target_message_block(reply_message)
         if target_message_block:
             sections.append(target_message_block)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 import traceback
 from typing import Any, Awaitable, Callable, Optional
@@ -24,6 +25,10 @@ from .onebot_reply import (
 
 bootstrap_src_alias()
 
+from .affinity_query_helper import build_affinity_query_reply, is_affinity_query
+from .mood_state import get_mood_label
+from .mood_events import note_bot_spoke, note_group_activity
+from .affinity_evaluator import evaluate_affinity_event
 from src.emoji_system.emoji_manager import emoji_manager
 from src.prompt.prompt_manager import prompt_manager
 
@@ -43,6 +48,7 @@ _codex_poke = on_notice(
 driver = get_driver()
 _superusers = {str(x) for x in (getattr(driver.config, "superusers", set()) or set())}
 _poke_cooldowns: dict[tuple[int, int], float] = {}  # 每个群内的每位用户独立冷却 30 秒
+_affinity_tasks: set[asyncio.Task] = set()
 
 
 def _ensure_maibot_prompts_loaded() -> None:
@@ -446,7 +452,8 @@ async def _codex_chat_host_send_interceptor(
             f"target_id={target_id} is_group={is_group} "
             f"error={type(exc).__name__}: {exc}\n{traceback.format_exc()}"
         )
-        return None
+        from src.services.send_service import DeliveryUncertainError
+        raise DeliveryUncertainError("OneBot send result unknown after API exception") from exc
 
     onebot_message_id = ""
     if isinstance(api_response, dict):
@@ -612,6 +619,8 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
     bot_self_id = str(getattr(event, "self_id", None) or getattr(bot, "self_id", "") or "").strip()
     at_bot = bool(bot_self_id and bot_self_id in at_targets)
     at_others = sorted(target for target in at_targets if target != bot_self_id)
+    if isinstance(event, GroupMessageEvent):
+        note_group_activity(str(event.group_id), at_bot)
 
     if isinstance(event, GroupMessageEvent) and at_others and not at_bot:
         logger.info(
@@ -627,6 +636,23 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
             f"at_targets={sorted(at_targets)} bot_self_id={bot_self_id} "
             f"message_id={getattr(event, 'message_id', '')}"
         )
+
+    if isinstance(event, GroupMessageEvent) and at_bot:
+        raw_plain = str(raw_message_for_addressing.extract_plain_text()).strip()
+        if is_affinity_query(raw_plain):
+            sender = getattr(event, "sender", None)
+            nickname = str(
+                getattr(sender, "card", "") or getattr(sender, "nickname", "") or "你"
+            )
+            try:
+                reply = build_affinity_query_reply(
+                    str(event.user_id), nickname, get_mood_label
+                )
+                await bot.send(event=event, message=reply)
+            except Exception as exc:
+                logger.exception(f"codex_chat_affinity_query_failed error={exc}")
+                await bot.send(event=event, message="好感度暂时无法查询，请稍后再试。")
+            return
 
     _remember_target(event, bot)
     _record_inbound_route(event, bot)
@@ -664,8 +690,24 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
 
     if not plain_text and not components:
         return
+    if isinstance(event, GroupMessageEvent) and plain_text:
+        task = asyncio.create_task(
+            evaluate_affinity_event(
+                str(event.user_id), str(event.group_id), plain_text, addressed=at_bot
+            )
+        )
+        _affinity_tasks.add(task)
+        task.add_done_callback(_affinity_tasks.discard)
 
     sender = getattr(event, "sender", None)
+    sender_role = bot_role = None
+    if isinstance(event, GroupMessageEvent):
+        sender_role = str(getattr(sender, 'role', '') or '') or None
+        try:
+            bot_member = await bot.get_group_member_info(group_id=int(event.group_id), user_id=int(bot.self_id))
+            bot_role = str(bot_member.get('role') or '') or None
+        except Exception as exc:
+            logger.warning(f'codex_chat_bot_role_unavailable group_id={event.group_id} error={exc}')
     received_at = time.time()
     event_timestamp_epoch, event_timestamp_source, timestamp_fallback_reason = normalize_unix_timestamp(
         getattr(event, "time", None),
@@ -689,6 +731,8 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
         raw_segments=raw_segments,
         raw_event=event,
         bot_self_id=bot_self_id,
+        sender_role=sender_role,
+        bot_role=bot_role,
         at_targets=sorted(at_targets),
         at_bot=at_bot,
         at_others=at_others,
@@ -726,8 +770,19 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
                     f"reason={downgrade_reason}"
                 )
             if onebot_message is None:
+                if reply.mood_reservation:
+                    from .proactive_mood import release_expression
+                    release_expression(reply.mood_reservation)
                 continue
             sent_count += 1
+            if is_group:
+                note_bot_spoke(target_id)
+                try:
+                    from .proactive_mood import confirm_delivered
+                    if reply.mood_reservation and confirm_delivered(target_id, reply.mood_reservation):
+                        logger.info(f"proactive_mood_delivered group_id={target_id}")
+                except Exception:
+                    logger.exception("proactive_mood_delivery_accounting_failed")
             logger.info(
                 f"codex_chat_send_from_maibot sent index={index} "
                 f"requested_reply_message_id={requested_reply_message_id or '-'} "
@@ -735,6 +790,8 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
                 f"native_reply_segment={int(bool(validated_reply_message_id))}"
             )
         except Exception as exc:
+            if getattr(reply, "mood_reservation", None):
+                logger.warning(f"proactive_mood_delivery_uncertain index={index}")
             logger.exception(f"codex_chat_send_from_maibot failed index={index} error={exc}")
     logger.info(
         f"codex_chat_send_from_maibot done sent_count={sent_count} replies={len(result.replies)}"
