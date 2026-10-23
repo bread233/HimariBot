@@ -93,6 +93,7 @@ class ReplyEntryModel(BaseModel):
 class ConfigModel(BaseModel):
     autoreply_block: bool = False
     autoreply_priority: int = 99
+    autoreply_poke_enabled: bool = False
 
 
 replies: List[ReplyEntryModel] = []

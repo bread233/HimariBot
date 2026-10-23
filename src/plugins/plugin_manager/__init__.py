@@ -4,7 +4,7 @@ from nonebot.matcher import Matcher
 from nonebot.params import ShellCommandArgs
 from nonebot.message import run_preprocessor
 from nonebot.exception import IgnoredException
-from nonebot.plugin import PluginMetadata, on_shell_command, get_loaded_plugins
+from nonebot.plugin import PluginMetadata, on_shell_command, on_regex, get_loaded_plugins
 from nonebot.adapters.onebot.v11 import Bot, Event, MessageEvent, GroupMessageEvent
 from nonebot.log import logger
 
@@ -26,6 +26,28 @@ __plugin_meta__ = PluginMetadata(
 )
 
 npm = on_shell_command("npm", parser=npm_parser, priority=1)
+
+
+chat_switch = on_regex(r"^(开启自动聊天|关闭自动聊天|自动聊天状态)$", priority=1, block=True)
+
+
+@chat_switch.handle()
+async def _(bot: Bot, event: GroupMessageEvent):
+    if event.sender.role not in ("admin", "owner") and str(event.user_id) not in bot.config.superusers:
+        await chat_switch.finish("只有群管理员或群主可以管理自动聊天。")
+    plugin = "nonebot_plugin_codex_chat"
+    conv = {"user": [], "group": [event.group_id]}
+    command = event.get_plaintext().strip()
+    if command == "自动聊天状态":
+        enabled = plugin_manager.get_plugin(conv=conv, perm=1).get(plugin, False)
+        await chat_switch.finish(f"本群自动聊天已{'开启' if enabled else '关闭'}。")
+    if command == "关闭自动聊天":
+        result = plugin_manager.block_plugin([plugin], conv)
+        action = "关闭"
+    else:
+        result = plugin_manager.unblock_plugin([plugin], conv)
+        action = "开启"
+    await chat_switch.finish(f"本群自动聊天已{action}。" if result.get(plugin) else "操作失败：插件未注册。")
 
 
 # 在 Matcher 运行前检测其是否启用

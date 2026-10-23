@@ -4,12 +4,14 @@ import time
 import traceback
 from typing import Any, Awaitable, Callable, Optional
 
-from nonebot import get_driver, logger, on_message
-from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent
+from nonebot import get_driver, logger, on_message, on_notice
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, MessageSegment, PokeNotifyEvent
 from nonebot.params import EventMessage
 
 from .config import get_config
 from .maibot_core.bridge import MaibotInboundMessage, handle_inbound_message
+from .maibot_core.codex_llm_adapter import generate_text
+from .maibot_core.config.config import global_config
 from .maibot_core.time_utils import normalize_unix_timestamp
 from .maibot_core.bootstrap import bootstrap_src_alias
 from .onebot_reply import (
@@ -33,6 +35,11 @@ __plugin_meta__ = {
 
 plugin_config = get_config()
 _codex_chat = on_message(priority=plugin_config.codex_chat_command_priority, block=False)
+_codex_poke = on_notice(
+    rule=lambda event: isinstance(event, PokeNotifyEvent),
+    priority=plugin_config.codex_chat_command_priority,
+    block=False,
+)
 driver = get_driver()
 _superusers = {str(x) for x in (getattr(driver.config, "superusers", set()) or set())}
 
@@ -536,6 +543,48 @@ def _register_host_send_interceptor() -> None:
 
 
 _register_host_send_interceptor()
+
+
+@_codex_poke.handle()
+async def _handle_poke(event: PokeNotifyEvent, bot: Bot):
+    if not isinstance(event, PokeNotifyEvent) or not event.group_id or not event.is_tome():
+        return
+    if not plugin_config.codex_chat_enable:
+        return
+    if plugin_config.allowed_groups_list and int(event.group_id) not in plugin_config.allowed_groups_list:
+        return
+    group_id, user_id = int(event.group_id), int(event.user_id)
+    try:
+        member = await bot.get_group_member_info(group_id=group_id, user_id=user_id)
+        nickname = str(member.get("card") or member.get("nickname") or "").strip()
+        if not nickname:
+            logger.info(f"codex_chat_poke_skip reason=no_nickname group_id={group_id} user_id={user_id}")
+            return
+    except Exception as exc:
+        logger.warning(f"codex_chat_poke_skip reason=member_lookup_failed error={type(exc).__name__}: {exc}")
+        return
+
+    identity = f"你的名字是{global_config.bot.nickname}。\n{global_config.personality.personality}"
+    aliases = global_config.bot.alias_names
+    if aliases:
+        identity += f"\n你也被称为{','.join(aliases)}。"
+    system_prompt = (
+        f"{identity}\n你的回复风格：{global_config.personality.reply_style}\n"
+        "你正在QQ群聊天。只输出最终回复正文，不要解释、思考过程、用户名或@。"
+    )
+    prompt = f"群友「{nickname}」刚刚戳了你一下。请自然简短地回应，最多20个字符。"
+    try:
+        result = await generate_text(prompt, system_prompt=system_prompt, request_type="poke_reply")
+        if not result.ok or not (reply := result.text.strip()):
+            logger.info(f"codex_chat_poke_skip reason=empty_generation group_id={group_id} user_id={user_id}")
+            return
+        reply = reply.strip(' \n\r\t\"“”')[:20].strip()
+        if not reply:
+            return
+        await bot.send_group_msg(group_id=group_id, message=MessageSegment.at(user_id) + MessageSegment.text(f" {reply}"))
+        logger.info(f"codex_chat_poke_sent group_id={group_id} user_id={user_id} chars={len(reply)}")
+    except Exception as exc:
+        logger.warning(f"codex_chat_poke_skip reason=generate_or_send_failed error={type(exc).__name__}: {exc}")
 
 
 @_codex_chat.handle()
