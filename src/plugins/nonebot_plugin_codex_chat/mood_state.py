@@ -24,6 +24,8 @@ class MoodSnapshot:
 
 _state = list(BASELINE)
 _updated_at = time.monotonic()
+_recent_emotions: dict[str, tuple[str, float]] = {}
+EMOTION_SECONDS = 15 * 60
 
 
 def _clamp(value: float) -> float:
@@ -64,11 +66,29 @@ def get_mood_label() -> str:
         return "低落" if state.energy < 45 else "烦躁"
     if state.valence >= 70:
         return "兴奋" if state.energy >= 70 else "开心"
+    if state.valence >= 59:
+        return "小开心"
     if state.energy < 30:
         return "疲惫"
     if state.sociability < 30:
         return "不太想说话"
     return "平静"
+
+
+def note_recent_emotion(qq_id: str, description: str) -> None:
+    with _LOCK:
+        _recent_emotions[str(qq_id)] = (description, time.monotonic())
+
+
+def get_recent_emotion(qq_id: str) -> str:
+    with _LOCK:
+        item = _recent_emotions.get(str(qq_id))
+        if not item:
+            return "无明显变化😌"
+        if time.monotonic() - item[1] >= EMOTION_SECONDS:
+            _recent_emotions.pop(str(qq_id), None)
+            return "无明显变化😌"
+        return item[0]
 
 
 def get_mood_prompt() -> str:
@@ -93,4 +113,5 @@ def reset_mood() -> None:
     global _updated_at
     with _LOCK:
         _state[:] = BASELINE
+        _recent_emotions.clear()
         _updated_at = time.monotonic()

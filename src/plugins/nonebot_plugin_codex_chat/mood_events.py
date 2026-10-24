@@ -9,7 +9,7 @@ import re
 import time
 from threading import RLock
 
-from .mood_state import apply_mood_event
+from .mood_state import apply_mood_event, note_recent_emotion
 
 WAIT_SECONDS = 20 * 60
 _lock = RLock()
@@ -17,7 +17,10 @@ _pending: dict[str, tuple[float, str]] = {}
 _recent_sentiment: dict[tuple[str, str], tuple[str, float]] = {}
 SENTIMENT_COOLDOWN_SECONDS = 60
 _BOT_NAME = re.compile(r"(?i)(?<![a-z])himari(?![a-z])|ひまり|日葵")
-_POSITIVE = ("谢谢你", "感谢你", "喜欢你", "爱你", "辛苦了", "你真棒", "你真好", "对不起", "抱歉", "谢谢", "感谢")
+_POSITIVE = ("谢谢你", "感谢你", "喜欢你", "爱你", "辛苦了", "你真棒", "你真好", "对不起", "抱歉", "谢谢", "感谢", "你太厉害了", "好可爱", "做得真好")
+_PRAISE = ("你真棒", "你真好", "你太厉害了", "好可爱", "做得真好")
+_AFFECTION = ("喜欢你", "爱你")
+_CARE = ("辛苦了", "对不起", "抱歉")
 _NEGATIVE = ("讨厌你", "你真烦", "闭嘴", "滚开", "你真蠢", "你真笨", "烦死你了")
 
 
@@ -47,7 +50,20 @@ def note_targeted_mood(group_id: str, qq_id: str, message: str, *, addressed: bo
         if previous and previous[0] == signature and now - previous[1] < SENTIMENT_COOLDOWN_SECONDS:
             return
         _recent_sentiment[key] = (signature, now)
-    apply_mood_event(valence=float(direction), sociability=float(direction))
+    if direction > 0:
+        if any(word in message for word in _AFFECTION):
+            change, description = 10.0, "被表达喜欢，有点害羞🥰"
+        elif any(word in message for word in _PRAISE):
+            change, description = 8.0, "被夸奖，有点高兴😊"
+        elif any(word in message for word in _CARE):
+            change, description = 6.0, "受到关心，有点感动🥹"
+        else:
+            change, description = 5.0, "受到感谢，有点高兴😊"
+    else:
+        change = -9.0 if any(word in message for word in ("讨厌你", "滚开", "闭嘴")) else -5.0
+        description = "被责备，有点难过🥺" if change > -9 else "被攻击，有点生气😠"
+    apply_mood_event(valence=change, sociability=change * 0.5)
+    note_recent_emotion(qq_id, description)
 
 
 def note_bot_spoke(group_id: str, bot_message_id: str = "") -> None:
