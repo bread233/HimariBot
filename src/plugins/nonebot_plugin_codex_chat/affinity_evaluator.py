@@ -9,6 +9,7 @@ import re
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Any
 
 from .maibot_core.codex_llm_adapter import generate_text
@@ -16,10 +17,17 @@ from src.common.database.affinity_store import get_or_create_affinity
 from src.common.database.database import get_db_session
 from src.common.database.database_model import HimariBotAffinity
 from .mood_state import get_affinity_mood_multiplier
+from .mood_events import is_bot_directed
 
 log = logging.getLogger(__name__)
 COOLDOWN_SECONDS = 60
 MAX_DAILY_CHANGES = 20
+JST = ZoneInfo("Asia/Tokyo")
+
+
+def _as_utc(value: datetime) -> datetime:
+    """SQLite stores historical UTC timestamps without timezone information."""
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 EVENT_RANGES = {
     "ordinary": (0.0, 0.0),
     "friendly": (0.5, 2.0),
@@ -50,7 +58,7 @@ def _parse_evaluation(raw: str) -> tuple[str, float] | None:
         if kind not in EVENT_RANGES or not math.isfinite(delta) or not math.isfinite(confidence):
             return None
         low, high = EVENT_RANGES[kind]
-        if confidence < 0.75 or not low <= delta <= high:
+        if confidence < 0.65 or not low <= delta <= high:
             return None
         return kind, delta
     except (KeyError, ValueError, TypeError, json.JSONDecodeError):
@@ -68,20 +76,22 @@ async def evaluate_affinity_event(
         return
     context = _history[group_id]
     context.append(f"{qq_id}: {message[:300]}")
-    if not addressed or len(message) < 3 or qq_id in _inflight:
+    if not is_bot_directed(message, addressed) or len(message) < 3 or qq_id in _inflight:
         return
     _inflight.add(qq_id)
     try:
         record = await asyncio.to_thread(get_or_create_affinity, qq_id)
         now = datetime.now(timezone.utc)
-        if record.last_evaluated_at and (now - record.last_evaluated_at).total_seconds() < COOLDOWN_SECONDS:
+        if record.last_evaluated_at and (now - _as_utc(record.last_evaluated_at)).total_seconds() < COOLDOWN_SECONDS:
             return
-        if record.daily_reset_date == now.date().isoformat() and record.daily_change_count >= MAX_DAILY_CHANGES:
+        if record.daily_reset_date == now.astimezone(JST).date().isoformat() and record.daily_change_count >= MAX_DAILY_CHANGES:
             return
         prompt = (
             "判断用户与机器人之间的互动事件。仅评价对机器人本人的态度，"
             "不能把群友之间的冲突算作对机器人的态度。"
-            "普通聊天、重复问候、玩笑和刷好感输出ordinary。"
+            "无明确态度的普通聊天、重复问候、无针对性的玩笑和刷好感输出ordinary。"
+            "明确针对机器人的感谢、关心、善意、道歉、不满或攻击，应结合上下文认真判断，"
+            "不要仅因语气日常就归为ordinary；也不要把礼貌套话自动判为重大事件。"
             "重大帮助和承诺必须有上下文证据，不采信单方面宣称。"
             "参考上下文，输出严格JSON："
             '{"event_type":"ordinary","base_delta":0,"confidence":0.9}。'
@@ -118,13 +128,13 @@ def _persist_evaluation(qq_id: str, kind: str, delta: float) -> bool:
     from sqlalchemy import func, update
 
     now = datetime.now(timezone.utc)
-    date = now.date().isoformat()
+    date = now.astimezone(JST).date().isoformat()
     with get_db_session() as session:
         record = session.get(HimariBotAffinity, qq_id)
         if record is None:
             return
         today_count = record.daily_change_count if record.daily_reset_date == date else 0
-        if record.last_evaluated_at and (now - record.last_evaluated_at).total_seconds() < COOLDOWN_SECONDS:
+        if record.last_evaluated_at and (now - _as_utc(record.last_evaluated_at)).total_seconds() < COOLDOWN_SECONDS:
             return
         if delta and today_count >= MAX_DAILY_CHANGES:
             return

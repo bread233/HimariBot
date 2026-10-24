@@ -27,7 +27,7 @@ bootstrap_src_alias()
 
 from .affinity_query_helper import build_affinity_query_reply, is_affinity_query
 from .mood_state import get_mood_label
-from .mood_events import note_bot_spoke, note_group_activity
+from .mood_events import note_bot_spoke, note_group_activity, note_targeted_mood
 from .affinity_evaluator import evaluate_affinity_event
 from src.emoji_system.emoji_manager import emoji_manager
 from src.prompt.prompt_manager import prompt_manager
@@ -691,6 +691,7 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
     if not plain_text and not components:
         return
     if isinstance(event, GroupMessageEvent) and plain_text:
+        note_targeted_mood(str(event.group_id), str(event.user_id), plain_text, addressed=at_bot)
         task = asyncio.create_task(
             evaluate_affinity_event(
                 str(event.user_id), str(event.group_id), plain_text, addressed=at_bot
