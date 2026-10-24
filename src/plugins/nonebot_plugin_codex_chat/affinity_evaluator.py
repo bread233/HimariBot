@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import logging
 import re
 import time
@@ -43,6 +44,23 @@ _inflight: set[str] = set()
 _recent_events: dict[str, tuple[str, float]] = {}
 _negative_streak: dict[str, tuple[str, int]] = {}
 REPEAT_WINDOW_SECONDS = 30 * 60
+
+
+def _affinity_adjustment(score: float, delta: float, mood_multiplier: float) -> float:
+    """Continuous curves; negative scores have independent repair/decline rules."""
+    if not delta:
+        return 0.0
+    if score < 0:
+        multiplier = 5.0 if delta > 0 else 1.5
+        cap = 25.0 if delta > 0 else 10.0
+    elif delta > 0:
+        multiplier = 0.6 + 4.4 * math.exp(-score / 30.0)
+        cap = 2.0 + 23.0 * math.exp(-score / 25.0)
+    else:
+        multiplier = 0.35 + 0.65 * math.exp(-score / 40.0)
+        cap = 10.0
+    amount = min(abs(delta * mood_multiplier * multiplier), cap)
+    return amount if delta > 0 else -amount
 
 
 def _parse_evaluation(raw: str) -> tuple[str, float] | None:
@@ -138,9 +156,7 @@ def _persist_evaluation(qq_id: str, kind: str, delta: float) -> bool:
             return
         if delta and today_count >= MAX_DAILY_CHANGES:
             return
-        adjusted = delta * get_affinity_mood_multiplier(delta < 0)
-        if delta < 0 and record.affinity_score >= 40:
-            adjusted *= 0.5
+        adjusted = _affinity_adjustment(record.affinity_score, delta, get_affinity_mood_multiplier(delta < 0))
         streak_day, streak = _negative_streak.get(qq_id, ("", 0))
         if streak_day != date:
             streak = 0

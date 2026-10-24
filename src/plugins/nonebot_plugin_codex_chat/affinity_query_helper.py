@@ -32,7 +32,14 @@ def affinity_level(score: float) -> str:
 def build_affinity_query_reply(
     qq_id: str, nickname: str, mood_label: Callable[[], str]
 ) -> str:
+    from .mood_state import get_recent_emotion
+
     record = get_or_create_affinity(qq_id)
     mood = str(mood_label() or "平静").strip()
     name = str(nickname or "你").strip().replace("\n", " ")[:40]
-    return f"心情：{mood}\n对{name}的好感：{affinity_level(record.affinity_score)}"
+    mood_emoji = {"小开心": "😊", "开心": "😄", "兴奋": "🤩", "低落": "🥺", "烦躁": "😠", "疲惫": "😴", "平静": "😌", "不太想说话": "😶"}.get(mood, "😌")
+    score = f"{record.affinity_score:.4f}".rstrip("0").rstrip(".")
+    return (f"对{name}的好感：{score} / 100\n"
+            f"关系等级：{affinity_level(record.affinity_score)}\n"
+            f"当前心情：{mood}{mood_emoji}\n"
+            f"最近情绪：{get_recent_emotion(qq_id)}")
