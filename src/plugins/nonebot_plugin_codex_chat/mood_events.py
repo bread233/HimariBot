@@ -5,6 +5,7 @@ Tracks one unanswered bot utterance per group; no periodic background task.
 
 from __future__ import annotations
 
+import re
 import time
 from threading import RLock
 
@@ -13,6 +14,40 @@ from .mood_state import apply_mood_event
 WAIT_SECONDS = 20 * 60
 _lock = RLock()
 _pending: dict[str, tuple[float, str]] = {}
+_recent_sentiment: dict[tuple[str, str], tuple[str, float]] = {}
+SENTIMENT_COOLDOWN_SECONDS = 60
+_BOT_NAME = re.compile(r"(?i)(?<![a-z])himari(?![a-z])|ひまり|日葵")
+_POSITIVE = ("谢谢你", "感谢你", "喜欢你", "爱你", "辛苦了", "你真棒", "你真好", "对不起", "抱歉", "谢谢", "感谢")
+_NEGATIVE = ("讨厌你", "你真烦", "闭嘴", "滚开", "你真蠢", "你真笨", "烦死你了")
+
+
+def is_bot_directed(message: str, addressed: bool) -> bool:
+    """Recognize explicit bot names without treating other group chat as directed."""
+    return addressed or bool(_BOT_NAME.search(message))
+
+
+def _sentiment(message: str) -> int:
+    negative = any(phrase in message for phrase in _NEGATIVE)
+    positive = any(phrase in message for phrase in _POSITIVE)
+    return 0 if positive == negative else (1 if positive else -1)
+
+
+def note_targeted_mood(group_id: str, qq_id: str, message: str, *, addressed: bool) -> None:
+    """A mild mood response to explicit bot-directed sentiment, never a score change."""
+    if not is_bot_directed(message, addressed):
+        return
+    direction = _sentiment(message)
+    if not direction:
+        return
+    key = (str(group_id), str(qq_id))
+    signature = str(direction) + ":" + message.strip().casefold()[:200]
+    with _lock:
+        previous = _recent_sentiment.get(key)
+        now = time.monotonic()
+        if previous and previous[0] == signature and now - previous[1] < SENTIMENT_COOLDOWN_SECONDS:
+            return
+        _recent_sentiment[key] = (signature, now)
+    apply_mood_event(valence=float(direction), sociability=float(direction))
 
 
 def note_bot_spoke(group_id: str, bot_message_id: str = "") -> None:
