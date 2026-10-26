@@ -567,6 +567,12 @@ async def _handle_poke(event: PokeNotifyEvent, bot: Bot):
     if now < _poke_cooldowns.get(cooldown_key, 0):
         return
     _poke_cooldowns[cooldown_key] = now + 30  # 在首次 await 前占位，避免并发重复触发
+    # 只对戳当前机器人且通过冷却的事件，复用既有情绪与好感度系统。
+    task = asyncio.create_task(
+        evaluate_affinity_event(str(user_id), str(group_id), "QQ戳一戳", addressed=True)
+    )
+    _affinity_tasks.add(task)
+    task.add_done_callback(_affinity_tasks.discard)
     try:
         member = await bot.get_group_member_info(group_id=group_id, user_id=user_id)
         nickname = str(member.get("card") or member.get("nickname") or "").strip()
@@ -691,7 +697,6 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
     if not plain_text and not components:
         return
     if isinstance(event, GroupMessageEvent) and plain_text:
-        note_targeted_mood(str(event.group_id), str(event.user_id), plain_text, addressed=at_bot)
         task = asyncio.create_task(
             evaluate_affinity_event(
                 str(event.user_id), str(event.group_id), plain_text, addressed=at_bot

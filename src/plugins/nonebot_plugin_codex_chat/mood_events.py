@@ -40,7 +40,8 @@ def note_targeted_mood(group_id: str, qq_id: str, message: str, *, addressed: bo
     if not is_bot_directed(message, addressed):
         return
     direction = _sentiment(message)
-    if not direction:
+    social_touch = any(word in message for word in ("摸摸头", "摸头", "抱抱", "rua", "戳戳", "戳一戳"))
+    if not direction and not (addressed and social_touch):
         return
     key = (str(group_id), str(qq_id))
     signature = str(direction) + ":" + message.strip().casefold()[:200]
@@ -50,7 +51,9 @@ def note_targeted_mood(group_id: str, qq_id: str, message: str, *, addressed: bo
         if previous and previous[0] == signature and now - previous[1] < SENTIMENT_COOLDOWN_SECONDS:
             return
         _recent_sentiment[key] = (signature, now)
-    if direction > 0:
+    if not direction and social_touch:
+        change, description = 2.0, "被轻轻互动，有点惊讶和开心😊"
+    elif direction > 0:
         if any(word in message for word in _AFFECTION):
             change, description = 10.0, "被表达喜欢，有点害羞🥰"
         elif any(word in message for word in _PRAISE):
