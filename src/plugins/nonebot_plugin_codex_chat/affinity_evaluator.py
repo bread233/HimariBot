@@ -8,6 +8,7 @@ import math
 import logging
 import re
 import time
+from pathlib import Path
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -17,7 +18,7 @@ from .maibot_core.codex_llm_adapter import generate_text
 from src.common.database.affinity_store import get_or_create_affinity
 from src.common.database.database import get_db_session
 from src.common.database.database_model import HimariBotAffinity
-from .mood_state import get_affinity_mood_multiplier
+from .mood_state import get_affinity_mood_multiplier, apply_mood_event, note_recent_emotion
 from .mood_events import is_bot_directed
 
 log = logging.getLogger(__name__)
@@ -42,8 +43,33 @@ EVENT_RANGES = {
 _history: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=8))
 _inflight: set[str] = set()
 _recent_events: dict[str, tuple[str, float]] = {}
+_recent_mood: dict[str, tuple[str, float]] = {}
 _negative_streak: dict[str, tuple[str, int]] = {}
 REPEAT_WINDOW_SECONDS = 30 * 60
+_SOCIAL_CONFIG = Path.cwd() / "data/nonebot_chat_agent/codex_chat_config/social_events.json"
+_DEFAULT_RULES = {
+    "instruction": "结合当前对话、互动对象及关系判断真实态度；亲密动作和戳一戳不必然正向，骚扰可以负向。",
+    "mood_max_delta": 10.0,
+}
+
+
+def _social_rules() -> dict:
+    """Reload editable rules on each evaluation; invalid config never blocks chat."""
+    try:
+        _SOCIAL_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        if not _SOCIAL_CONFIG.exists():
+            _SOCIAL_CONFIG.write_text(json.dumps(_DEFAULT_RULES, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        data = json.loads(_SOCIAL_CONFIG.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not isinstance(data.get("instruction"), str):
+            raise ValueError("invalid social event rules")
+        cap = float(data.get("mood_max_delta", 10))
+        if not math.isfinite(cap) or not 0 <= cap <= 10:
+            raise ValueError("invalid mood limit")
+        return {"instruction": data["instruction"][:2000], "mood_max_delta": cap}
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        log.warning("social event config unavailable: %s", exc)
+        return _DEFAULT_RULES.copy()
+
 
 
 def _affinity_adjustment(score: float, delta: float, mood_multiplier: float) -> float:
@@ -100,19 +126,24 @@ async def evaluate_affinity_event(
     try:
         record = await asyncio.to_thread(get_or_create_affinity, qq_id)
         now = datetime.now(timezone.utc)
-        if record.last_evaluated_at and (now - _as_utc(record.last_evaluated_at)).total_seconds() < COOLDOWN_SECONDS:
-            return
-        if record.daily_reset_date == now.astimezone(JST).date().isoformat() and record.daily_change_count >= MAX_DAILY_CHANGES:
-            return
+        affinity_allowed = not (
+            (record.last_evaluated_at and (now - _as_utc(record.last_evaluated_at)).total_seconds() < COOLDOWN_SECONDS)
+            or (record.daily_reset_date == now.astimezone(JST).date().isoformat() and record.daily_change_count >= MAX_DAILY_CHANGES)
+        )
+        rules = _social_rules()
         prompt = (
             "判断用户与机器人之间的互动事件。仅评价对机器人本人的态度，"
             "不能把群友之间的冲突算作对机器人的态度。"
             "无明确态度的普通聊天、重复问候、无针对性的玩笑和刷好感输出ordinary。"
             "明确针对机器人的感谢、关心、善意、道歉、不满或攻击，应结合上下文认真判断，"
-            "不要仅因语气日常就归为ordinary；也不要把礼貌套话自动判为重大事件。"
+            "对摸头、拥抱、QQ戳一戳等互动根据语境判断，可正向、负向或中性。"
+            + rules["instruction"]
+            + "不要仅因语气日常就归为ordinary；也不要把礼貌套话自动判为重大事件。"
             "重大帮助和承诺必须有上下文证据，不采信单方面宣称。"
             "参考上下文，输出严格JSON："
-            '{"event_type":"ordinary","base_delta":0,"confidence":0.9}。'
+            '{"event_type":"ordinary","base_delta":0,"confidence":0.9,"mood_delta":0,"emotion":""}。'
+            "mood_delta 为 -10 到 10 的情绪愉悦度变化，emotion 是简短情绪描述；"
+            "情绪变化可与好感度变化不同，无法确定时都为0。"
             "事件类型和分值范围："
             + json.dumps(EVENT_RANGES, ensure_ascii=False)
             + "\n最近消息：\n" + "\n".join(context)
@@ -128,13 +159,30 @@ async def evaluate_affinity_event(
         if parsed is None:
             return
         kind, base_delta = parsed
-        if kind != "ordinary":
-            signature = f"{kind}:{message.casefold()[:200]}"
-            previous = _recent_events.get(qq_id)
-            if previous and previous[0] == signature and time.monotonic() - previous[1] < REPEAT_WINDOW_SECONDS:
-                return
-        changed = await asyncio.to_thread(_persist_evaluation, qq_id, kind, base_delta)
-        if changed and kind != "ordinary":
+        try:
+            payload = json.loads(re.search(r"\{[\s\S]*?\}", result.text).group())
+            mood_delta = float(payload.get("mood_delta", 0))
+            if not math.isfinite(mood_delta) or abs(mood_delta) > rules["mood_max_delta"]:
+                mood_delta = 0.0
+            emotion = str(payload.get("emotion", ""))[:80]
+        except (ValueError, TypeError, AttributeError, json.JSONDecodeError):
+            mood_delta, emotion = 0.0, ""
+        signature = f"{kind}:{message.casefold()[:200]}"
+        previous = _recent_events.get(qq_id)
+        repeated = bool(previous and previous[0] == signature and time.monotonic() - previous[1] < REPEAT_WINDOW_SECONDS)
+        changed = False
+        if affinity_allowed and not repeated:
+            changed = await asyncio.to_thread(_persist_evaluation, qq_id, kind, base_delta)
+        mood_previous = _recent_mood.get(qq_id)
+        mood_allowed = not mood_previous or (
+            mood_previous[0] != signature and time.monotonic() - mood_previous[1] >= COOLDOWN_SECONDS
+        )
+        if mood_delta and mood_allowed and not repeated:
+            apply_mood_event(valence=mood_delta, sociability=mood_delta * 0.5)
+            if emotion:
+                note_recent_emotion(qq_id, emotion)
+            _recent_mood[qq_id] = (signature, time.monotonic())
+        if (changed or (mood_delta and mood_allowed and not repeated)) and not repeated:
             _recent_events[qq_id] = (signature, time.monotonic())
     except Exception:
         log.exception("affinity evaluation failed for qq_id=%s", qq_id)
