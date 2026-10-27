@@ -31,7 +31,8 @@ async def pic2txt_byOCR(img_path, filename):
         start = time.time()
         params = {'url': img_path}
         async with httpx.AsyncClient() as client:
-            resp = await client.post(f'{ocr_url}/OCR/', data=params, timeout=5, follow_redirects=True)
+            resp = await client.post(f'{ocr_url}/OCR/', data=params, timeout=httpx.Timeout(12.0, connect=3.0), follow_redirects=True)
+            resp.raise_for_status()
             end = time.time()
             result = orjson.loads(resp.content)
             if result['code'] == 200:

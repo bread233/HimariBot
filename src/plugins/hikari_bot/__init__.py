@@ -344,7 +344,7 @@ async def job_listen_battle():
 
 scheduler.add_job(job_chech_version, 'cron', hour=12)
 scheduler.add_job(startup, 'cron', hour=4)
-scheduler.add_job(downlod_OcrResult, 'interval', minutes=10, args=[UserInfo_Model()])
+scheduler.add_job(downlod_OcrResult, 'interval', minutes=10, args=[UserInfo_Model()], id='hikari_ocr_cache', coalesce=True, max_instances=1, misfire_grace_time=60)
 scheduler.add_job(job_listen_battle, 'interval', minutes=driver.config.battle_listen_time)
 
 

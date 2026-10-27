@@ -57,7 +57,7 @@ async def send_video(bot: Bot, ev: NoticeEvent, url: str):
 
 
 def get_file(url: str):
-    response = requests.get(url)
+    response = requests.get(url, timeout=(5, 30))
     # 确保请求成功
     if response.status_code == 200:
         # 获取文件内容
