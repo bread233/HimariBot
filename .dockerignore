@@ -9,7 +9,7 @@
 # Tests / docs / migrations
 docs/
 tests/
-migrations/
+# Include project Alembic migrations in Docker images
 
 # Python 缓存 / 虚拟环境
 __pycache__/
