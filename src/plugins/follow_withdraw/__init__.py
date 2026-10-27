@@ -77,11 +77,10 @@ async def handle_save_message(
     except LookupError:
         return
 
-    if (result) and (event):
-        event = str(event.__str__)
-        logger.info(event)
-        event = event.split("message_id=")
-        event = event[1].split(",")
-        event = event[0]
-        event = dict(message_id=event)
-        await save_message(adapter_name, event, result)
+    if api not in {"send_group_msg", "send_private_msg", "send_msg"}:
+        return
+    origin_id = getattr(event, "message_id", None)
+    sent_id = result.get("message_id") if isinstance(result, dict) else None
+    if origin_id is None or sent_id is None:
+        return
+    await save_message(adapter_name, {"message_id": origin_id}, {"message_id": sent_id})
