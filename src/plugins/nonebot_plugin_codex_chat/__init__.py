@@ -10,6 +10,7 @@ from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, Me
 from nonebot.params import EventMessage
 
 from .config import get_config
+from .output_validation import invalid_output_reason
 from .maibot_core.bridge import MaibotInboundMessage, handle_inbound_message
 from .maibot_core.codex_llm_adapter import generate_text
 from .maibot_core.config.config import global_config
@@ -591,7 +592,7 @@ async def _handle_poke(event: PokeNotifyEvent, bot: Bot):
         identity += f"\n你也被称为{','.join(aliases)}。"
     system_prompt = (
         f"{identity}\n你的回复风格：{global_config.personality.reply_style}\n"
-        "你正在QQ群聊天。只输出最终回复正文，不要解释、思考过程、用户名或@。"
+        "你正在QQ群聊天。用自然中文简短回复，只输出最终回复正文，不要解释、思考过程、用户名、@、内部控制标记或无关外语后缀。"
     )
     prompt = f"群友「{nickname}」刚刚戳了你一下。请自然简短地回应，最多20个字符。"
     try:
@@ -599,6 +600,9 @@ async def _handle_poke(event: PokeNotifyEvent, bot: Bot):
         if not result.ok or not (reply := result.text.strip()):
             logger.info(f"codex_chat_poke_skip reason=empty_generation group_id={group_id} user_id={user_id}")
             _poke_cooldowns.pop(cooldown_key, None)
+            return
+        if invalid_output_reason(reply):
+            logger.warning(f"codex_chat_poke_skip reason=invalid_model_output group_id={group_id} user_id={user_id}")
             return
         reply = reply.strip(' \n\r\t\"“”')[:20].strip()
         if not reply:

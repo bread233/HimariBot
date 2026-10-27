@@ -54,6 +54,7 @@ from ...maisaka.visual_message_limiter import limit_latest_images_in_messages
 from ...plugin_runtime.hook_payloads import deserialize_prompt_messages, serialize_prompt_messages
 
 from .maisaka_expression_selector import maisaka_expression_selector
+from ....output_validation import invalid_output_reason
 
 logger = get_logger("replyer")
 
@@ -1050,6 +1051,10 @@ class BaseMaisakaReplyGenerator:
             matched_regex_pattern = str(after_response_kwargs.get("matched_regex_pattern") or "").strip()
             matched_regex_description = str(after_response_kwargs.get("matched_regex_description") or "").strip()
             retry_reason = str(after_response_kwargs.get("retry_reason") or "").strip()
+            invalid_reason = invalid_output_reason(response_text)
+            if invalid_reason:
+                retry_requested = True
+                retry_reason = f"模型回复校验失败: {invalid_reason}"
             if retry_requested and retry_count < REPLYER_MAX_HOOK_RETRIES:
                 reason_parts = []
                 if matched_regex:
@@ -1087,6 +1092,10 @@ class BaseMaisakaReplyGenerator:
                     f"rejected={self._normalize_content(response_text, limit=300)!r}"
                 )
                 continue
+            if retry_requested and retry_count >= REPLYER_MAX_HOOK_RETRIES:
+                logger.warning("Himari 回复器校验失败且重试耗尽，跳过发送")
+                result.error_message = "回复校验未通过且重试次数已耗尽"
+                return finalize(False)
             if retry_requested:
                 logger.warning(
                     f"Himari 回复器已达到重生成上限，将使用最后一次回复: "
