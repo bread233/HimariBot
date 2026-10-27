@@ -1,5 +1,6 @@
 from typing import Any, List, Optional
 
+from src.utils.recall_state import mark_recalled, send_origin_id
 from nonebot.typing import T_State
 from nonebot.permission import SUPERUSER
 from nonebot import on_notice, on_command
@@ -44,6 +45,7 @@ async def handle_withdraw(bot: Bot, event: GroupRecallNoticeEvent):
     try:
         if str(event.user_id) != str(bot.self_id):
             o_mid = event.message_id
+            mark_recalled(bot.self_id, event.group_id, o_mid)
             o_mids = await get_origin_message_fromdb(o_mid)
             if o_mids is None:
                 return
@@ -74,11 +76,14 @@ async def handle_save_message(
     try:
         event = current_event.get()
     except LookupError:
-        return
+        if send_origin_id.get() is not None:
+            event = None
+        else:
+            return
 
     if api not in {"send_group_msg", "send_private_msg", "send_msg"}:
         return
-    origin_id = getattr(event, "message_id", None)
+    origin_id = send_origin_id.get() or getattr(event, "message_id", None)
     sent_id = result.get("message_id") if isinstance(result, dict) else None
     if origin_id is None or sent_id is None:
         return

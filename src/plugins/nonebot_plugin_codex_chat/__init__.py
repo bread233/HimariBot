@@ -30,6 +30,7 @@ from .affinity_query_helper import build_affinity_query_reply, is_affinity_query
 from .mood_state import get_mood_label
 from .mood_events import note_bot_spoke, note_group_activity, note_targeted_mood
 from .affinity_evaluator import evaluate_affinity_event
+from src.utils.recall_state import send_origin_id, was_recalled
 from src.emoji_system.emoji_manager import emoji_manager
 from src.prompt.prompt_manager import prompt_manager
 
@@ -441,6 +442,7 @@ async def _codex_chat_host_send_interceptor(
     )
 
     try:
+        token = send_origin_id.set(requested_reply_message_id or None)
         api_response = await call_onebot_send(
             bot,
             is_group=is_group,
@@ -455,6 +457,8 @@ async def _codex_chat_host_send_interceptor(
         )
         from src.services.send_service import DeliveryUncertainError
         raise DeliveryUncertainError("OneBot send result unknown after API exception") from exc
+    finally:
+        send_origin_id.reset(token)
 
     onebot_message_id = ""
     if isinstance(api_response, dict):
@@ -469,6 +473,13 @@ async def _codex_chat_host_send_interceptor(
         raise DeliveryUncertainError(
             f"OneBot API 已返回但缺少 message_id: target_id={target_id} is_group={is_group}"
         )
+
+    if is_group and requested_reply_message_id and was_recalled(bot_self_id, target_id, requested_reply_message_id):
+        try:
+            await bot.delete_msg(message_id=int(onebot_message_id))
+            logger.info(f"codex_chat_late_reply_recalled message_id={onebot_message_id} origin={requested_reply_message_id}")
+        except Exception:
+            logger.exception(f"codex_chat_late_reply_recall_failed message_id={onebot_message_id}")
 
     synthetic_message: Any
     try:
