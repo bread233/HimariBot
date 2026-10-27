@@ -33,11 +33,11 @@ fi
 # nonebot-plugin-orm: 非交互环境下启动前自动执行数据库迁移，避免容器重启循环。
 # 如需临时跳过，可设置 HIMARIBOT_ORM_AUTO_UPGRADE=0。
 if [ "${HIMARIBOT_ORM_AUTO_UPGRADE:-1}" = "1" ]; then
-  if command -v nb >/dev/null 2>&1; then
-    echo "[HimariBot] Running ORM migrations: nb orm upgrade"
-    nb orm upgrade
+  if command -v python >/dev/null 2>&1; then
+    echo "[HimariBot] Running ORM migrations"
+    python scripts/orm_upgrade.py
   else
-    echo "⚠️  [HimariBot] nb command not found, skip ORM auto upgrade."
+    echo "⚠️  [HimariBot] python command not found, skip ORM auto upgrade."
   fi
 fi
 
