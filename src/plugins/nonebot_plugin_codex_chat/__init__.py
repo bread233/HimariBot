@@ -10,7 +10,7 @@ from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, Me
 from nonebot.params import EventMessage
 
 from .config import get_config
-from .output_validation import invalid_output_reason
+from .maibot_core.common.output_validation import invalid_output_reason
 from .maibot_core.bridge import MaibotInboundMessage, handle_inbound_message
 from .maibot_core.codex_llm_adapter import generate_text
 from .maibot_core.config.config import global_config

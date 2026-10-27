@@ -54,7 +54,7 @@ from ...maisaka.visual_message_limiter import limit_latest_images_in_messages
 from ...plugin_runtime.hook_payloads import deserialize_prompt_messages, serialize_prompt_messages
 
 from .maisaka_expression_selector import maisaka_expression_selector
-from ....output_validation import invalid_output_reason
+from ...common.output_validation import invalid_output_reason
 
 logger = get_logger("replyer")
 
