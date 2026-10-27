@@ -51,12 +51,11 @@ async def handle_withdraw(bot: Bot, event: GroupRecallNoticeEvent):
             if f_mids is None:
                 return
             for f_mid in f_mids:
-                await bot.delete_msg(message_id=f_mid)
+                await bot.delete_msg(message_id=f_mid[0])
             await delete_message(o_mid, f_mids)
-    except:
-        import traceback
+    except Exception:
 
-        logger.error(traceback.print_exc())
+        logger.exception("跟随撤回失败")
 
 
 @clear_cmd.handle()
