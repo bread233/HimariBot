@@ -103,19 +103,12 @@ async def handle_tool(
         )
 
     limit = _normalize_limit(invocation.arguments.get("limit"))
+    from src.A_memorix.core.runtime.profile_scope_policy import TrustedProfileScope
+    scope = TrustedProfileScope.from_runtime(tool_ctx.runtime)
+    if scope is None or not person_id:
+        return tool_ctx.build_failure_result(invocation.tool_name, "需要可信群上下文和明确人物 ID。")
     try:
-        if person_id:
-            payload = await memory_service.profile_admin(
-                action="query",
-                person_id=person_id,
-                limit=limit,
-            )
-        else:
-            payload = await memory_service.profile_admin(
-                action="query",
-                person_keyword=person_name,
-                limit=limit,
-            )
+        payload = await memory_service.get_scoped_person_profile(person_id, scope=scope, limit=limit)
     except Exception as exc:
         return tool_ctx.build_failure_result(
             invocation.tool_name,

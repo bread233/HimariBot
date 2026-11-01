@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from src.common.logger import get_logger
 from src.config.config import global_config
+from src.person_info.person_info import resolve_person_id_for_memory
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.services.memory_service import MemorySearchResult, memory_service
 

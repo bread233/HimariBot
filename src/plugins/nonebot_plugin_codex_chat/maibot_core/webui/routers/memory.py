@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import col, select
 
 from src.A_memorix.host_service import a_memorix_host_service
+from src.A_memorix.admin_access import issue_webui_profile_admin_capability
 from src.common.database.database import get_db_session
 from src.common.database.database_model import PersonInfo
 from src.person_info.person_info import resolve_person_id_for_memory
@@ -390,6 +391,7 @@ async def _profile_query(
     user_id: str,
     limit: int,
     force_refresh: bool,
+    capability,
 ) -> dict:
     clean_person_id = str(person_id or "").strip()
     if not clean_person_id and str(platform or "").strip() and str(user_id or "").strip():
@@ -399,7 +401,7 @@ async def _profile_query(
             strict_known=False,
         )
     return await memory_service.profile_admin(
-        action="query",
+        action="query", capability=capability,
         person_id=clean_person_id,
         person_keyword=person_keyword,
         limit=limit,
@@ -440,8 +442,8 @@ def _enrich_episode_person_name(item: dict) -> dict:
     return enriched
 
 
-async def _profile_list(limit: int) -> dict:
-    payload = await memory_service.profile_admin(action="list", limit=limit)
+async def _profile_list(limit: int, *, capability) -> dict:
+    payload = await memory_service.profile_admin(action="list", limit=limit, capability=capability)
     if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
         return payload
 
@@ -467,6 +469,7 @@ async def _profile_search(
     platform: str,
     user_id: str,
     limit: int,
+    capability,
 ) -> dict:
     clean_person_id = str(person_id or "").strip()
     if not clean_person_id and str(platform or "").strip() and str(user_id or "").strip():
@@ -476,7 +479,7 @@ async def _profile_search(
             strict_known=False,
         )
 
-    payload = await _profile_list(max(limit, 200))
+    payload = await _profile_list(max(limit, 200), capability=capability)
     if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
         return payload
 
@@ -521,9 +524,9 @@ async def _profile_search(
     }
 
 
-async def _profile_set_override(payload: ProfileOverrideRequest) -> dict:
+async def _profile_set_override(payload: ProfileOverrideRequest, *, capability) -> dict:
     return await memory_service.profile_admin(
-        action="set_override",
+        action="set_override", capability=capability,
         person_id=payload.person_id,
         override_text=payload.override_text,
         updated_by=payload.updated_by,
@@ -531,22 +534,22 @@ async def _profile_set_override(payload: ProfileOverrideRequest) -> dict:
     )
 
 
-async def _profile_delete_override(person_id: str) -> dict:
-    return await memory_service.profile_admin(action="delete_override", person_id=person_id)
+async def _profile_delete_override(person_id: str, *, capability) -> dict:
+    return await memory_service.profile_admin(action="delete_override", person_id=person_id, capability=capability)
 
 
-async def _profile_evidence(person_id: str, limit: int, force_refresh: bool) -> dict:
+async def _profile_evidence(person_id: str, limit: int, force_refresh: bool, *, capability) -> dict:
     return await memory_service.profile_admin(
-        action="evidence",
+        action="evidence", capability=capability,
         person_id=person_id,
         limit=limit,
         force_refresh=force_refresh,
     )
 
 
-async def _profile_correct_evidence(person_id: str, payload: ProfileEvidenceCorrectRequest) -> dict:
+async def _profile_correct_evidence(person_id: str, payload: ProfileEvidenceCorrectRequest, *, capability) -> dict:
     return await memory_service.profile_admin(
-        action="correct_evidence",
+        action="correct_evidence", capability=capability,
         person_id=person_id,
         evidence_type=payload.evidence_type,
         hash=payload.hash,
@@ -1045,6 +1048,7 @@ async def query_memory_profile(
     user_id: str = Query(""),
     limit: int = Query(12, ge=1, le=100),
     force_refresh: bool = Query(False),
+    admin_session: str = Depends(require_auth),
 ):
     return await _profile_query(
         person_id=person_id,
@@ -1053,12 +1057,13 @@ async def query_memory_profile(
         user_id=user_id,
         limit=limit,
         force_refresh=force_refresh,
+        capability=issue_webui_profile_admin_capability(admin_session),
     )
 
 
 @router.get("/profiles")
-async def list_memory_profiles(limit: int = Query(50, ge=1, le=200)):
-    return await _profile_list(limit)
+async def list_memory_profiles(limit: int = Query(50, ge=1, le=200), admin_session: str = Depends(require_auth)):
+    return await _profile_list(limit, capability=issue_webui_profile_admin_capability(admin_session))
 
 
 @router.get("/profiles/search")
@@ -1068,6 +1073,7 @@ async def search_memory_profiles(
     platform: str = Query(""),
     user_id: str = Query(""),
     limit: int = Query(50, ge=1, le=200),
+    admin_session: str = Depends(require_auth),
 ):
     return await _profile_search(
         person_id=person_id,
@@ -1075,17 +1081,18 @@ async def search_memory_profiles(
         platform=platform,
         user_id=user_id,
         limit=limit,
+        capability=issue_webui_profile_admin_capability(admin_session),
     )
 
 
 @router.post("/profiles/override")
-async def set_memory_profile_override(payload: ProfileOverrideRequest):
-    return await _profile_set_override(payload)
+async def set_memory_profile_override(payload: ProfileOverrideRequest, admin_session: str = Depends(require_auth)):
+    return await _profile_set_override(payload, capability=issue_webui_profile_admin_capability(admin_session))
 
 
 @router.delete("/profiles/override/{person_id}")
-async def delete_memory_profile_override(person_id: str):
-    return await _profile_delete_override(person_id)
+async def delete_memory_profile_override(person_id: str, admin_session: str = Depends(require_auth)):
+    return await _profile_delete_override(person_id, capability=issue_webui_profile_admin_capability(admin_session))
 
 
 @router.get("/profiles/{person_id}/evidence")
@@ -1093,13 +1100,14 @@ async def get_memory_profile_evidence(
     person_id: str,
     limit: int = Query(12, ge=1, le=100),
     force_refresh: bool = Query(False),
+    admin_session: str = Depends(require_auth),
 ):
-    return await _profile_evidence(person_id, limit, force_refresh)
+    return await _profile_evidence(person_id, limit, force_refresh, capability=issue_webui_profile_admin_capability(admin_session))
 
 
 @router.post("/profiles/{person_id}/evidence/correct")
-async def correct_memory_profile_evidence(person_id: str, payload: ProfileEvidenceCorrectRequest):
-    return await _profile_correct_evidence(person_id, payload)
+async def correct_memory_profile_evidence(person_id: str, payload: ProfileEvidenceCorrectRequest, admin_session: str = Depends(require_auth)):
+    return await _profile_correct_evidence(person_id, payload, capability=issue_webui_profile_admin_capability(admin_session))
 
 
 @router.get("/feedback-corrections")
@@ -1561,6 +1569,7 @@ async def compat_profile_query(
     user_id: str = Query(""),
     limit: int = Query(12, ge=1, le=100),
     force_refresh: bool = Query(False),
+    admin_session: str = Depends(require_auth),
 ):
     return await _profile_query(
         person_id=person_id,
@@ -1569,12 +1578,13 @@ async def compat_profile_query(
         user_id=user_id,
         limit=limit,
         force_refresh=force_refresh,
+        capability=issue_webui_profile_admin_capability(admin_session),
     )
 
 
 @compat_router.get("/person_profile/list")
-async def compat_profile_list(limit: int = Query(50, ge=1, le=200)):
-    return await _profile_list(limit)
+async def compat_profile_list(limit: int = Query(50, ge=1, le=200), admin_session: str = Depends(require_auth)):
+    return await _profile_list(limit, capability=issue_webui_profile_admin_capability(admin_session))
 
 
 @compat_router.get("/person_profile/search")
@@ -1584,6 +1594,7 @@ async def compat_profile_search(
     platform: str = Query(""),
     user_id: str = Query(""),
     limit: int = Query(50, ge=1, le=200),
+    admin_session: str = Depends(require_auth),
 ):
     return await _profile_search(
         person_id=person_id,
@@ -1591,17 +1602,18 @@ async def compat_profile_search(
         platform=platform,
         user_id=user_id,
         limit=limit,
+        capability=issue_webui_profile_admin_capability(admin_session),
     )
 
 
 @compat_router.post("/person_profile/override")
-async def compat_set_profile_override(payload: ProfileOverrideRequest):
-    return await _profile_set_override(payload)
+async def compat_set_profile_override(payload: ProfileOverrideRequest, admin_session: str = Depends(require_auth)):
+    return await _profile_set_override(payload, capability=issue_webui_profile_admin_capability(admin_session))
 
 
 @compat_router.delete("/person_profile/override/{person_id}")
-async def compat_delete_profile_override(person_id: str):
-    return await _profile_delete_override(person_id)
+async def compat_delete_profile_override(person_id: str, admin_session: str = Depends(require_auth)):
+    return await _profile_delete_override(person_id, capability=issue_webui_profile_admin_capability(admin_session))
 
 
 @compat_router.post("/save")

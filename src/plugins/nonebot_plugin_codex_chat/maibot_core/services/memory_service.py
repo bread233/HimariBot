@@ -341,6 +341,13 @@ class MemoryService:
             logger.warning(f"长期记忆写入文本失败: {exc}")
             return MemoryWriteResult(success=False, detail=str(exc))
 
+    async def get_scoped_person_profile(self, person_id: str, *, scope, limit: int = 10) -> Dict[str, Any]:
+        from src.A_memorix.core.runtime.profile_scope_policy import TrustedProfileScope
+        if not isinstance(scope, TrustedProfileScope):
+            return {"success": False, "error": "profile_scope_unverified"}
+        return await a_memorix_host_service.invoke_scoped_person_profile(
+            person_id=person_id, scope=scope, limit=limit)
+
     async def get_person_profile(self, person_id: str, *, chat_id: str = "", limit: int = 10) -> PersonProfileResult:
         clean_person_id = str(person_id or "").strip()
         if not clean_person_id:
@@ -405,9 +412,13 @@ class MemoryService:
             logger.warning(f"Episode 管理调用失败: {exc}")
             return {"success": False, "error": str(exc)}
 
-    async def profile_admin(self, *, action: str, **kwargs) -> Dict[str, Any]:
+    async def profile_admin(self, *, action: str, capability=None, **kwargs) -> Dict[str, Any]:
+        from src.A_memorix.admin_access import is_profile_admin_capability
+        if not is_profile_admin_capability(capability):
+            return {"success": False, "error": "profile_admin_forbidden"}
         try:
-            return await self._invoke_admin("memory_profile_admin", action=action, **kwargs)
+            return await a_memorix_host_service.invoke_authorized_profile_admin(
+                action=action, capability=capability, **kwargs)
         except Exception as exc:
             logger.warning(f"画像管理调用失败: {exc}")
             return {"success": False, "error": str(exc)}

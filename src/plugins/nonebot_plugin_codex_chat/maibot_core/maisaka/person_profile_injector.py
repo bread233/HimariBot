@@ -7,6 +7,7 @@ from typing import Sequence
 
 from ..chat.message_receive.message import SessionMessage
 from ..A_memorix.core.utils.profile_text import build_profile_injection_text
+from ..A_memorix.core.runtime.profile_scope_policy import TrustedProfileScope
 from ..common.data_models.message_component_data_model import AtComponent, ReplyComponent
 from ..common.logger import get_logger
 from ..config.config import global_config
@@ -220,6 +221,9 @@ async def build_person_profile_injection_messages(
 ) -> list[str]:
     """构造注入 planner 的一次性人物画像内部参考消息。"""
 
+    scope = TrustedProfileScope.from_message(anchor_message)
+    if scope is None:
+        return []
     integration_config = global_config.a_memorix.integration
     if not bool(getattr(integration_config, "enable_person_profile_injection", True)):
         return []
@@ -228,9 +232,13 @@ async def build_person_profile_injection_messages(
         max_profiles = int(getattr(integration_config, "person_profile_injection_max_profiles", 3) or 3)
     except (TypeError, ValueError):
         max_profiles = 3
+    same_group_messages = [message for message in (pending_messages or [])
+                           if (message.platform == scope.platform and
+                               message.message_info.group_info is not None and
+                               str(message.message_info.group_info.group_id) == scope.group_id)]
     candidates = collect_person_profile_candidates(
         anchor_message,
-        pending_messages,
+        same_group_messages,
         max_profiles=max(1, max_profiles),
     )
     if not candidates:
@@ -239,10 +247,8 @@ async def build_person_profile_injection_messages(
     blocks: list[str] = []
     for candidate in candidates:
         try:
-            payload = await memory_service.profile_admin(
-                action="query",
-                person_id=candidate.person_id,
-                limit=PROFILE_QUERY_LIMIT,
+            payload = await memory_service.get_scoped_person_profile(
+                candidate.person_id, scope=scope, limit=PROFILE_QUERY_LIMIT,
             )
         except Exception as exc:
             logger.debug(f"查询人物画像注入内容失败: person_id={candidate.person_id!r} err={exc}")

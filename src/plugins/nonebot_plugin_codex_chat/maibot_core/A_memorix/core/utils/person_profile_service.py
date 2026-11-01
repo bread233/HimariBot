@@ -161,18 +161,26 @@ class PersonProfileService:
                             PersonInfo.user_nickname == key,
                         )
                     )
-                    .limit(1)
-                ).first()
+                    .distinct()
+                    .limit(2)
+                ).all()
+                if len(record) > 1:
+                    logger.warning(f"姓名或昵称匹配多个 person_id，拒绝猜测: {key}")
+                    return ""
                 if record:
-                    return str(record)
+                    return str(record[0])
 
                 record = session.exec(
                     select(PersonInfo.person_id)
                     .where(PersonInfo.group_cardname.contains(key))
-                    .limit(1)
-                ).first()
+                    .distinct()
+                    .limit(2)
+                ).all()
+                if len(record) > 1:
+                    logger.warning(f"群名片匹配多个 person_id，拒绝猜测: {key}")
+                    return ""
                 if record:
-                    return str(record)
+                    return str(record[0])
         except Exception as e:
             logger.warning(f"按别名解析 person_id 失败: identifier={key}, err={e}")
 

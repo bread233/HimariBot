@@ -1333,6 +1333,9 @@ class SDKMemoryKernel:
         entity_tokens = self._merge_tokens(entities, person_tokens, participant_tokens)
         source = self._build_source(source_type, chat_id, person_tokens)
         paragraph_meta = coerce_metadata_dict(metadata)
+        # 普通导入不接受外部 metadata 自称公开；公开需独立授权流程。
+        paragraph_meta["visibility"] = "group_private"
+        paragraph_meta["source_group_id"] = str(group_id or "").strip()
         paragraph_meta.update(
             {
                 "external_id": external_token,
@@ -1680,18 +1683,42 @@ class SDKMemoryKernel:
             "has_manual_override": bool(profile.get("has_manual_override", False)),
         }
 
-    async def get_person_profile(self, *, person_id: str, chat_id: str = "", limit: int = 10) -> Dict[str, Any]:
-        del chat_id
+    async def get_scoped_person_profile(self, *, person_id: str, scope, limit: int = 10) -> Dict[str, Any]:
+        from .profile_scope_policy import TrustedProfileScope, can_read_fact
+        if not isinstance(scope, TrustedProfileScope) or not scope.group_id:
+            return {"success": False, "error": "profile_scope_unverified"}
+        pid = str(person_id or "").strip()
+        if not pid:
+            return {"success": False, "error": "person_id_required"}
         await self.initialize()
         assert self.metadata_store is not None
-        assert self.person_profile_service is not None
-        self._mark_person_active(person_id)
-        profile = await self._query_person_profile_with_feedback_refresh(
-            person_id=person_id,
-            limit=max(4, int(limit or 10)),
-            source_note="sdk_memory_kernel.get_person_profile",
-        )
-        return self._build_person_profile_response(profile, requested_person_id=person_id, limit=limit)
+        evidence = []
+        for row in self.metadata_store.get_paragraphs_by_entity(pid):
+            meta = row.get("metadata") or {}
+            if not isinstance(meta, dict) or pid not in (meta.get("person_ids") or []):
+                continue
+            if not can_read_fact(meta, reader_group_id=scope.group_id):
+                continue
+            evidence.append({"hash": row.get("hash", ""), "content": str(row.get("content", ""))[:220],
+                             "metadata": meta, "type": "paragraph"})
+            if len(evidence) >= max(1, min(int(limit), 20)):
+                break
+        summary = "\n".join(item["content"] for item in evidence)
+        return {"success": True, "summary": summary, "profile_text": summary,
+                "traits": [], "evidence": evidence, "person_id": pid,
+                "person_name": "", "profile_source": "scoped_evidence",
+                "has_manual_override": False}
+
+    async def get_person_profile(self, *, person_id: str, chat_id: str = "", limit: int = 10) -> Dict[str, Any]:
+        # chat_id 来自工具参数，不能作为可信授权凭据。
+        # 全局快照和手工覆盖未隔离来源群，普通查询先默认拒绝。
+        return {
+            "success": False, "error": "profile_scope_unverified",
+            "summary": "", "traits": [], "evidence": [],
+            "person_id": str(person_id or "").strip(),
+            "person_name": "", "profile_source": "",
+            "has_manual_override": False,
+        }
 
     async def refresh_person_profile(self, person_id: str, limit: int = 10, *, mark_active: bool = True) -> Dict[str, Any]:
         await self.initialize()

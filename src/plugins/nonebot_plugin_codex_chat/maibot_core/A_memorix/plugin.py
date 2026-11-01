@@ -263,7 +263,8 @@ class AMemorixPlugin(MaiBotPlugin):
 
     @Tool("memory_profile_admin", description="人物画像管理接口", parameters=_ADMIN_TOOL_PARAMS)
     async def handle_memory_profile_admin(self, action: str, **kwargs):
-        return await self._dispatch_admin_tool("memory_profile_admin", action=action, **kwargs)
+        # LLM 工具调用不具备 WebUI 管理员会话，不能执行全局画像管理。
+        return {"success": False, "error": "profile_admin_forbidden"}
 
     @Tool("memory_runtime_admin", description="长期记忆运行时管理接口", parameters=_ADMIN_TOOL_PARAMS)
     async def handle_memory_runtime_admin(self, action: str, **kwargs):

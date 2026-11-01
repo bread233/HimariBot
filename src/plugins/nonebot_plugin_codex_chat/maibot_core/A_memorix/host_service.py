@@ -185,9 +185,29 @@ class AMemorixHostService:
             "config_path": str(path),
         }
 
+    async def invoke_authorized_profile_admin(self, *, action: str, capability, **kwargs) -> Dict[str, Any]:
+        from .admin_access import is_profile_admin_capability
+        if not is_profile_admin_capability(capability):
+            return {"success": False, "error": "profile_admin_forbidden"}
+        if not self.is_enabled():
+            return {"success": False, "error": "a_memorix_disabled"}
+        kernel = await self._ensure_kernel()
+        return await kernel.memory_profile_admin(action=action, **kwargs)
+
+    async def invoke_scoped_person_profile(self, *, person_id: str, scope, limit: int = 10) -> Dict[str, Any]:
+        from .core.runtime.profile_scope_policy import TrustedProfileScope
+        if not isinstance(scope, TrustedProfileScope) or not scope.group_id:
+            return {"success": False, "error": "profile_scope_unverified"}
+        if not self.is_enabled():
+            return {"success": False, "error": "a_memorix_disabled"}
+        kernel = await self._ensure_kernel()
+        return await kernel.get_scoped_person_profile(person_id=person_id, scope=scope, limit=limit)
+
     async def invoke(self, component_name: str, args: Dict[str, Any] | None = None, *, timeout_ms: int = 30000) -> Any:
         del timeout_ms
         payload = args or {}
+        if component_name == "memory_profile_admin":
+            return {"success": False, "error": "profile_admin_forbidden"}
         if not self.is_enabled():
             return self._disabled_response(component_name)
         kernel = await self._ensure_kernel()
