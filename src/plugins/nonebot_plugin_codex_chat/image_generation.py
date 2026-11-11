@@ -21,6 +21,22 @@ _LIMIT = asyncio.Semaphore(1)
 _MAX_PENDING = 8
 _ROOT = Path("/app/data/nonebot_chat_agent/generated_images")
 _IMAGE_PATH = re.compile(r"(?<![\w])(/(?:[\w.\-]+/)+[\w.\-]+\.png)\b", re.IGNORECASE)
+_HIMARI_NAME = re.compile(r"上原绯玛丽|上原緋まり|上原ひまり|绯玛丽|肥玛丽|himari|hmr", re.IGNORECASE)
+_HIMARI_SELF = re.compile(r"自画像|画(?:一[张幅个])?(?:我|自己)|画画(?:我|自己)|(?:我|自己)的(?:画像|肖像|照片)")
+_HIMARI_VISUAL = (
+    "Character identity constraint: depict Himari Uehara (上原ひまり) from BanG Dream!, "
+    "Afterglow's bassist, with pink hair and distinctly GREEN eyes (not pink/red/purple eyes). "
+    "The nickname 肥玛丽 is only a homophonic nickname for 绯玛丽 and does NOT imply a heavier body type. "
+    "Preserve the user's requested scene, pose, outfit, and art style. "
+    "Use official Himari Uehara character design as the visual identity reference."
+)
+
+
+def _image_request_prompt(prompt: str) -> str:
+    """Only enrich requests about Himari herself; do not change unrelated image requests."""
+    if _HIMARI_NAME.search(prompt) or _HIMARI_SELF.search(prompt):
+        return f"{prompt}\n\n{_HIMARI_VISUAL}"
+    return prompt
 
 
 async def _run(*args: str, timeout: float = 300, input_text: str | None = None) -> tuple[int, str, str]:
@@ -80,7 +96,7 @@ async def _generate_and_send(
             instruction = (
                 "Use your built-in image generation capability to create exactly one PNG image. "
                 "Report the generated PNG absolute path under /root/.codex/generated_images/ in the final response. "
-                "Do not merely describe an image. Image request: " + prompt
+                "Do not merely describe an image. Image request: " + _image_request_prompt(prompt)
             )
             code, output, stderr = await _run(
                 "docker", "exec", "-i", container, "codex", "exec", "--json",
