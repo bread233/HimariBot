@@ -45,11 +45,12 @@ async def handle_tool(
     if tool_ctx.runtime.chat_stream.platform != "onebot.v11":
         return tool_ctx.build_failure_result(invocation.tool_name, "当前仅支持 QQ 生图。")
     try:
-        job_id = submit_image_job(prompt, caption[:500], tool_ctx.runtime.session_id, target, True)
+        job_id, created = submit_image_job(prompt, caption[:500], tool_ctx.runtime.session_id, target, True)
     except RuntimeError as exc:
         return tool_ctx.build_failure_result(invocation.tool_name, str(exc))
     return tool_ctx.build_success_result(
         invocation.tool_name,
-        f"已提交后台生图任务 {job_id}，无需等待；可以继续正常文字聊天。",
-        structured_content={"job_id": job_id, "status": "queued", "msg_id": message_id},
+        (f"已提交后台生图任务 {job_id}，无需等待。" if created else
+         f"该原消息已有生图任务 {job_id}，不再重复生成或发送。"),
+        structured_content={"job_id": job_id, "status": "queued" if created else "already_submitted", "msg_id": message_id},
     )
