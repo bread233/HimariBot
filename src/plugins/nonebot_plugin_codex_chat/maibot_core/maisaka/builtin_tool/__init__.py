@@ -14,6 +14,8 @@ from .continue_tool import get_tool_spec as get_continue_tool_spec
 from .continue_tool import handle_tool as handle_continue_tool
 from .finish import get_tool_spec as get_finish_tool_spec
 from .finish import handle_tool as handle_finish_tool
+from .generate_image import get_tool_spec as get_generate_image_tool_spec
+from .generate_image import handle_tool as handle_generate_image_tool
 from .no_action import get_tool_spec as get_no_action_tool_spec
 from .no_action import handle_tool as handle_no_action_tool
 from .query_jargon import get_tool_spec as get_query_jargon_tool_spec
@@ -91,6 +93,7 @@ BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
     BuiltinToolEntry("wait", get_wait_tool_spec, handle_wait_tool, stage="timing", chat_scope="private"),
     BuiltinToolEntry("finish", get_finish_tool_spec, handle_finish_tool, stage="action"),
     BuiltinToolEntry("reply", get_reply_tool_spec, handle_reply_tool, stage="action"),
+    BuiltinToolEntry("generate_image", get_generate_image_tool_spec, handle_generate_image_tool, stage="action"),
     BuiltinToolEntry(
         "view_complex_message",
         get_view_complex_message_tool_spec,
