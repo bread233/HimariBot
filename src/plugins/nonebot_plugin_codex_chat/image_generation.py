@@ -104,6 +104,11 @@ async def _generate_and_send(
             components = ([TextComponent(caption)] if caption else []) + [
                 ImageComponent(binary_hash=hashlib.sha256(image_bytes).hexdigest(), binary_data=image_bytes)
             ]
+            # 先持久化发送占位，防止重启或重复 Planner 调用再次发送。
+            await asyncio.to_thread(
+                (job_dir / "send_started.json").write_text,
+                json.dumps({"job_id": job_id, "started_at": time.time()}), "utf-8",
+            )
             sent = await send_service._send_to_target_with_message(
                 message_sequence=MessageSequence(components),
                 stream_id=session_id,
@@ -135,6 +140,9 @@ async def _generate_and_send(
         except Exception:
             logger.exception(f"generate_image job={job_id} failed to persist error")
         try:
+            # 发送阶段可能已经成功但回执/元数据失败，不再补发失败消息。
+            if (job_dir / "send_started.json").exists():
+                return
             await send_service._send_to_target_with_message(
                 message_sequence=MessageSequence([TextComponent("这次画图没成功，稍后再试试吧。")]),
                 stream_id=session_id,
@@ -149,14 +157,57 @@ async def _generate_and_send(
             logger.exception(f"generate_image job={job_id} failed to notify user")
 
 
-def submit_image_job(prompt: str, caption: str, session_id: str, target_message: object, quote: bool) -> str:
-    if len(_TASKS) >= _MAX_PENDING:
-        raise RuntimeError("生图队列已满，请稍后再试")
+def submit_image_job(prompt: str, caption: str, session_id: str, target_message: object, quote: bool) -> tuple[str, bool]:
+    """按会话与原消息永久去重；原子目录创建防止并发 Planner 重复提交。
+
+    以持久化标记为准，重启后也不会自动重试同一原消息。
+    用户发送新的 QQ 消息才会创建新的生成任务。
+    """
+    source_id = str(getattr(target_message, "message_id", "") or "").strip()
+    if not session_id or not source_id:
+        raise RuntimeError("无法确认原始消息 ID，拒绝提交生图任务")
+    key = hashlib.sha256(
+        json.dumps(["onebot.v11", session_id, source_id], ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    claims = _ROOT / "requests"
+    claims.mkdir(parents=True, exist_ok=True)
+    claim = claims / key
+    try:
+        claim.mkdir()
+    except FileExistsError:
+        record = claim / "job.json"
+        try:
+            existing = json.loads(record.read_text(encoding="utf-8"))
+            return str(existing["job_id"]), False
+        except (OSError, ValueError, KeyError):
+            # 创建目录后进程崩溃：仍拒绝二次生成，避免重复扣额度和重复发图。
+            return key, False
     job_id = uuid.uuid4().hex
-    task = asyncio.create_task(
-        _generate_and_send(job_id, prompt, caption, session_id, target_message, quote),
-        name=f"generate_image_{job_id}",
-    )
-    _TASKS.add(task)
-    task.add_done_callback(_TASKS.discard)
-    return job_id
+    try:
+        (claim / "job.json").write_text(
+            json.dumps({
+                "job_id": job_id, "session_id": session_id,
+                "source_message_id": source_id, "created_at": time.time(),
+            }, ensure_ascii=False), encoding="utf-8",
+        )
+        if len(_TASKS) >= _MAX_PENDING:
+            # 排队已满时释放本次新占位，允许用户稍后重试。
+            (claim / "job.json").unlink()
+            claim.rmdir()
+            raise RuntimeError("生图队列已满，请稍后再试")
+        task = asyncio.create_task(
+            _generate_and_send(job_id, prompt, caption, session_id, target_message, quote),
+            name=f"generate_image_{job_id}",
+        )
+        _TASKS.add(task)
+        task.add_done_callback(_TASKS.discard)
+        logger.info(f"generate_image submitted job={job_id} source={source_id} key={key[:12]}")
+        return job_id, True
+    except Exception:
+        # 已经创建任务时不能释放占位；这里只处理提交之前的失败。
+        if not (claim / "job.json").exists():
+            try:
+                claim.rmdir()
+            except OSError:
+                pass
+        raise
