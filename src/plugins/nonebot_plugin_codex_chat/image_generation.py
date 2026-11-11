@@ -64,6 +64,8 @@ def _extract_image_path(output: str) -> str:
         for candidate in reversed(_IMAGE_PATH.findall(text)):
             if candidate.startswith(expected_prefix) and ".." not in Path(candidate).parts:
                 return candidate
+    if any("安全审核拦截" in text or "moderation_blocked" in text for text in texts):
+        raise ValueError("moderation_blocked: 图像生成被安全审核拦截")
     raise ValueError("Codex 未返回可验证的 PNG 路径")
 
 
@@ -135,7 +137,9 @@ async def _generate_and_send(
             await asyncio.to_thread(job_dir.mkdir, parents=True, exist_ok=True)
             await asyncio.to_thread(
                 (job_dir / "error.json").write_text,
-                json.dumps({"job_id": job_id, "error_type": type(exc).__name__, "created_at": time.time()}), "utf-8",
+                json.dumps({"job_id": job_id, "error_type": type(exc).__name__,
+                            "reason": "moderation_blocked" if "moderation_blocked" in str(exc) else "generation_failed",
+                            "created_at": time.time()}), "utf-8",
             )
         except Exception:
             logger.exception(f"generate_image job={job_id} failed to persist error")
@@ -143,10 +147,12 @@ async def _generate_and_send(
             # 发送阶段可能已经成功但回执/元数据失败，不再补发失败消息。
             if (job_dir / "send_started.json").exists():
                 return
+            notice = ("这次画图被图像生成服务的安全审核拦截了。" if "moderation_blocked" in str(exc)
+                      else "这次画图没成功，稍后再试试吧。")
             await send_service._send_to_target_with_message(
-                message_sequence=MessageSequence([TextComponent("这次画图没成功，稍后再试试吧。")]),
+                message_sequence=MessageSequence([TextComponent(notice)]),
                 stream_id=session_id,
-                processed_plain_text="这次画图没成功，稍后再试试吧。",
+                processed_plain_text=notice,
                 set_reply=quote,
                 reply_message=target_message if quote else None,
                 typing=False,
