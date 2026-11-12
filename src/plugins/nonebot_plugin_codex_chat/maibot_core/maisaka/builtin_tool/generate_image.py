@@ -12,7 +12,7 @@ from .context import BuiltinToolRuntimeContext
 def get_tool_spec() -> ToolSpec:
     return ToolSpec(
         name="generate_image",
-        description="当用户明确要求创作或绘制新图片时调用。根据自然语言理解意图，不依赖关键词。提交后后台生成并自动引用原消息发送图片，普通聊天不等待；成功提交后不要再用 reply 承诺图片已完成，也不要重复调用。",
+        description="当用户明确要求创作或绘制新图片时调用。指定作品角色时必须保持用户要求的角色身份及已确认的外观特征；不确定时先调用 web_search 核实，禁止编造官方设定。根据自然语言理解意图，不依赖关键词。提交后后台生成并自动引用原消息发送图片，普通聊天不等待；成功提交后不要再用 reply 承诺图片已完成，也不要重复调用。",
         parameters_schema={
             "type": "object",
             "properties": {
