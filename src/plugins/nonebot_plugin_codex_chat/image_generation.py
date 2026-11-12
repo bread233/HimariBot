@@ -22,6 +22,10 @@ _MAX_PENDING = 8
 _ROOT = Path("/app/data/nonebot_chat_agent/generated_images")
 _IMAGE_PATH = re.compile(r"(?<![\w])(/(?:[\w.\-]+/)+[\w.\-]+\.png)\b", re.IGNORECASE)
 _HIMARI_NAME = re.compile(r"上原绯玛丽|上原緋まり|上原ひまり|绯玛丽|肥玛丽|himari|hmr", re.IGNORECASE)
+_HIMARI_NEGATED = re.compile(
+    r"(?:不要|别|避免|禁止|不是|并非|而非|not|without).{0,20}"
+    r"(?:上原绯玛丽|上原緋まり|上原ひまり|绯玛丽|肥玛丽|himari|hmr)", re.IGNORECASE
+)
 _HIMARI_SELF = re.compile(r"自画像|画(?:一[张幅个])?(?:我|自己)|画画(?:我|自己)|(?:我|自己)的(?:画像|肖像|照片)")
 _HIMARI_VISUAL = (
     "Character identity constraint: depict Himari Uehara (上原ひまり) from BanG Dream!, "
@@ -34,6 +38,8 @@ _HIMARI_VISUAL = (
 
 def _image_request_prompt(prompt: str) -> str:
     """Only enrich requests about Himari herself; do not change unrelated image requests."""
+    if _HIMARI_NEGATED.search(prompt):
+        return prompt
     if _HIMARI_NAME.search(prompt) or _HIMARI_SELF.search(prompt):
         return f"{prompt}\n\n{_HIMARI_VISUAL}"
     return prompt
