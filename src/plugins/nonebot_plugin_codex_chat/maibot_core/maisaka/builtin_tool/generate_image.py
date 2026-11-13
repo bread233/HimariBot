@@ -12,6 +12,7 @@ from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvo
 from src.plugins.nonebot_plugin_codex_chat.image_generation import get_image_job_status, submit_image_job
 
 from ..reply_target_guard import evaluate_runtime_target
+from ..image_clarification import load_image_clarification, _user_id as clarification_user_id
 from .context import BuiltinToolRuntimeContext
 
 
@@ -70,17 +71,18 @@ def get_tool_spec() -> ToolSpec:
             "QQ 参考图使用 reference_msg_id（当前消息或明确引用的同会话消息）；验证后作为本次新任务的参考图传入 Codex。"
             "参考图校验失败时必须解释原因或请用户重新提供图片，不得移除参考图参数改为纯文字生图。"
             "reference_image_url 仅接受已核实的公开 HTTPS 图片直链；未实际传入参考图不得声称已使用。"
-            "指定作品角色先核实身份，优先 web_search 的 images 模式找可信官方角色立绘；无可信图片时按已核实文字特征绘制，禁止编造官方外观。"
+            "指定作品角色先核实身份，优先 web_search 的 images 模式找可信官方角色立绘；身份已确认后不要反复搜索，无可信图片时按已核实文字特征绘制，禁止编造官方外观。若同一用户普通发言经 Planner 判断是旧绘图澄清的补充，合并原请求并使用当前消息有效 msg_id 提交，new_image_request=false；独立新绘图设 true。"
             "后台自动引用请求消息发图；同一 msg_id 只能提交一次，成功提交后不得额外 reply 或重复提交。"
         ),
         parameters_schema={
             "type": "object",
             "properties": {
-                "msg_id": {"type": "string", "description": "当前明确发起生图或修改请求的消息 ID；修改旧图须使用新请求 ID，不得复用旧请求 ID"},
+                "msg_id": {"type": "string", "description": "本轮有效用户消息 ID；旧图澄清补充也使用当前消息 ID，不得复用原请求 ID"},
                 "prompt": {"type": "string", "description": "详细生图提示词：准确角色名、作品、经可靠资料核实的关键外观及用户要求的场景；禁止把未核实的发型、发色、瞳色等写成官方特征"},
                 "caption": {"type": "string", "description": "随图片一起发送的简短文字，可为空", "default": ""},
                 "reference_image_url": {"type": "string", "description": "可选：已核实角色身份的公开 HTTPS 图片直链；优先官方角色立绘，不能使用未经核实的搜索缩略图"},
                 "reference_msg_id": {"type": "string", "description": "可选：当前消息或当前请求明确引用的同会话 QQ 图片消息 ID；验证后将图片传给 Codex"},
+                "new_image_request": {"type": "boolean", "description": "仅当 LLM 确认本轮是独立的新绘图请求、而非此前澄清的补充时设为 true", "default": False},
             },
             "required": ["msg_id", "prompt"],
         },
@@ -101,6 +103,7 @@ async def handle_tool(
     caption = str(args.get("caption") or "").strip()
     reference_url = str(args.get("reference_image_url") or "").strip()
     reference_msg_id = str(args.get("reference_msg_id") or "").strip()
+    new_image_request = args.get("new_image_request") is True
     if "reference_msg_id" in args and not reference_msg_id:
         return tool_ctx.build_failure_result(invocation.tool_name, "参考图消息 ID 不能为空。")
     if reference_msg_id and (len(reference_msg_id) > 128 or reference_url):
@@ -121,6 +124,14 @@ async def handle_tool(
     )
     if not guard.allowed:
         return tool_ctx.build_failure_result(invocation.tool_name, f"生图请求目标已失效：{guard.reason}")
+    clarification = load_image_clarification(tool_ctx.runtime.session_id, clarification_user_id(target))
+    if (clarification and not new_image_request and clarification.get("reference_required")
+            and str(clarification.get("original_msg_id")) != message_id
+            and not reference_msg_id and not reference_url):
+        return tool_ctx.build_failure_result(
+            invocation.tool_name,
+            "之前的绘图请求包含参考图。请用户在新消息里重新附图或明确引用原图，并传入 reference_msg_id；不得忽略参考图直接生图。",
+        )
     if not reference_msg_id and not reference_url:
         parts = getattr(target.raw_message, "components", ()) or ()
         sources = [target]

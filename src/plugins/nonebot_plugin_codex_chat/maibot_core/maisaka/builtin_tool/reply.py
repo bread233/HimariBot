@@ -81,6 +81,16 @@ def get_tool_spec() -> ToolSpec:
                     "description": "有助于回复的信息，之前搜集得到的事实性信息，记忆等，使用平文本格式。",
                     "default": True,
                 },
+                "image_clarification": {
+                    "type": "boolean",
+                    "description": "仅当用户明确请求绘图，但关键身份/必要信息确实无法确认，且本次回复要向用户询问补充信息时为 true；用于保存待续绘图任务。",
+                    "default": False,
+                },
+                "image_clarification_new_request": {
+                    "type": "boolean",
+                    "description": "仅当本轮是独立的新绘图请求且需要澄清时设为 true；防止继承旧绘图任务。",
+                    "default": False,
+                },
                 "mood_expression": {
                     "type": "boolean",
                     "description": "仅主动表达情绪时为true；普通回复为false。",
@@ -145,7 +155,7 @@ async def handle_tool(
     reply_tool_args = {
         key: value
         for key, value in dict(invocation.arguments or {}).items()
-        if key not in {"msg_id", "set_quote", "reference_info", "mood_expression"}
+        if key not in {"msg_id", "set_quote", "reference_info", "mood_expression", "image_clarification", "image_clarification_new_request"}
     }
     enable_reply_quote = bool(config_module.global_config.chat.enable_reply_quote)
 

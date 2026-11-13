@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal, Optional
 import asyncio
 import difflib
 import json
+import re
 import time
 import traceback
 import uuid
@@ -69,6 +70,12 @@ from .person_profile_injector import build_person_profile_injection_messages
 from .planner_message_utils import build_planner_user_prefix_from_session_message
 from .visual_mode_utils import resolve_enable_visual_planner
 from src.plugins.nonebot_plugin_codex_chat.image_generation import get_image_job_status, image_request_claimed
+from .image_clarification import (
+    clear_image_clarification,
+    pending_clarification_for_message,
+    save_image_clarification,
+    _user_id as clarification_user_id,
+)
 
 if TYPE_CHECKING:
     from .runtime import MaisakaHeartFlowChatting
@@ -84,6 +91,8 @@ HISTORY_SILENT_TOOL_NAMES = {"finish"}
 HISTORY_DEFERRED_TOOL_RESULT_NAMES = {"wait"}
 TOOL_RESULT_MEDIA_SOURCE_KIND = "tool_result_media"
 TOOL_RESULT_MEDIA_TYPES = {"image", "audio", "resource_link", "resource", "binary"}
+_IMAGE_REQUEST_PATTERN = re.compile(r"(?:画(?:一[个张幅]|个|张|幅|一下)|(?:帮我|给我|请你)画|绘制|生图|生成.{0,8}(?:图|图片|插画)|重画|改图)")
+_IMAGE_CANCEL_PATTERN = re.compile(r"(?:不(?:用|要|想)画|别画|取消(?:绘图|画图|生图)|算了.{0,5}(?:不画|别画))")
 
 
 def _only_existing_image_jobs(session_id: str, messages: list[SessionMessage], lookup: Any) -> bool:
@@ -95,6 +104,62 @@ def _only_existing_image_jobs(session_id: str, messages: list[SessionMessage], l
     )
 
 
+def _unsubmitted_image_request_after_search(runtime: Any, anchor_message: SessionMessage, now_epoch: float) -> str | None:
+    """仅在本批次搜索后识别同一用户近期未提交的明确绘图请求。"""
+    if not getattr(runtime, "_active_web_search_queries", None):
+        return None
+    if "generate_image" not in getattr(runtime, "_current_action_tool_names", set()):
+        return None
+    if getattr(getattr(runtime, "chat_stream", None), "platform", "") != "onebot.v11":
+        return None
+    anchor_id = str(getattr(anchor_message, "message_id", "") or "")
+    if anchor_id not in getattr(runtime, "_active_reply_request_ids", set()):
+        return None
+
+    def user_id(message: Any) -> str:
+        return str(getattr(getattr(getattr(message, "message_info", None), "user_info", None), "user_id", "") or "")
+
+    anchor_user = user_id(anchor_message)
+    if not anchor_user or image_request_claimed(runtime.session_id, anchor_id):
+        return None
+    try:
+        anchor_epoch = float(anchor_message.timestamp.timestamp())
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if abs(now_epoch - anchor_epoch) > 300:
+        return None
+
+    candidates = list(getattr(runtime, "message_cache", ()))[-25:]
+    for message in reversed(candidates):
+        if user_id(message) != anchor_user:
+            continue
+        try:
+            age = anchor_epoch - float(message.timestamp.timestamp())
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if age < 0 or age > 300:
+            continue
+        if image_request_claimed(runtime.session_id, str(getattr(message, "message_id", "") or "")):
+            return None
+        content = " ".join(
+            str(getattr(component, "text", "") or "")
+            for component in getattr(getattr(message, "raw_message", None), "components", ())
+            if isinstance(component, TextComponent)
+        )
+        if _IMAGE_CANCEL_PATTERN.search(content):
+            return None
+        if _IMAGE_REQUEST_PATTERN.search(content):
+            msg_id = str(getattr(message, "message_id", "") or "")
+            if not msg_id or image_request_claimed(runtime.session_id, msg_id):
+                return None
+            if msg_id != anchor_id and not (
+                getattr(message, "is_at", False) or getattr(message, "is_mentioned", False)
+            ):
+                return None
+            return msg_id
+    return None
+
+
 class MaisakaReasoningEngine:
     """负责内部思考、推理与工具执行。"""
 
@@ -102,6 +167,7 @@ class MaisakaReasoningEngine:
         self._runtime = runtime
         self._last_reasoning_content: str = ""
         self._pending_image_failure_ids: set[str] = set()
+        self._image_gate_override_count = 0
 
     @staticmethod
     def _get_runtime_manager() -> Any:
@@ -264,6 +330,24 @@ class MaisakaReasoningEngine:
             logger.debug(f"{self._runtime.log_prefix} 人物画像自动注入失败，已跳过: {exc}")
             profile_messages = []
         injected_messages.extend(profile_messages)
+        pending = pending_clarification_for_message(self._runtime, anchor_message)
+        if pending:
+            injected_messages.append(
+                "[待补充绘图任务] 同一用户有未完成的绘图澄清；本轮可能是普通发言，不要求 Reply、引用或 @Bot。"
+                f"原始请求：{pending['original_request']}；已确认补充：{pending.get('supplements', [])}；上次追问：{pending['question']}。"
+                "结合原请求、追问、历史和本轮语义，区分补充/调整旧图、取消、独立新绘图请求、无关聊天；不能只看“画”字或是否引用。"
+                f"补充充分则合并条件调用 generate_image(new_image_request=false)，必须使用本轮 msg_id={anchor_message.message_id}，不能使用旧消息 ID。"
+                "仍缺必要信息才 reply(image_clarification=true)；独立新绘图用 generate_image(new_image_request=true)，若需澄清则 reply(image_clarification=true, image_clarification_new_request=true)。"
+                "取消旧图不要生图；无关聊天正常处理，不得恢复旧图。"
+            )
+        pending_image_id = _unsubmitted_image_request_after_search(self._runtime, anchor_message, time.time())
+        if pending_image_id and not pending:
+            injected_messages.append(
+                f"[未完成的绘图任务] 近期用户明确要求画图（原请求 msg_id={pending_image_id}），"
+                "目前只有 web_search 搜索记录，尚未提交后台图片任务。"
+                f"本轮请直接调用 generate_image，使用当前有效消息 msg_id={anchor_message.message_id} 和已核实资料组织 prompt；"
+                "不要继续重复搜索，也不要把此前的文字澄清当成绘图完成。若仍缺必要信息，请明确解释，不得编造外观。"
+            )
         return injected_messages
 
     async def _invoke_tool_call(
@@ -394,6 +478,25 @@ class MaisakaReasoningEngine:
                 for message in self._runtime._chat_history
                 if message.source != TIMING_GATE_INVALID_TOOL_HINT_SOURCE
             ]
+
+        if selected_tool_call.func_name == "no_action" and self._image_gate_override_count < 2:
+            clarification = pending_clarification_for_message(self._runtime, anchor_message)
+            if clarification:
+                self._image_gate_override_count += 1
+                logger.info(f"{self._runtime.log_prefix} image_clarification_timing_continue")
+                selected_tool_call = _build_timing_gate_tool_call("continue")
+                response.tool_calls = [selected_tool_call]
+                response.content = (response.content or "") + "\n[用户可能在补充之前的绘图问题，交给 Planner 核对]"
+            pending_image_id = _unsubmitted_image_request_after_search(self._runtime, anchor_message, time.time())
+            if pending_image_id and selected_tool_call.func_name == "no_action":
+                self._image_gate_override_count += 1
+                logger.warning(
+                    f"{self._runtime.log_prefix} image_pending_timing_gate_continue "
+                    f"original_msg_id={pending_image_id} override={self._image_gate_override_count}/2"
+                )
+                selected_tool_call = _build_timing_gate_tool_call("continue")
+                response.tool_calls = [selected_tool_call]
+                response.content = (response.content or "") + "\n[绘图任务未提交：Timing Gate 的 no_action 已被保护性改为 continue]"
 
         append_history = False
         store_record = selected_tool_call.func_name != "continue"
@@ -608,6 +711,7 @@ class MaisakaReasoningEngine:
 
                 self._runtime._active_reply_request_ids = collect_active_reply_request_ids(cached_messages)
                 self._pending_image_failure_ids.clear()
+                self._image_gate_override_count = 0
                 self._runtime._active_web_search_queries.clear()
                 try:
                     timing_gate_required = self._is_independent_timing_gate_enabled()
@@ -623,6 +727,8 @@ class MaisakaReasoningEngine:
                             if pending_round_messages:
                                 await self._ingest_messages(pending_round_messages)
                                 self._pending_image_failure_ids.clear()  # 新请求取代旧轮次的待反馈失败
+                                self._image_gate_override_count = 0
+                                self._runtime._active_web_search_queries.clear()
                                 cached_messages = pending_round_messages
                                 anchor_message = pending_round_messages[-1]
                                 self._runtime._active_reply_request_ids.update(
@@ -897,6 +1003,8 @@ class MaisakaReasoningEngine:
 
                             await self._ingest_messages(interrupted_messages)
                             self._pending_image_failure_ids.clear()  # 中断后新请求取代旧失败
+                            self._image_gate_override_count = 0
+                            self._runtime._active_web_search_queries.clear()
                             cached_messages = interrupted_messages
                             anchor_message = interrupted_messages[-1]
                             logger.info(
@@ -1006,6 +1114,7 @@ class MaisakaReasoningEngine:
                 finally:
                     self._pending_image_failure_ids.clear()
                     clear_active_reply_request_ids(self._runtime)
+                    self._image_gate_override_count = 0
                     self._runtime._active_web_search_queries.clear()
                     if self._runtime._agent_state == self._runtime._STATE_RUNNING:
                         self._runtime._agent_state = self._runtime._STATE_STOP
@@ -2389,6 +2498,9 @@ class MaisakaReasoningEngine:
                 image_target_id = str(invocation.arguments.get("msg_id") or "").strip()
                 if result.success:
                     self._pending_image_failure_ids.discard(image_target_id)
+                    target = self._runtime.find_source_message_by_id(image_target_id)
+                    if target is not None:
+                        clear_image_clarification(self._runtime.session_id, clarification_user_id(target))
                 elif image_target_id in self._runtime._active_reply_request_ids:
                     self._pending_image_failure_ids.add(image_target_id)
 
@@ -2400,6 +2512,18 @@ class MaisakaReasoningEngine:
                 and self._visible_delivery_succeeded(result)
             )
             if visible_delivery_succeeded:
+                if (invocation.tool_name == "reply" and invocation.arguments.get("image_clarification") is True
+                        and self._runtime.chat_stream.platform == "onebot.v11"):
+                    target = self._runtime.find_source_message_by_id(str(invocation.arguments.get("msg_id") or ""))
+                    question = str((result.structured_content or {}).get("reply_text") or "")
+                    try:
+                        if target is not None and save_image_clarification(
+                            self._runtime.session_id, target, question,
+                            new_request=invocation.arguments.get("image_clarification_new_request") is True,
+                        ):
+                            logger.info(f"{self._runtime.log_prefix} image_clarification_waiting user_id={clarification_user_id(target)}")
+                    except OSError as exc:
+                        logger.warning(f"{self._runtime.log_prefix} image_clarification_save_failed: {exc}")
                 answered_target = str(invocation.arguments.get("msg_id") or "").strip()
                 if answered_target:
                     self._runtime._answered_msg_ids.add(answered_target)

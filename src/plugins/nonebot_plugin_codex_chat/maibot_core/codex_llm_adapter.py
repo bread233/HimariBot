@@ -113,6 +113,7 @@ _ALLOWED_PLANNER_ACTION_TOOLS: frozenset[str] = frozenset(
     {
         "reply",
         "finish",
+        "generate_image",
         "view_complex_message",
         "query_jargon",
         "query_memory",
@@ -120,6 +121,9 @@ _ALLOWED_PLANNER_ACTION_TOOLS: frozenset[str] = frozenset(
         "tool_search",
         "send_image",
         "send_emoji",
+        "ocr_image",
+        "vision_caption",
+        "web_search",
         "none",
     }
 )
