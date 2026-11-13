@@ -161,6 +161,13 @@ async def handle_tool(
             invocation.tool_name,
             f"未找到要回复的目标消息，msg_id={target_message_id}",
         )
+    if tool_ctx.runtime.chat_stream.platform == HOST_PLATFORM_ONEBOT_V11:
+        from src.plugins.nonebot_plugin_codex_chat.image_generation import image_request_claimed
+        if image_request_claimed(tool_ctx.runtime.session_id, target_message_id):
+            return tool_ctx.build_success_result(
+                invocation.tool_name, "该原消息已有后台生图任务，不再额外发送文字回复。",
+                structured_content={"suppressed": True, "reason": "image_job_claimed"},
+            )
     mood_expression = invocation.arguments.get("mood_expression") is True
     group_info = getattr(target_message.message_info, "group_info", None)
     mood_group_id = str(getattr(group_info, "group_id", "") or "")

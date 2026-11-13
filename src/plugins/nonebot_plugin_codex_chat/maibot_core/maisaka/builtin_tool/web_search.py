@@ -18,15 +18,17 @@ logger = __import__("nonebot").logger
 def get_tool_spec() -> ToolSpec:
     return ToolSpec(
         name="web_search",
-        description="联网搜索实时外部信息，例如天气、新闻、赛程、比分、价格、版本、公告、活动等。",
+        description="联网搜索实时信息和作品角色资料；category=images 返回图片直链 image_url 与来源网页 url。角色绘图时先核实身份，优先找官方立绘并核实来源；图片搜索结果未经验证，禁止将任意缩略图视为官方图片。",
         parameters_schema={
             "type": "object",
             "properties": {
+                "category": {"type": "string", "enum": ["general", "images"], "description": "默认 general；查找角色官方立绘直链时选 images"},
                 "query": {
                     "type": "string",
                     "description": "搜索关键词，应简洁明确。",
                 },
             },
+
             "required": ["query"],
         },
         provider_name="maisaka_builtin",
@@ -48,7 +50,10 @@ async def handle_tool(
         )
 
     query = raw_query.strip()
-    logger.info(f"codex_chat_web_search_start query={query}")
+    category = invocation.arguments.get("category", "general")
+    if category not in ("general", "images"):
+        return tool_ctx.build_failure_result(invocation.tool_name, "category 仅支持 general 或 images")
+    logger.info(f"codex_chat_web_search_start query={query} category={category}")
 
     from src.plugins.nonebot_plugin_codex_chat.config import get_config as _get_plugin_config
     config = _get_plugin_config()
@@ -64,10 +69,12 @@ async def handle_tool(
     )
 
     if searxng_url:
-        result = await _search_searxng(searxng_url, query, timeout, max_results)
+        result = await _search_searxng(searxng_url, query, timeout, max_results, category)
         if result is not None:
             return result
 
+    if category == "images":
+        return tool_ctx.build_failure_result(invocation.tool_name, "图片搜索不可用，请改用普通搜索或请用户提供参考图")
     if fallback_codexcli:
         return await _search_codexcli(query, config)
 
@@ -78,11 +85,13 @@ async def handle_tool(
 
 
 async def _search_searxng(
-    base_url: str, query: str, timeout: int, max_results: int,
+    base_url: str, query: str, timeout: int, max_results: int, category: str = "general",
 ) -> Optional[ToolExecutionResult]:
     base = base_url.rstrip("/")
     url = f"{base}/search"
     params = {"q": query, "format": "json", "language": "zh-CN", "safesearch": "0"}
+    if category == "images":
+        params["categories"] = "images"
 
     logger.info(f"codex_chat_web_search_searxng_start url={url} query={query}")
     started = time.perf_counter()
@@ -126,7 +135,12 @@ async def _search_searxng(
         engine = str(item.get("engine") or "").strip()
         if not title and not content and not url_val:
             continue
-        items.append({"title": title, "content": content, "url": url_val, "engine": engine})
+        entry = {"title": title, "content": content, "url": url_val, "engine": engine}
+        if category == "images":
+            entry["image_url"] = str(item.get("img_src") or "").strip()
+            if not entry["image_url"].startswith("https://"):
+                continue
+        items.append(entry)
 
     if not items:
         logger.warning(
@@ -142,13 +156,15 @@ async def _search_searxng(
         lines.append(f"{i}. {item['title']}")
         lines.append(f"   {item['content']}")
         lines.append(f"   {item['url']}")
+        if category == "images":
+            lines.append(f"   image_url: {item['image_url']} (未经角色身份核实)")
         lines.append(f"   engine: {item['engine']}")
 
     return ToolExecutionResult(
         tool_name="web_search",
         success=True,
         content="\n".join(lines),
-        structured_content={"provider": "searxng", "query": query, "results": items},
+        structured_content={"provider": "searxng", "query": query, "category": category, "results": items},
     )
 
 
