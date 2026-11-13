@@ -12,13 +12,14 @@ from .context import BuiltinToolRuntimeContext
 def get_tool_spec() -> ToolSpec:
     return ToolSpec(
         name="generate_image",
-        description="当用户明确要求创作或绘制新图片时调用。指定作品角色时必须保持用户要求的角色身份及已确认的外观特征；不确定时先调用 web_search 核实，禁止编造官方设定。根据自然语言理解意图，不依赖关键词。提交后后台生成并自动引用原消息发送图片，普通聊天不等待；成功提交后不要再用 reply 承诺图片已完成，也不要重复调用。",
+        description="当用户明确要求创作或绘制新图片时调用。指定作品角色先核实身份，优先 web_search 的 images 模式找可信官方角色立绘，确认人物匹配后以 reference_image_url 传公开 HTTPS 图片直链；无可信图片时才按已核实文字特征绘制，禁止编造官方外观。后台自动引用原消息发图；同一 msg_id 只能提交一次，成功提交后不得额外 reply 或重复提交。",
         parameters_schema={
             "type": "object",
             "properties": {
                 "msg_id": {"type": "string", "description": "请求画图的原始消息编号"},
-                "prompt": {"type": "string", "description": "详细的图片生成提示词"},
+                "prompt": {"type": "string", "description": "详细生图提示词：准确角色名、作品、经可靠资料核实的关键外观及用户要求的场景；禁止把未核实的发型、发色、瞳色等写成官方特征"},
                 "caption": {"type": "string", "description": "随图片一起发送的简短文字，可为空", "default": ""},
+                "reference_image_url": {"type": "string", "description": "可选：已核实角色身份的公开 HTTPS 图片直链；优先官方角色立绘，不能使用未经核实的搜索缩略图"},
             },
             "required": ["msg_id", "prompt"],
         },
@@ -37,6 +38,9 @@ async def handle_tool(
     message_id = str(args.get("msg_id") or "").strip()
     prompt = str(args.get("prompt") or "").strip()
     caption = str(args.get("caption") or "").strip()
+    reference_url = str(args.get("reference_image_url") or "").strip()
+    if len(reference_url) > 2048:
+        return tool_ctx.build_failure_result(invocation.tool_name, "参考图 URL 过长。")
     if not prompt or len(prompt) > 6000:
         return tool_ctx.build_failure_result(invocation.tool_name, "生图提示词不能为空或超过 6000 字符。")
     target = tool_ctx.runtime.find_source_message_by_id(message_id)
@@ -45,7 +49,7 @@ async def handle_tool(
     if tool_ctx.runtime.chat_stream.platform != "onebot.v11":
         return tool_ctx.build_failure_result(invocation.tool_name, "当前仅支持 QQ 生图。")
     try:
-        job_id, created = submit_image_job(prompt, caption[:500], tool_ctx.runtime.session_id, target, True)
+        job_id, created = submit_image_job(prompt, caption[:500], tool_ctx.runtime.session_id, target, True, reference_url)
     except RuntimeError as exc:
         return tool_ctx.build_failure_result(invocation.tool_name, str(exc))
     return tool_ctx.build_success_result(
