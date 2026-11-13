@@ -889,7 +889,7 @@ def _normalize_planner_output(text: str, *, extra: dict | None) -> list[Any]:
         raw_at_bot = extra.get("latest_at_current_bot_msg_id")
         if raw_at_bot is not None:
             latest_at_bot_msg_id = str(raw_at_bot).strip()
-    if latest_at_bot_msg_id and latest_at_bot_msg_id != anchor_message_id:
+    if not anchor_message_id and latest_at_bot_msg_id:
         logger.info(
             "maisaka_reply_anchor_corrected from=%s to=%s reason=at_current_bot_detected",
             anchor_message_id,
@@ -1076,7 +1076,7 @@ def _build_planner_tool_call(
     """根据 ACTION + ARGS 构造 ToolCall。失败时返回 ``[]`` 并写日志。
 
     - ``action == "none"`` -> ``[]``（明确不调用任何工具）
-    - ``action == "reply"`` -> 必须有 ``anchor_message_id``；自动注入 ``msg_id`` 和
+    - ``action == "reply"`` -> 必须有 ``anchor_message_id``；保留显式 ``msg_id``，缺失时补全，并设置
       ``set_quote=False``（除非调用方已经显式给出 ``set_quote``）；明确寻址和具体问题由 reply 工具强制引用。
     - ``action == "view_complex_message"`` -> 必须有 ``anchor_message_id``；
       自动注入 ``msg_id``。
@@ -1105,7 +1105,7 @@ def _build_planner_tool_call(
             )
             return []
         merged: dict[str, Any] = dict(args or {})
-        merged["msg_id"] = anchor_message_id
+        merged["msg_id"] = str(merged.get("msg_id") or "").strip() or anchor_message_id
         merged.setdefault("set_quote", False)
         return [
             _ToolCall(
