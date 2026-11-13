@@ -93,8 +93,40 @@ def _extract_image_path(output: str) -> str:
     raise ValueError("Codex 未返回可验证的 PNG 路径")
 
 
-async def _prepare_reference(container: str, url: str, job_id: str) -> str:
-    image_bytes, suffix = await download_reference_image(url)
+_CLEANUP_TASKS: set[asyncio.Task] = set()
+
+
+async def _cleanup_reference(container: str, path: str, job_id: str, stage: str) -> None:
+    try:
+        code, _, stderr = await _run("docker", "exec", container, "rm", "-f", "--", path, timeout=15)
+        if code:
+            logger.warning(f"generate_image job={job_id} stage={stage} reference_cleanup_failed exit_code={code} stderr_chars={len(stderr)}")
+    except Exception:
+        logger.exception(f"generate_image job={job_id} stage={stage} reference_cleanup_exception")
+
+
+async def _cleanup_reference_shielded(container: str, path: str, job_id: str, stage: str) -> None:
+    task = asyncio.create_task(_cleanup_reference(container, path, job_id, stage))
+    _CLEANUP_TASKS.add(task)
+    task.add_done_callback(_CLEANUP_TASKS.discard)
+    await asyncio.shield(task)
+
+
+async def _prepare_reference(container: str, url: str, job_id: str, reference_image_bytes: bytes | None = None) -> str:
+    if reference_image_bytes is None:
+        image_bytes, suffix = await download_reference_image(url)
+    else:
+        image_bytes = reference_image_bytes
+        if not isinstance(image_bytes, bytes) or not 32 <= len(image_bytes) <= 8 * 1024 * 1024:
+            raise ValueError("QQ 参考图大小无效")
+        if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+            suffix = ".png"
+        elif image_bytes.startswith(b"\xff\xd8\xff"):
+            suffix = ".jpg"
+        elif image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
+            suffix = ".webp"
+        else:
+            raise ValueError("QQ 参考图格式无效")
     container_path = f"/tmp/himaribot-reference-{job_id}{suffix}"
     # 清理上次进程异常退出留下的宿主临时文件（仅匹配本功能专用前缀）。
     for stale in Path(tempfile.gettempdir()).glob("himaribot-reference-*"):
@@ -107,18 +139,24 @@ async def _prepare_reference(container: str, url: str, job_id: str) -> str:
     try:
         with os.fdopen(fd, "wb") as output:
             output.write(image_bytes)
-        code, _, stderr = await _run("docker", "cp", local_path, f"{container}:{container_path}", timeout=45)
-        if code:
-            await _run("docker", "exec", container, "rm", "-f", "--", container_path, timeout=15)
-            raise RuntimeError(f"参考图传入 Codex 失败; stderr_chars={len(stderr)}")
+        try:
+            code, _, stderr = await _run("docker", "cp", local_path, f"{container}:{container_path}", timeout=45)
+            if code:
+                raise RuntimeError(f"参考图传入 Codex 失败; stderr_chars={len(stderr)}")
+        except (Exception, asyncio.CancelledError):
+            await _cleanup_reference_shielded(container, container_path, job_id, "copy_failed")
+            raise
     finally:
-        os.unlink(local_path)
+        try:
+            os.unlink(local_path)
+        except OSError:
+            logger.exception(f"generate_image job={job_id} stage=local_reference_cleanup_failed")
     return container_path
 
 
 async def _generate_and_send(
     job_id: str, prompt: str, caption: str, session_id: str, target_message: object, quote: bool,
-    reference_image_url: str = "",
+    reference_image_url: str = "", reference_image_bytes: bytes | None = None,
 ) -> None:
     job_dir = _ROOT / job_id
     container = os.getenv("CODEX_CHAT_DOCKER_CONTAINER", "codexcli")
@@ -127,10 +165,12 @@ async def _generate_and_send(
         async with _LIMIT:
             await asyncio.to_thread(job_dir.mkdir, parents=True, exist_ok=False)
             # 下次任务顺便清理强制退出遗留的旧参考图；当前任务最多运行约 5 分钟。
-            await _run("docker", "exec", container, "find", "/tmp", "-maxdepth", "1",
-                       "-type", "f", "-name", "himaribot-reference-*", "-mmin", "+120", "-delete", timeout=15)
-            if reference_image_url:
-                reference_path = await _prepare_reference(container, reference_image_url, job_id)
+            code, _, stderr = await _run("docker", "exec", container, "find", "/tmp", "-maxdepth", "1",
+                                         "-type", "f", "-name", "himaribot-reference-*", "-mmin", "+120", "-delete", timeout=15)
+            if code:
+                logger.warning(f"generate_image job={job_id} stage=stale_reference_cleanup_failed exit_code={code} stderr_chars={len(stderr)}")
+            if reference_image_url or reference_image_bytes is not None:
+                reference_path = await _prepare_reference(container, reference_image_url, job_id, reference_image_bytes)
             instruction = (
                 "Use your built-in image generation capability to create exactly one PNG image. "
                 "Report the generated PNG absolute path under /root/.codex/generated_images/ in the final response. "
@@ -226,12 +266,7 @@ async def _generate_and_send(
 
     finally:
         if reference_path:
-            try:
-                code, _, stderr = await _run("docker", "exec", container, "rm", "-f", "--", reference_path, timeout=15)
-                if code:
-                    logger.warning(f"generate_image job={job_id} reference cleanup failed: stderr_chars={len(stderr)}")
-            except Exception:
-                logger.exception(f"generate_image job={job_id} failed to clean temporary reference")
+            await _cleanup_reference_shielded(container, reference_path, job_id, "job_finished")
 
 
 def image_request_claimed(session_id: str, source_id: str) -> bool:
@@ -244,12 +279,41 @@ def image_request_claimed(session_id: str, source_id: str) -> bool:
     return (_ROOT / "requests" / key).is_dir()
 
 
-def submit_image_job(prompt: str, caption: str, session_id: str, target_message: object, quote: bool, reference_image_url: str = "") -> tuple[str, bool]:
+def get_image_job_status(session_id: str, source_id: str) -> dict[str, str] | None:
+    """从原消息占位及结果文件读取状态；无结果时区分运行中和进程中断。"""
+    if not session_id or not source_id:
+        return None
+    key = hashlib.sha256(
+        json.dumps(["onebot.v11", session_id, source_id], ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    record = _ROOT / "requests" / key / "job.json"
+    if not record.is_file():
+        return None
+    try:
+        job_id = str(json.loads(record.read_text(encoding="utf-8"))["job_id"])
+        if not re.fullmatch(r"[0-9a-f]{32}", job_id):
+            return {"job_id": "", "status": "unknown"}
+        job_dir = _ROOT / job_id
+        if (job_dir / "metadata.json").is_file():
+            status = json.loads((job_dir / "metadata.json").read_text(encoding="utf-8")).get("status")
+            if status in {"sent", "send_failed"}:
+                return {"job_id": job_id, "status": status}
+        if (job_dir / "error.json").is_file():
+            return {"job_id": job_id, "status": "failed"}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {"job_id": "", "status": "unknown"}
+    active = any(t.get_name() == f"generate_image_{job_id}" and not t.done() for t in _TASKS)
+    return {"job_id": job_id, "status": "pending" if active else "interrupted"}
+
+
+def submit_image_job(prompt: str, caption: str, session_id: str, target_message: object, quote: bool, reference_image_url: str = "", reference_image_bytes: bytes | None = None) -> tuple[str, bool]:
     """按会话与原消息永久去重；原子目录创建防止并发 Planner 重复提交。
 
     以持久化标记为准，重启后也不会自动重试同一原消息。
     用户发送新的 QQ 消息才会创建新的生成任务。
     """
+    if reference_image_url and reference_image_bytes is not None:
+        raise RuntimeError("不能同时指定两种参考图来源")
     source_id = str(getattr(target_message, "message_id", "") or "").strip()
     if not session_id or not source_id:
         raise RuntimeError("无法确认原始消息 ID，拒绝提交生图任务")
@@ -283,7 +347,7 @@ def submit_image_job(prompt: str, caption: str, session_id: str, target_message:
             claim.rmdir()
             raise RuntimeError("生图队列已满，请稍后再试")
         task = asyncio.create_task(
-            _generate_and_send(job_id, prompt, caption, session_id, target_message, quote, reference_image_url),
+            _generate_and_send(job_id, prompt, caption, session_id, target_message, quote, reference_image_url, reference_image_bytes),
             name=f"generate_image_{job_id}",
         )
         _TASKS.add(task)
