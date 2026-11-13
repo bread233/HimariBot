@@ -94,8 +94,11 @@ Werkzeug>=3.1.4,<3.2.0
 nonebot2[fastapi,httpx]>=2.5.0,<3.0
 nonebot-adapter-onebot
 
-# Maibot core minimal runtime dependencies
+# Maibot core runtime dependencies (memory graph, vector index, knowledge store)
 faiss-cpu>=1.9.0,<1.10.0
+scipy>=1.13.0,<1.17.0
+pandas>=2.2.0,<3.0.0
+python-multipart>=0.0.9,<1.0.0
 rapidfuzz
 sqlmodel
 sqlalchemy
