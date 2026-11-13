@@ -81,6 +81,7 @@ logger.info("codex_chat minimal bootstrap loaded")
 
 
 _HOST_TARGET_TTL_SECONDS = 600
+_INBOUND_ROUTE_TTL_SECONDS = 7200  # 异步生图引用路由保留两小时。
 _host_target_registry: dict[str, tuple[Bot, dict[str, Any]]] = {}
 _onebot_bots_by_self_id: dict[str, Bot] = {}
 _inbound_route_by_message_id: dict[str, dict[str, Any]] = {}
@@ -174,7 +175,7 @@ def _record_inbound_route(event: MessageEvent, bot: Bot) -> None:
     now = time.time()
     expired = [
         k for k, v in _inbound_route_by_message_id.items()
-        if now - float(v.get("ts", 0)) > _HOST_TARGET_TTL_SECONDS
+        if now - float(v.get("ts", 0)) > _INBOUND_ROUTE_TTL_SECONDS
     ]
     for k in expired:
         _inbound_route_by_message_id.pop(k, None)
@@ -209,7 +210,7 @@ def _lookup_inbound_route(
         record = _inbound_route_by_message_id.get(mid)
         if record is None:
             continue
-        if now - float(record.get("ts", 0)) > _HOST_TARGET_TTL_SECONDS:
+        if now - float(record.get("ts", 0)) > _INBOUND_ROUTE_TTL_SECONDS:
             _inbound_route_by_message_id.pop(mid, None)
             continue
         return record
@@ -405,7 +406,7 @@ async def _codex_chat_host_send_interceptor(
         is_group=is_group,
         target_id=target_id,
         bot_self_id=bot_self_id,
-        ttl_seconds=_HOST_TARGET_TTL_SECONDS,
+        ttl_seconds=_INBOUND_ROUTE_TTL_SECONDS,
     )
     if requested_reply_message_id and quote_downgrade_reason:
         logger.warning(
@@ -782,7 +783,7 @@ async def _handle(event: MessageEvent, bot: Bot, message=EventMessage()):
                 is_group=is_group,
                 target_id=target_id,
                 bot_self_id=str(getattr(bot, "self_id", "") or "").strip(),
-                ttl_seconds=_HOST_TARGET_TTL_SECONDS,
+                ttl_seconds=_INBOUND_ROUTE_TTL_SECONDS,
             )
             if requested_reply_message_id and downgrade_reason:
                 logger.warning(
