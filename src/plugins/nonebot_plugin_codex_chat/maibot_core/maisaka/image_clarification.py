@@ -13,6 +13,7 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any
+from src.plugins.nonebot_plugin_codex_chat.maibot_core.maisaka.image_task_state import load_image_task
 
 _ROOT = Path("/app/data/nonebot_chat_agent/generated_images/image_clarifications")
 TTL_SECONDS = 15 * 60
@@ -75,13 +76,17 @@ def save_image_clarification(
     if _CANCEL.search(original_text):
         return False
     previous = None if new_request else load_image_clarification(session_id, user_id, now=now)
+    task = load_image_task(session_id, user_id)
     supplements = list(previous.get("supplements", []))[-5:] if previous else []
     if previous:
         supplements.append(original_text[:500])
         original_text = str(previous["original_request"])
         msg_id = str(previous["original_msg_id"])
     elif not _DRAW.search(original_text):
-        return False
+        if not task or task.get("status") in {"sent", "cancelled"}:
+            return False
+        original_text = str(task["original_request"])
+        msg_id = str(task["original_msg_id"])
     now = time.time() if now is None else now
     data = {
         "session_id": session_id,
@@ -90,7 +95,9 @@ def save_image_clarification(
         "original_request": original_text[:2000],
         "question": question,
         "supplements": supplements[-6:],
-        "reference_required": bool(previous.get("reference_required")) if previous else any(
+        "reference_required": bool(previous.get("reference_required")) if previous else bool(
+            task and task.get("reference_required")
+        ) or any(
             type(part).__name__ in {"ImageComponent", "ReplyComponent"}
             for part in (getattr(getattr(message, "raw_message", None), "components", ()) or ())
         ),
