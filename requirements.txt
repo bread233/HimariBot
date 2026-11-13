@@ -95,6 +95,7 @@ nonebot2[fastapi,httpx]>=2.5.0,<3.0
 nonebot-adapter-onebot
 
 # Maibot core minimal runtime dependencies
+faiss-cpu>=1.9.0,<1.10.0
 rapidfuzz
 sqlmodel
 sqlalchemy
