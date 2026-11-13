@@ -70,11 +70,13 @@ from .person_profile_injector import build_person_profile_injection_messages
 from .planner_message_utils import build_planner_user_prefix_from_session_message
 from .visual_mode_utils import resolve_enable_visual_planner
 from src.plugins.nonebot_plugin_codex_chat.image_generation import get_image_job_status, image_request_claimed
+from .image_task_state import cancel_image_task, load_image_task, start_image_task, update_image_task
 from .image_clarification import (
     clear_image_clarification,
     pending_clarification_for_message,
     save_image_clarification,
     _user_id as clarification_user_id,
+    _CANCEL as image_cancel_pattern,
 )
 
 if TYPE_CHECKING:
@@ -180,6 +182,39 @@ class MaisakaReasoningEngine:
         from src.plugin_runtime.integration import get_plugin_runtime_manager
 
         return get_plugin_runtime_manager()
+
+    def _sync_image_tasks(self, messages: list[SessionMessage]) -> None:
+        """Keep drawing intent durable even if a new message interrupts Planner."""
+        if self._runtime.chat_stream.platform != "onebot.v11":
+            return
+        for message in messages:
+            msg_id = str(getattr(message, "message_id", "") or "")
+            if msg_id not in self._runtime._active_reply_request_ids:
+                continue
+            uid = clarification_user_id(message)
+            task = load_image_task(self._runtime.session_id, uid)
+            if task and task.get("status") in {"generating", "sending"} and task.get("submitted_msg_id"):
+                job = get_image_job_status(self._runtime.session_id, str(task["submitted_msg_id"]))
+                if job and job.get("job_id") == task.get("job_id"):
+                    next_status = {
+                        "sent": "sent", "send_failed": "send_failed",
+                        "failed": "failed", "interrupted": (
+                            "delivery_uncertain" if task["status"] == "sending" else "failed"
+                        ),
+                    }.get(job.get("status"))
+                    if next_status:
+                        update_image_task(self._runtime.session_id, uid, next_status, expected_job_id=task["job_id"])
+            content = " ".join(
+                str(getattr(part, "text", "") or "")
+                for part in (getattr(getattr(message, "raw_message", None), "components", ()) or ())
+                if isinstance(getattr(part, "text", None), str)
+            )
+            if image_cancel_pattern.search(content):
+                if cancel_image_task(self._runtime.session_id, uid):
+                    clear_image_clarification(self._runtime.session_id, uid)
+                    logger.info(f"{self._runtime.log_prefix} image_task_cancelled user_id={uid}")
+            elif _IMAGE_REQUEST_PATTERN.search(content) and not image_request_claimed(self._runtime.session_id, msg_id):
+                start_image_task(self._runtime.session_id, message)
 
     @property
     def last_reasoning_content(self) -> str:
@@ -331,6 +366,15 @@ class MaisakaReasoningEngine:
             profile_messages = []
         injected_messages.extend(profile_messages)
         pending = pending_clarification_for_message(self._runtime, anchor_message)
+        task = load_image_task(self._runtime.session_id, clarification_user_id(anchor_message))
+        if task and not pending and task.get("status") in {"planning", "searching", "awaiting_clarification", "failed", "send_failed"}:
+            injected_messages.append(
+                "[持久绘图任务] 本用户仍有未完成的绘图任务；搜索、Planner 轮次结束或新消息不能视为完成。"
+                f"原始请求：{task['original_request']}；原始消息 ID：{task['original_msg_id']}；状态：{task['status']}。"
+                "请判断本轮消息是旧任务补充、取消、新的独立任务还是无关聊天；无关聊天正常回复，不要擅自重启旧图。"
+                "资料充分则 generate_image；不足则 reply(image_clarification=true) 追问参考图。"
+                + (f" 已执行搜索的结果（未经验证）：{task.get('search_evidence', '')}" if task.get("search_evidence") else "")
+            )
         if pending:
             injected_messages.append(
                 "[待补充绘图任务] 同一用户有未完成的绘图澄清；本轮可能是普通发言，不要求 Reply、引用或 @Bot。"
@@ -508,6 +552,10 @@ class MaisakaReasoningEngine:
                 response.tool_calls = [selected_tool_call]
                 response.content = (response.content or "") + "\n[用户可能在补充之前的绘图问题，交给 Planner 核对]"
             pending_image_id = _unsubmitted_image_request_after_search(self._runtime, anchor_message, time.time())
+            task = load_image_task(self._runtime.session_id, clarification_user_id(anchor_message))
+            if (task and task.get("status") in {"planning", "searching"}
+                    and str(anchor_message.message_id) in self._runtime._active_reply_request_ids):
+                pending_image_id = pending_image_id or str(task.get("original_msg_id") or "")
             if pending_image_id and selected_tool_call.func_name == "no_action":
                 self._image_gate_override_count += 1
                 logger.warning(
@@ -730,6 +778,7 @@ class MaisakaReasoningEngine:
                     continue
 
                 self._runtime._active_reply_request_ids = collect_active_reply_request_ids(cached_messages)
+                self._sync_image_tasks(cached_messages)
                 self._pending_image_failure_ids.clear()
                 self._image_gate_override_count = 0
                 self._runtime._active_web_search_queries.clear()
@@ -750,6 +799,8 @@ class MaisakaReasoningEngine:
                                 self._image_gate_override_count = 0
                                 self._runtime._active_web_search_queries.clear()
                                 cached_messages = pending_round_messages
+                                self._runtime._active_reply_request_ids.update(collect_active_reply_request_ids(pending_round_messages))
+                                self._sync_image_tasks(pending_round_messages)
                                 anchor_message = pending_round_messages[-1]
                                 self._runtime._active_reply_request_ids.update(
                                     collect_active_reply_request_ids(pending_round_messages)
@@ -1027,6 +1078,8 @@ class MaisakaReasoningEngine:
                             self._runtime._active_web_search_queries.clear()
                             cached_messages = interrupted_messages
                             anchor_message = interrupted_messages[-1]
+                            self._runtime._active_reply_request_ids.update(collect_active_reply_request_ids(interrupted_messages))
+                            self._sync_image_tasks(interrupted_messages)
                             logger.info(
                                 f"{self._runtime.log_prefix} 淇濇寔娲昏穬鐘舵€侊紝璺宠繃 Timing Gate 鐩存帴閲嶈瘯 Planner: "
                                 f"鍥炲悎={round_index + 2}"
@@ -1139,6 +1192,12 @@ class MaisakaReasoningEngine:
                                     self._runtime, anchor_message, time.time()
                                 )
                             )
+                        task = load_image_task(self._runtime.session_id, clarification_user_id(anchor_message))
+                        if (task and task.get("status") in {"planning", "searching"}
+                                and str(anchor_message.message_id) in self._runtime._active_reply_request_ids):
+                            unresolved_search_msg_id = unresolved_search_msg_id or str(anchor_message.message_id)
+                        if unresolved_search_msg_id and unresolved_search_msg_id not in self._runtime._active_reply_request_ids:
+                            unresolved_search_msg_id = str(anchor_message.message_id)
                         await self._notify_pending_image_failures(
                             unresolved_search_msg_id=unresolved_search_msg_id
                         )
@@ -2314,9 +2373,12 @@ class MaisakaReasoningEngine:
                 )
                 if sent is not None:
                     self._runtime._answered_msg_ids.add(msg_id)
+                    if not search_fallback:
+                        update_image_task(self._runtime.session_id, clarification_user_id(target), "failed")
                     if search_fallback:
                         try:
-                            save_image_clarification(self._runtime.session_id, target, notice)
+                            if save_image_clarification(self._runtime.session_id, target, notice):
+                                update_image_task(self._runtime.session_id, clarification_user_id(target), "awaiting_clarification")
                         except OSError as exc:
                             logger.warning(f"{self._runtime.log_prefix} image_search_clarification_save_failed: {exc}")
                 else:
@@ -2384,18 +2446,20 @@ class MaisakaReasoningEngine:
             if invocation.tool_name == "web_search":
                 query = " ".join(str(invocation.arguments.get("query") or "").split()).casefold()
                 seen_queries = self._runtime._active_web_search_queries
+                task = load_image_task(self._runtime.session_id, clarification_user_id(anchor_message))
                 category = str(invocation.arguments.get("category") or "general").casefold()
                 search_key = f"{category}:{query}"
                 image_request = bool(
                     pending_clarification_for_message(self._runtime, anchor_message)
                     or _IMAGE_REQUEST_PATTERN.search(anchor_message.processed_plain_text or "")
                     or _unsubmitted_image_request_after_search(self._runtime, anchor_message, time.time())
+                    or (task and task.get("status") in {"planning", "searching"} and str(anchor_message.message_id) in self._runtime._active_reply_request_ids)
                 )
                 rejection = (
                     "相同关键词已搜索过，已有结果保存在工具历史中。"
-                    if query and search_key in seen_queries else
+                    if query and (search_key in seen_queries or (image_request and task and search_key in task.get("search_queries", []))) else
                     "本次绘图已达到两次检索上限，禁止继续换词搜索。"
-                    if query and image_request and len(seen_queries) >= 2 else ""
+                    if query and image_request and len(set(seen_queries) | set(task.get("search_queries", []) if task else ())) >= 2 else ""
                 )
                 if rejection:
                     logger.warning(
@@ -2548,6 +2612,11 @@ class MaisakaReasoningEngine:
                                 continue
 
             result = await self._runtime._tool_registry.invoke(invocation, execution_context)
+            if invocation.tool_name == "web_search" and image_request and task:
+                update_image_task(
+                    self._runtime.session_id, clarification_user_id(anchor_message), "searching",
+                    query=search_key, evidence=result.get_history_content() if result.success else None,
+                )
             if is_unexpanded_tool and not result.success:
                 result = self._append_deferred_tool_parameter_hint(result)
             tool_duration_ms = (time.time() - tool_started_at) * 1000
@@ -2591,10 +2660,13 @@ class MaisakaReasoningEngine:
                     target = self._runtime.find_source_message_by_id(str(invocation.arguments.get("msg_id") or ""))
                     question = str((result.structured_content or {}).get("reply_text") or "")
                     try:
+                        if target is not None and invocation.arguments.get("image_clarification_new_request") is True:
+                            start_image_task(self._runtime.session_id, target, new_request=True)
                         if target is not None and save_image_clarification(
                             self._runtime.session_id, target, question,
                             new_request=invocation.arguments.get("image_clarification_new_request") is True,
                         ):
+                            update_image_task(self._runtime.session_id, clarification_user_id(target), "awaiting_clarification")
                             logger.info(f"{self._runtime.log_prefix} image_clarification_waiting user_id={clarification_user_id(target)}")
                     except OSError as exc:
                         logger.warning(f"{self._runtime.log_prefix} image_clarification_save_failed: {exc}")

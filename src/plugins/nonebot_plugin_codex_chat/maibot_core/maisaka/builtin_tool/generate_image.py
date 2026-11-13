@@ -13,6 +13,7 @@ from src.plugins.nonebot_plugin_codex_chat.image_generation import get_image_job
 
 from ..reply_target_guard import evaluate_runtime_target
 from ..image_clarification import load_image_clarification, _user_id as clarification_user_id
+from ..image_task_state import start_image_task, update_image_task
 from .context import BuiltinToolRuntimeContext
 
 
@@ -151,12 +152,15 @@ async def handle_tool(
         except ValueError as exc:
             return tool_ctx.build_failure_result(invocation.tool_name, str(exc))
     try:
+        start_image_task(tool_ctx.runtime.session_id, target, new_request=new_image_request)
         job_id, created = submit_image_job(
             prompt, caption[:500], tool_ctx.runtime.session_id, target, True, reference_url,
             reference_image_bytes=reference_bytes,
         )
     except RuntimeError as exc:
         return tool_ctx.build_failure_result(invocation.tool_name, str(exc))
+    if created:
+        update_image_task(tool_ctx.runtime.session_id, clarification_user_id(target), "generating", job_id=job_id, submitted_msg_id=message_id)
     status = "pending" if created else (get_image_job_status(tool_ctx.runtime.session_id, message_id) or {}).get("status", "unknown")
     return tool_ctx.build_success_result(
         invocation.tool_name,

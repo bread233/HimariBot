@@ -15,6 +15,9 @@ from pathlib import Path
 from src.common.data_models.message_component_data_model import ImageComponent, MessageSequence, TextComponent
 from src.common.logger import get_logger
 from src.plugins.nonebot_plugin_codex_chat.image_reference import download_reference_image
+from src.plugins.nonebot_plugin_codex_chat.maibot_core.maisaka.image_task_state import (
+    image_task_cancelled, update_image_task, user_id as image_task_user_id,
+)
 from src.services import send_service
 
 logger = get_logger("maisaka_image_generation")
@@ -161,8 +164,12 @@ async def _generate_and_send(
     job_dir = _ROOT / job_id
     container = os.getenv("CODEX_CHAT_DOCKER_CONTAINER", "codexcli")
     reference_path = ""
+    uid = image_task_user_id(target_message)
     try:
         async with _LIMIT:
+            if image_task_cancelled(session_id, uid, job_id):
+                logger.info(f"generate_image job={job_id} cancelled_before_generation")
+                return
             await asyncio.to_thread(job_dir.mkdir, parents=True, exist_ok=False)
             # 下次任务顺便清理强制退出遗留的旧参考图；当前任务最多运行约 5 分钟。
             code, _, stderr = await _run("docker", "exec", container, "find", "/tmp", "-maxdepth", "1",
@@ -204,9 +211,17 @@ async def _generate_and_send(
             width, height = struct.unpack(">II", image_bytes[16:24])
             if not 1 <= width <= 8192 or not 1 <= height <= 8192:
                 raise ValueError("PNG 尺寸不合法")
+            if image_task_cancelled(session_id, uid, job_id):
+                logger.info(f"generate_image job={job_id} cancelled_before_send")
+                return
             components = ([TextComponent(caption)] if caption else []) + [
                 ImageComponent(binary_hash=hashlib.sha256(image_bytes).hexdigest(), binary_data=image_bytes)
             ]
+            # Mark transport entry before sending; cancellation cannot recall an in-flight send.
+            transitioned = update_image_task(session_id, uid, "sending", expected_job_id=job_id)
+            if transitioned is None and image_task_cancelled(session_id, uid, job_id):
+                logger.info(f"generate_image job={job_id} cancelled_at_send_boundary")
+                return
             # 先持久化发送占位，防止重启或重复 Planner 调用再次发送。
             await asyncio.to_thread(
                 (job_dir / "send_started.json").write_text,
@@ -229,11 +244,16 @@ async def _generate_and_send(
                 "sent_message_id": str(getattr(sent, "message_id", "")) if sent else "",
                 "status": "sent" if sent else "send_failed", "created_at": time.time(),
             }
+            update_image_task(session_id, uid, "sent" if sent else "send_failed", expected_job_id=job_id)
             await asyncio.to_thread(
                 (job_dir / "metadata.json").write_text,
                 json.dumps(metadata, ensure_ascii=False, indent=2), "utf-8",
             )
     except Exception as exc:
+        update_image_task(
+            session_id, uid, "delivery_uncertain" if (job_dir / "send_started.json").exists() else "failed",
+            expected_job_id=job_id,
+        )
         logger.exception(f"generate_image job={job_id} failed: {type(exc).__name__}: {exc}")
         try:
             await asyncio.to_thread(job_dir.mkdir, parents=True, exist_ok=True)
