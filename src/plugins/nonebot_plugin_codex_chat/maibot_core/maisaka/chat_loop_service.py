@@ -760,6 +760,7 @@ class MaisakaChatLoopService:
     _TOOL_RENDER_ORDER: tuple[str, ...] = (
         "reply",
         "finish",
+        "generate_image",
         "view_complex_message",
         "query_jargon",
         "query_memory",
