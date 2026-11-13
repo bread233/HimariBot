@@ -48,6 +48,36 @@ _codex_poke = on_notice(
     block=False,
 )
 driver = get_driver()
+_webui_server: Any | None = None
+
+
+@driver.on_startup
+async def _start_codex_chat_webui() -> None:
+    global _webui_server
+    if not global_config.webui.enabled:
+        logger.info("codex_chat WebUI disabled by configuration")
+        return
+    try:
+        from .maibot_core.webui.webui_server import get_threaded_webui_server
+
+        _webui_server = get_threaded_webui_server()
+        _webui_server.start()
+        logger.info(f"codex_chat WebUI starting on {global_config.webui.host}:{global_config.webui.port}")
+    except Exception:
+        logger.exception("codex_chat WebUI startup failed")
+
+
+@driver.on_shutdown
+async def _stop_codex_chat_webui() -> None:
+    global _webui_server
+    if _webui_server is not None:
+        try:
+            await _webui_server.shutdown()
+        except Exception:
+            logger.exception("codex_chat WebUI shutdown failed")
+        finally:
+            _webui_server = None
+
 _superusers = {str(x) for x in (getattr(driver.config, "superusers", set()) or set())}
 _poke_cooldowns: dict[tuple[int, int], float] = {}  # 每个群内的每位用户独立冷却 30 秒
 _affinity_tasks: set[asyncio.Task] = set()
