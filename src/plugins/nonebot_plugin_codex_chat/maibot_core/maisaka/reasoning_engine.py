@@ -24,6 +24,7 @@ from ..core.tooling import ToolAvailabilityContext, ToolExecutionContext, ToolEx
 from ..llm_models.exceptions import ReqAbortException, RespNotOkException
 from ..llm_models.payload_content.tool_option import ToolCall
 from ..services import database_service as database_api
+from ..services import send_service
 from ..services.memory_service import memory_service
 
 from .builtin_tool import build_builtin_tool_handlers as build_split_builtin_tool_handlers
@@ -53,6 +54,7 @@ from .reply_target_guard import (
     clear_active_reply_request_ids,
     collect_active_reply_request_ids,
     evaluate_reply_target,
+    evaluate_runtime_target,
     is_active_direct_reply_target,
 )
 from .mid_term_memory import build_mid_term_memory_message, insert_mid_term_memory_message
@@ -66,6 +68,7 @@ from .monitor_events import (
 from .person_profile_injector import build_person_profile_injection_messages
 from .planner_message_utils import build_planner_user_prefix_from_session_message
 from .visual_mode_utils import resolve_enable_visual_planner
+from src.plugins.nonebot_plugin_codex_chat.image_generation import get_image_job_status, image_request_claimed
 
 if TYPE_CHECKING:
     from .runtime import MaisakaHeartFlowChatting
@@ -83,12 +86,22 @@ TOOL_RESULT_MEDIA_SOURCE_KIND = "tool_result_media"
 TOOL_RESULT_MEDIA_TYPES = {"image", "audio", "resource_link", "resource", "binary"}
 
 
+def _only_existing_image_jobs(session_id: str, messages: list[SessionMessage], lookup: Any) -> bool:
+    """仅当前消息批次全部已有生图任务时跳过 Planner。"""
+    return bool(messages) and all(
+        (job := lookup(session_id, str(getattr(message, "message_id", "") or "")))
+        and job.get("status") in {"pending", "sent", "failed", "send_failed", "interrupted"}
+        for message in messages
+    )
+
+
 class MaisakaReasoningEngine:
     """负责内部思考、推理与工具执行。"""
 
     def __init__(self, runtime: "MaisakaHeartFlowChatting") -> None:
         self._runtime = runtime
         self._last_reasoning_content: str = ""
+        self._pending_image_failure_ids: set[str] = set()
 
     @staticmethod
     def _get_runtime_manager() -> Any:
@@ -594,12 +607,14 @@ class MaisakaReasoningEngine:
                     continue
 
                 self._runtime._active_reply_request_ids = collect_active_reply_request_ids(cached_messages)
+                self._pending_image_failure_ids.clear()
                 self._runtime._active_web_search_queries.clear()
                 try:
                     timing_gate_required = self._is_independent_timing_gate_enabled()
                     if not timing_gate_required:
                         self._runtime._consume_force_next_timing_continue_reason()
                     round_index = 0
+                    last_cycle_end_reason = ""
                     while round_index < self._runtime._max_internal_rounds:
                         if round_index > 0 and self._runtime._has_pending_messages():
                             await self._runtime._wait_for_message_quiet_period()
@@ -607,6 +622,7 @@ class MaisakaReasoningEngine:
                             pending_round_messages = self._runtime._collect_pending_messages()
                             if pending_round_messages:
                                 await self._ingest_messages(pending_round_messages)
+                                self._pending_image_failure_ids.clear()  # 新请求取代旧轮次的待反馈失败
                                 cached_messages = pending_round_messages
                                 anchor_message = pending_round_messages[-1]
                                 self._runtime._active_reply_request_ids.update(
@@ -616,6 +632,10 @@ class MaisakaReasoningEngine:
                                     f"{self._runtime.log_prefix} 内部轮次开始前已合并新消息: "
                                     f"消息数={len(pending_round_messages)} 回合={round_index + 1}"
                                 )
+
+                        if _only_existing_image_jobs(self._runtime.session_id, cached_messages, get_image_job_status):
+                            logger.info(f"{self._runtime.log_prefix} 跳过已提交生图消息的重复规划: count={len(cached_messages)}")
+                            break
 
                         cycle_detail = self._start_cycle()
                         round_text = f"第 {round_index + 1}/{self._runtime._max_internal_rounds} 轮"
@@ -876,6 +896,7 @@ class MaisakaReasoningEngine:
                                 break
 
                             await self._ingest_messages(interrupted_messages)
+                            self._pending_image_failure_ids.clear()  # 中断后新请求取代旧失败
                             cached_messages = interrupted_messages
                             anchor_message = interrupted_messages[-1]
                             logger.info(
@@ -975,7 +996,15 @@ class MaisakaReasoningEngine:
                             )
                             if not planner_interrupted:
                                 round_index += 1
+                            last_cycle_end_reason = cycle_end_reason
+                    # 正常结束才兜底；不覆盖异常、取消、中断、wait 或发送回执不确定。
+                    if last_cycle_end_reason in {
+                        "finish", "tool_pause:no_action", "timing_no_action",
+                        "empty_planner_response", "max_rounds",
+                    }:
+                        await self._notify_pending_image_failures()
                 finally:
+                    self._pending_image_failure_ids.clear()
                     clear_active_reply_request_ids(self._runtime)
                     self._runtime._active_web_search_queries.clear()
                     if self._runtime._agent_state == self._runtime._STATE_RUNNING:
@@ -2091,6 +2120,67 @@ class MaisakaReasoningEngine:
 
         return anchor_message.message_id
 
+    async def _notify_pending_image_failures(self) -> None:
+        """仅在本轮即将结束时，对仍未回复的生图失败尝试一次可见提示。"""
+        pending_ids = tuple(self._pending_image_failure_ids)
+        self._pending_image_failure_ids.clear()  # 包括发送失败和回执不确定，均不得自动重试
+        for msg_id in pending_ids:
+            try:
+                if self._runtime._has_pending_messages():
+                    logger.info(f"{self._runtime.log_prefix} image_failure_notice_skipped pending_new_messages")
+                    break
+                if (
+                    msg_id not in self._runtime._active_reply_request_ids
+                    or msg_id in self._runtime._answered_msg_ids
+                    or self._runtime.chat_stream.platform != "onebot.v11"
+                    or image_request_claimed(self._runtime.session_id, msg_id)
+                ):
+                    continue
+                target = self._runtime.find_source_message_by_id(msg_id)
+                if target is None:
+                    continue
+                guard = evaluate_runtime_target(
+                    self._runtime, target,
+                    float(global_config.chat.reply_target_max_age_seconds), time.time(),
+                )
+                if not guard.allowed:
+                    logger.info(
+                        f"{self._runtime.log_prefix} image_failure_notice_skipped "
+                        f"target_msg_id={msg_id} reason={guard.reason}"
+                    )
+                    continue
+                if self._runtime._has_pending_messages():
+                    logger.info(f"{self._runtime.log_prefix} image_failure_notice_skipped pending_new_messages")
+                    break
+                notice = "这次画图没能成功处理，请检查图片或描述后再试一次。"
+                sent = await send_service._send_to_target_with_message(
+                    message_sequence=MessageSequence([TextComponent(notice)]),
+                    stream_id=self._runtime.session_id,
+                    processed_plain_text=notice,
+                    set_reply=True,
+                    reply_message=target,
+                    typing=False,
+                    sync_to_maisaka_history=True,
+                    maisaka_source_kind="generated_image_validation_error",
+                )
+                if sent is not None:
+                    self._runtime._answered_msg_ids.add(msg_id)
+                else:
+                    logger.warning(
+                        f"{self._runtime.log_prefix} image_failure_notice_send_failed "
+                        f"target_msg_id={msg_id}"
+                    )
+            except send_service.DeliveryUncertainError:
+                logger.warning(
+                    f"{self._runtime.log_prefix} image_failure_notice_delivery_uncertain "
+                    f"target_msg_id={msg_id}; no retry"
+                )
+            except Exception:
+                logger.exception(
+                    f"{self._runtime.log_prefix} image_failure_notice_exception "
+                    f"target_msg_id={msg_id}; no retry"
+                )
+
     async def _handle_tool_calls(
         self,
         tool_calls: list[ToolCall],
@@ -2295,6 +2385,13 @@ class MaisakaReasoningEngine:
                 )
             )
 
+            if invocation.tool_name == "generate_image":
+                image_target_id = str(invocation.arguments.get("msg_id") or "").strip()
+                if result.success:
+                    self._pending_image_failure_ids.discard(image_target_id)
+                elif image_target_id in self._runtime._active_reply_request_ids:
+                    self._pending_image_failure_ids.add(image_target_id)
+
             if not result.success and tool_call.func_name == "reply":
                 logger.warning(f"{self._runtime.log_prefix} 回复工具未生成可见消息，将继续下一轮循环")
 
@@ -2306,6 +2403,7 @@ class MaisakaReasoningEngine:
                 answered_target = str(invocation.arguments.get("msg_id") or "").strip()
                 if answered_target:
                     self._runtime._answered_msg_ids.add(answered_target)
+                    self._pending_image_failure_ids.discard(answered_target)
                 logger.info(
                     f"{self._runtime.log_prefix} maibot_visible_delivery_completed "
                     f"tool={invocation.tool_name} target_msg_id={answered_target or '-'}"

@@ -573,7 +573,9 @@ async def convert_onebot_segments_to_maibot_components(
                         url_host=url_host,
                     )
                     if effective_kind == "image":
-                        components.append(ImageComponent(binary_hash=media_item.sha256 or sha256_bytes(binary_data), binary_data=binary_data))
+                        image = ImageComponent(binary_hash=media_item.sha256 or sha256_bytes(binary_data), binary_data=binary_data)
+                        image._onebot_direct_attachment = bot is not None
+                        components.append(image)
                         append_plain("[图片]")
                     else:
                         components.append(EmojiComponent(binary_hash=media_item.sha256 or sha256_bytes(binary_data), binary_data=binary_data))
