@@ -69,6 +69,7 @@ async def _run(*args: str, timeout: float = 300, input_text: str | None = None) 
 def _extract_image_path(output: str) -> str:
     """仅接受 Codex JSONL 中的图片路径，不从任意提示词中提取路径。"""
     texts = []
+    image_ids = []
     thread_id = None
     completed = False
     for line in output.splitlines():
@@ -84,9 +85,15 @@ def _extract_image_path(output: str) -> str:
             item = event.get("item")
             if isinstance(item, dict) and item.get("type") in {"agent_message", "tool_output"}:
                 texts.append(str(item.get("text") or item.get("output") or ""))
+            if isinstance(item, dict) and item.get("type") in {"image_generation", "image_gen.generation"}:
+                image_id = str(item.get("id") or "")
+                if item.get("status") == "completed" and re.fullmatch(r"exec-[a-f0-9-]{36}", image_id):
+                    image_ids.append(image_id)
     if not completed or not thread_id or not re.fullmatch(r"[a-f0-9-]{36}", thread_id):
         raise ValueError("Codex 生图任务未正常完成或缺少 thread_id")
     expected_prefix = f"/root/.codex/generated_images/{thread_id}/"
+    if len(image_ids) == 1:
+        return f"{expected_prefix}{image_ids[0]}.png"
     for text in reversed(texts):
         for candidate in reversed(_IMAGE_PATH.findall(text)):
             if candidate.startswith(expected_prefix) and ".." not in Path(candidate).parts:
