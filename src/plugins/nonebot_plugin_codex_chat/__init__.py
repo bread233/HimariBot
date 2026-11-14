@@ -636,7 +636,8 @@ async def _handle_poke(event: PokeNotifyEvent, bot: Bot):
         f"{identity}\n你的回复风格：{global_config.personality.reply_style}\n"
         "你正在QQ群聊天。用自然中文简短回复，只输出最终回复正文，不要解释、思考过程、用户名、@、内部控制标记或无关外语后缀。"
     )
-    prompt = f"群友「{nickname}」刚刚戳了你一下。请自然简短地回应，最多20个字符。"
+    prompt = (f"群友「{nickname}」刚刚戳了你一下。请根据你的角色性格、当前心情和对这类互动的态度，"
+              "即兴自然回应，最多20个字符；不要套用固定台词，也不要总用同一种语气。")
     try:
         result = await generate_text(prompt, system_prompt=system_prompt, request_type="poke_reply")
         if not result.ok or not (reply := result.text.strip()):
