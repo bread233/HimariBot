@@ -150,6 +150,8 @@ async def handle_tool(
     current_task = load_image_task(tool_ctx.runtime.session_id, clarification_user_id(target))
     if (current_task and new_image_request
             and current_task.get("status") not in {"sent", "cancelled", "failed", "send_failed"}
+            and not (current_task.get("status") in {"planning", "searching", "awaiting_clarification"}
+                     and not current_task.get("job_id"))
             and current_task.get("original_msg_id") != message_id):
         return tool_ctx.build_failure_result(
             invocation.tool_name, "上一张图尚未结束；请等待完成，或先明确取消旧任务。"

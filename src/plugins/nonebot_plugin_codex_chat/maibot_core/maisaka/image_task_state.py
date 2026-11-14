@@ -81,6 +81,8 @@ def start_image_task(session_id: str, message: Any, *, new_request: bool = False
         return None
     previous = load_image_task(session_id, uid)
     if (previous and new_request and previous.get("status") not in _REPLACEABLE
+            and not (previous.get("status") in {"planning", "searching", "awaiting_clarification"}
+                     and not previous.get("job_id"))
             and previous.get("original_msg_id") != msg_id):
         raise RuntimeError("上一张图尚未结束；请等待完成，或先明确取消旧任务。")
     if previous and previous.get("status") not in _TERMINAL and not new_request:
