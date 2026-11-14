@@ -218,7 +218,13 @@ class MaisakaReasoningEngine:
                     clear_image_clarification(self._runtime.session_id, uid)
                     logger.info(f"{self._runtime.log_prefix} image_task_cancelled user_id={uid}")
             elif _IMAGE_REQUEST_PATTERN.search(content) and not image_request_claimed(self._runtime.session_id, msg_id):
-                start_image_task(self._runtime.session_id, message)
+                stale = (task and task.get("status") in {"planning", "searching", "awaiting_clarification"}
+                         and not task.get("job_id") and time.time() - float(task.get("updated_at", 0)) > 900)
+                explicit = re.search(r"(?:^|[，,。！？!?\s])(?:帮我|请|给我)?(?:画(?:一[张幅个]|个|张|幅)|绘制|生图)", content)
+                if stale and explicit and not pending_clarification_for_message(self._runtime, message):
+                    start_image_task(self._runtime.session_id, message, new_request=True)
+                else:
+                    start_image_task(self._runtime.session_id, message)
 
     @property
     def last_reasoning_content(self) -> str:
