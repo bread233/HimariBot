@@ -220,9 +220,14 @@ async def _generate_and_send(
                 reference_path = await _prepare_reference(container, reference_image_url, job_id, reference_image_bytes)
             instruction = (
                 "Use your built-in image generation capability to create exactly one PNG image. "
+                "Call the image generation tool only once; do not regenerate to inspect its output or recover a path. "
                 "Report the generated PNG absolute path under /root/.codex/generated_images/ in the final response. "
                 "Do not merely describe an image. Keep the explicitly requested character identity; "
-                "do not substitute another character or invent missing official appearance traits. " +
+                "do not substitute another character or invent missing official appearance traits. "
+                "For named fictional characters, only describe canonical visual traits explicitly supplied "
+                "in the image request or visible in an attached reference. Do not guess hair, eyes, clothing "
+                "or accessories from memory and label them official. If no verified visual details are supplied, "
+                "retain the character name and franchise without inventing identifying features. " +
                 ("Use the attached image as the visual identity reference; preserve its recognizable "
                  "character design while changing only the requested scene. " if reference_path else "")
                 + "Image request: " + _image_request_prompt(prompt)
