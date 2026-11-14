@@ -29,7 +29,7 @@ JSON 格式：
 - tool_calls: 工具调用数组（不需要工具时为空数组 []）
 
 工具名只能取以下值之一：
-reply, finish, view_complex_message, query_jargon, query_memory, query_person_profile, tool_search, send_image, send_emoji, ocr_image, vision_caption, web_search
+reply, finish, generate_image, view_complex_message, query_jargon, query_memory, query_person_profile, tool_search, send_image, send_emoji, ocr_image, vision_caption, web_search
 
 工具调用示例：
 
@@ -58,6 +58,9 @@ reply, finish, view_complex_message, query_jargon, query_memory, query_person_pr
 - ocr_image：用于识别上下文中图片里的文字。arguments 可提供 message_id、media_index、image_url 或 image_path。用户要求"读图、识别图片文字、OCR、图里写了什么、截图文字、帮我看这张图上的字"时，优先调用 ocr_image。ocr_image 只能提取文字，不能可靠判断人物、场景、情绪、梗图含义；如果 OCR 结果为空，不要猜测图片内容。
 - vision_caption：用于描述图片、表情、截图、梗图的大致视觉内容。arguments 必须提供 message_id，可选 media_index。用户问"这是什么图""这是啥""这图啥意思""什么梗""图里发生了什么""这个动态是什么""看不懂这图"时，优先调用 vision_caption。不适合精确 OCR；读文字时优先使用 ocr_image。
 - web_search：用于查询实时外部信息。arguments 必须提供 query。
+- generate_image：仅在用户明确要求生成、修改或重画图片时调用。必须提供本轮有效 msg_id 与 prompt；成功提交后台任务后不得再 reply 或重复提交。
+- 对绘图请求，资料足够时 generate_image（优先）；身份、外观或参考图信息不足时才 reply(image_clarification=true) 向用户追问，不能无限 web_search 或直接 finish。
+- 用户对旧绘图任务的补充使用本轮有效 msg_id，设置 new_image_request=false；只有 Planner 判断是独立新绘图任务时才设置 new_image_request=true。无关聊天不得擅自恢复旧图。
 - 如果消息中的图片或表情没有视觉识别结果（显示为[图片:视觉识别失败，内容未知]或[表情:视觉识别失败，内容未知]），禁止猜测图片/表情的内容，只能将其称为"图片""表情"或"未识别图片/表情"。如果有 ocr_image 工具可用，可以调用 ocr_image 尝试提取图片中的文字信息。
 
 # 高优先级决策规则

@@ -181,6 +181,7 @@ class ImageManager:
             logger.info(f"图片描述后台构建完成，哈希值: {image_hash}")
         except Exception as exc:
             logger.warning(f"图片描述后台构建失败，哈希值: {image_hash}，错误: {exc}")
+            raise
 
     def _finalize_description_build(self, image_hash: str, task: asyncio.Task[None]) -> None:
         """回收图片描述后台构建任务。
@@ -456,15 +457,30 @@ class ImageManager:
         prompt = await prompt_manager.render_prompt(prompt_template)
         image_base64 = base64.b64encode(image_bytes).decode("utf-8")
 
-        generation_result = await vlm.generate_response_for_image(
-            prompt,
-            image_base64,
-            image_format,
+        from ...vision_failover_state import primary_vlm_available, mark_primary_vlm_failed
+        if primary_vlm_available():
+            try:
+                generation_result = await asyncio.wait_for(
+                    vlm.generate_response_for_image(prompt, image_base64, image_format),
+                    timeout=15.0,
+                )
+                description = (generation_result.response or "").strip()
+                if description:
+                    return description
+                logger.warning("原 VLM 返回空图片描述，改用 Codex Vision")
+            except Exception as exc:
+                logger.warning(f"原 VLM 图片描述失败，改用 Codex Vision: {type(exc).__name__}")
+            mark_primary_vlm_failed()
+
+        from ...codex_vision_adapter import describe_image
+        result = await describe_image(
+            image_bytes=image_bytes, prompt=prompt,
+            context={"source": "image_manager_description"},
         )
-        description = generation_result.response
+        description = (result.text or "").strip() if result.ok else ""
         if not description:
-            logger.warning("VLM未能生成图片描述")
-        return description or ""
+            raise RuntimeError(f"Codex Vision 图片描述失败: {result.error}")
+        return description
 
 
 image_manager = ImageManager()

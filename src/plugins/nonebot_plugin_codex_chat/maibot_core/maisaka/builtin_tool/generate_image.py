@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+import re
 import time
 from typing import Optional
 
@@ -13,7 +14,7 @@ from src.plugins.nonebot_plugin_codex_chat.image_generation import get_image_job
 
 from ..reply_target_guard import evaluate_runtime_target
 from ..image_clarification import load_image_clarification, _user_id as clarification_user_id
-from ..image_task_state import start_image_task, update_image_task
+from ..image_task_state import load_image_task, start_image_task, update_image_task
 from .context import BuiltinToolRuntimeContext
 
 
@@ -118,13 +119,46 @@ async def handle_tool(
         return tool_ctx.build_failure_result(invocation.tool_name, "找不到生图请求的原始消息。")
     if tool_ctx.runtime.chat_stream.platform != "onebot.v11":
         return tool_ctx.build_failure_result(invocation.tool_name, "当前仅支持 QQ 生图。")
-    if message_id not in getattr(tool_ctx.runtime, "_active_reply_request_ids", set()):
-        return tool_ctx.build_failure_result(invocation.tool_name, "生图请求不属于当前有效消息批次。")
+    original_msg_id = message_id
+    active_ids = getattr(tool_ctx.runtime, "_active_reply_request_ids", set())
+    if message_id not in active_ids:
+        task = load_image_task(tool_ctx.runtime.session_id, clarification_user_id(target))
+        candidates = []
+        for msg in getattr(tool_ctx.runtime, "message_cache", ()):
+            if (str(getattr(msg, "message_id", "")) not in active_ids
+                    or str(getattr(msg, "session_id", "")) != tool_ctx.runtime.session_id
+                    or clarification_user_id(msg) != clarification_user_id(target)
+                    or str(msg.message_id) in getattr(tool_ctx.runtime, "_answered_msg_ids", set())):
+                continue
+            content = " ".join(str(getattr(p, "text", "") or "") for p in (getattr(msg.raw_message, "components", ()) or ()))
+            if (re.search(r"继续(?:画|绘制|生图)|接着(?:画|绘制|生图)|把刚才的图继续画", content)
+                    and not re.search(r"别(?:再|继续)?画|不(?:要|用|想)?(?:再|继续)?画|取消|算了", content)):
+                candidates.append(msg)
+        if (new_image_request or str(getattr(target, "session_id", "")) != tool_ctx.runtime.session_id
+                or not task or task.get("original_msg_id") != message_id
+                or task.get("status") not in {"planning", "searching", "awaiting_clarification"}
+                or task.get("job_id") or (task.get("reference_required") and not (reference_msg_id or reference_url))
+                or len(candidates) != 1):
+            return tool_ctx.build_failure_result(invocation.tool_name, "生图请求不属于当前有效消息批次。")
+        target = candidates[0]
+        message_id = str(target.message_id)
     guard = evaluate_runtime_target(
         tool_ctx.runtime, target, float(global_config.chat.reply_target_max_age_seconds), time.time(),
     )
     if not guard.allowed:
         return tool_ctx.build_failure_result(invocation.tool_name, f"生图请求目标已失效：{guard.reason}")
+    current_task = load_image_task(tool_ctx.runtime.session_id, clarification_user_id(target))
+    if (current_task and new_image_request and current_task.get("status") not in {"sent", "cancelled"}
+            and current_task.get("original_msg_id") != message_id):
+        return tool_ctx.build_failure_result(
+            invocation.tool_name, "上一张图尚未结束；请等待完成，或先明确取消旧任务。"
+        )
+    if (current_task and not new_image_request and current_task.get("status") not in {"sent", "cancelled"}
+            and current_task.get("original_msg_id") != original_msg_id):
+        return tool_ctx.build_failure_result(invocation.tool_name, "已有另一条未完成绘图任务；新请求需设置 new_image_request。")
+    if (current_task and current_task.get("original_msg_id") == message_id
+            and current_task.get("status") == "cancelled"):
+        return tool_ctx.build_failure_result(invocation.tool_name, "绘图任务已取消，不能重新提交原请求。")
     clarification = load_image_clarification(tool_ctx.runtime.session_id, clarification_user_id(target))
     if (clarification and not new_image_request and clarification.get("reference_required")
             and str(clarification.get("original_msg_id")) != message_id

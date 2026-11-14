@@ -37,11 +37,15 @@ class RelationWriteService:
         graph_store: Any,
         vector_store: Any,
         embedding_manager: Any,
+        embedding_degraded_provider=None,
+        embedding_failure_callback=None,
     ):
         self.metadata_store = metadata_store
         self.graph_store = graph_store
         self.vector_store = vector_store
         self.embedding_manager = embedding_manager
+        self._embedding_degraded_provider = embedding_degraded_provider
+        self._embedding_failure_callback = embedding_failure_callback
 
     @staticmethod
     def build_relation_vector_text(subject: str, predicate: str, obj: str) -> str:
@@ -73,6 +77,8 @@ class RelationWriteService:
             )
 
         self.metadata_store.set_relation_vector_state(hash_value, "pending")
+        if callable(self._embedding_degraded_provider) and self._embedding_degraded_provider():
+            return RelationWriteResult(hash_value, False, False, "pending")
         try:
             vector_text = self.build_relation_vector_text(subject, predicate, obj)
             embedding = await self.embedding_manager.encode(vector_text)
@@ -92,16 +98,16 @@ class RelationWriteService:
                 vector_already_exists=False,
                 vector_state="ready",
             )
-        except ValueError:
-            # 向量已存在冲突，按成功处理
-            self.metadata_store.set_relation_vector_state(hash_value, "ready")
-            return RelationWriteResult(
-                hash_value=hash_value,
-                vector_written=False,
-                vector_already_exists=True,
-                vector_state="ready",
-            )
         except Exception as e:
+            # 只有实际查询到向量存在，才能将并发写入冲突视为成功。
+            if hash_value in self.vector_store:
+                self.metadata_store.set_relation_vector_state(hash_value, "ready")
+                return RelationWriteResult(hash_value, False, True, "ready")
+            if callable(self._embedding_failure_callback):
+                try:
+                    self._embedding_failure_callback(str(e))
+                except Exception as callback_exc:
+                    logger.warning(f"关系向量降级通知失败: {callback_exc}")
             err = str(e)[:max_error_len]
             self.metadata_store.set_relation_vector_state(
                 hash_value,
