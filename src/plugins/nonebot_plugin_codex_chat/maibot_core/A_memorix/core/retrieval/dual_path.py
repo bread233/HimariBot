@@ -266,10 +266,21 @@ class DualPathRetriever:
             re.IGNORECASE,
         )
         self._runtime_sparse_only = False
+        self._embedding_failure_callback = None
 
     def set_runtime_sparse_only(self, enabled: bool) -> None:
         """由运行时控制强制 sparse-only（不改用户配置文件）。"""
         self._runtime_sparse_only = bool(enabled)
+
+    def set_embedding_failure_callback(self, callback) -> None:
+        self._embedding_failure_callback = callback
+
+    def _notify_embedding_failure(self, exc: Exception) -> None:
+        if callable(self._embedding_failure_callback):
+            try:
+                self._embedding_failure_callback(str(exc))
+            except Exception as callback_exc:
+                logger.warning(f"embedding 降级通知失败: {callback_exc}")
 
     def _is_sparse_only_runtime(self) -> bool:
         mode = str(getattr(self.config.sparse, "mode", "auto") or "auto").strip().lower()
@@ -404,6 +415,7 @@ class DualPathRetriever:
         stage: str,
     ) -> bool:
         if not self._is_valid_embedding(emb):
+            self._notify_embedding_failure(ValueError(f"{stage}: embedding 无效或包含非有限值"))
             return False
         if self._is_embedding_dimension_compatible(emb):
             return True
@@ -414,6 +426,7 @@ class DualPathRetriever:
             "metric.embedding_dim_mismatch_fallback_count=1 "
             f"stage={stage} expected_dim={expected_dim} got_dim={got_dim}"
         )
+        self._notify_embedding_failure(ValueError(f"{stage}: embedding 维度不匹配 {got_dim} vs {expected_dim}"))
         return False
 
     def _should_use_sparse(
@@ -836,6 +849,7 @@ class DualPathRetriever:
             )
         except Exception as e:
             logger.warning(f"段落检索 embedding 生成失败，将尝试 sparse 回退: {e}")
+            self._notify_embedding_failure(e)
 
         if embedding_ok:
             multiplier = max(1, temporal.candidate_multiplier) if temporal else 1
@@ -923,6 +937,7 @@ class DualPathRetriever:
             )
         except Exception as e:
             logger.warning(f"关系检索 embedding 生成失败，将尝试 sparse 回退: {e}")
+            self._notify_embedding_failure(e)
 
         if embedding_ok:
             # 1. 检索向量 (混合了段落和实体，所以扩大检索范围以召回足够多实体)
@@ -1102,6 +1117,7 @@ class DualPathRetriever:
             )
         except Exception as e:
             logger.warning(f"双路检索 embedding 生成失败，将尝试 sparse 回退: {e}")
+            self._notify_embedding_failure(e)
 
         para_results: List[RetrievalResult] = []
         rel_results: List[RetrievalResult] = []

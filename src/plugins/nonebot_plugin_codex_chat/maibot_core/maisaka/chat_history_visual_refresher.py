@@ -174,13 +174,12 @@ def _collect_pending_image_hashes(components: list[object]) -> list[str]:
 
 
 def _is_image_component_pending(component: ImageComponent) -> bool:
-    if not component.binary_hash:
+    if not component.binary_hash or _lookup_cached_image_description(component.binary_hash):
         return False
-    if _is_image_description_pending(component.binary_hash):
-        return True
-    if component.binary_data and not _lookup_cached_image_description(component.binary_hash):
-        return True
-    return False
+    from ..chat.image_system.image_manager import image_manager
+
+    task = image_manager._pending_description_tasks.get(component.binary_hash)
+    return bool(task is not None and not task.done())
 
 
 def _is_image_description_pending(image_hash: str) -> bool:

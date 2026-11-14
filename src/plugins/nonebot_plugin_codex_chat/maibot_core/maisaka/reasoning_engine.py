@@ -70,7 +70,7 @@ from .person_profile_injector import build_person_profile_injection_messages
 from .planner_message_utils import build_planner_user_prefix_from_session_message
 from .visual_mode_utils import resolve_enable_visual_planner
 from src.plugins.nonebot_plugin_codex_chat.image_generation import get_image_job_status, image_request_claimed
-from .image_task_state import cancel_image_task, load_image_task, start_image_task, update_image_task
+from .image_task_state import cancel_image_task, claim_image_resume, load_image_task, start_image_task, update_image_task
 from .image_clarification import (
     clear_image_clarification,
     pending_clarification_for_message,
@@ -101,7 +101,7 @@ def _only_existing_image_jobs(session_id: str, messages: list[SessionMessage], l
     """仅当前消息批次全部已有生图任务时跳过 Planner。"""
     return bool(messages) and all(
         (job := lookup(session_id, str(getattr(message, "message_id", "") or "")))
-        and job.get("status") in {"pending", "sent", "failed", "send_failed", "interrupted"}
+        and job.get("status") in {"pending", "sent", "failed", "send_failed", "interrupted", "delivery_uncertain"}
         for message in messages
     )
 
@@ -115,6 +115,10 @@ def _unsubmitted_image_request_after_search(runtime: Any, anchor_message: Sessio
     if getattr(getattr(runtime, "chat_stream", None), "platform", "") != "onebot.v11":
         return None
     anchor_id = str(getattr(anchor_message, "message_id", "") or "")
+    task = load_image_task(runtime.session_id, clarification_user_id(anchor_message))
+    if (not task or task.get("original_msg_id") != anchor_id
+            or task.get("status") not in {"planning", "searching"} or task.get("job_id")):
+        return None
     if anchor_id not in getattr(runtime, "_active_reply_request_ids", set()):
         return None
 
@@ -197,7 +201,7 @@ class MaisakaReasoningEngine:
                 job = get_image_job_status(self._runtime.session_id, str(task["submitted_msg_id"]))
                 if job and job.get("job_id") == task.get("job_id"):
                     next_status = {
-                        "sent": "sent", "send_failed": "send_failed",
+                        "sent": "sent", "send_failed": "send_failed", "delivery_uncertain": "delivery_uncertain",
                         "failed": "failed", "interrupted": (
                             "delivery_uncertain" if task["status"] == "sending" else "failed"
                         ),
@@ -367,7 +371,9 @@ class MaisakaReasoningEngine:
         injected_messages.extend(profile_messages)
         pending = pending_clarification_for_message(self._runtime, anchor_message)
         task = load_image_task(self._runtime.session_id, clarification_user_id(anchor_message))
-        if task and not pending and task.get("status") in {"planning", "searching", "awaiting_clarification", "failed", "send_failed"}:
+        if (task and not pending and task.get("status") in {"planning", "searching", "awaiting_clarification", "failed", "send_failed"}
+                and (task.get("original_msg_id") == str(anchor_message.message_id)
+                     or re.search(r"(?:继续|接着|重新)(?:画|绘制|生图)", anchor_message.processed_plain_text or ""))):
             injected_messages.append(
                 "[持久绘图任务] 本用户仍有未完成的绘图任务；搜索、Planner 轮次结束或新消息不能视为完成。"
                 f"原始请求：{task['original_request']}；原始消息 ID：{task['original_msg_id']}；状态：{task['status']}。"
@@ -543,9 +549,10 @@ class MaisakaReasoningEngine:
                 if message.source != TIMING_GATE_INVALID_TOOL_HINT_SOURCE
             ]
 
-        if selected_tool_call.func_name == "no_action" and self._image_gate_override_count < 2:
+        if selected_tool_call.func_name == "no_action" and self._image_gate_override_count < 1:
             clarification = pending_clarification_for_message(self._runtime, anchor_message)
-            if clarification:
+            if (clarification and (getattr(anchor_message, "is_at", False)
+                                   or getattr(anchor_message, "is_mentioned", False))):
                 self._image_gate_override_count += 1
                 logger.info(f"{self._runtime.log_prefix} image_clarification_timing_continue")
                 selected_tool_call = _build_timing_gate_tool_call("continue")
@@ -554,13 +561,14 @@ class MaisakaReasoningEngine:
             pending_image_id = _unsubmitted_image_request_after_search(self._runtime, anchor_message, time.time())
             task = load_image_task(self._runtime.session_id, clarification_user_id(anchor_message))
             if (task and task.get("status") in {"planning", "searching"}
+                    and task.get("original_msg_id") == str(anchor_message.message_id)
                     and str(anchor_message.message_id) in self._runtime._active_reply_request_ids):
                 pending_image_id = pending_image_id or str(task.get("original_msg_id") or "")
             if pending_image_id and selected_tool_call.func_name == "no_action":
                 self._image_gate_override_count += 1
                 logger.warning(
                     f"{self._runtime.log_prefix} image_pending_timing_gate_continue "
-                    f"original_msg_id={pending_image_id} override={self._image_gate_override_count}/2"
+                    f"original_msg_id={pending_image_id} override={self._image_gate_override_count}/1"
                 )
                 selected_tool_call = _build_timing_gate_tool_call("continue")
                 response.tool_calls = [selected_tool_call]
@@ -719,10 +727,14 @@ class MaisakaReasoningEngine:
         try:
             while self._runtime._running:
                 queued_trigger = await self._runtime._internal_turn_queue.get()
-                message_triggered, timeout_triggered, proactive_triggered = self._drain_ready_turn_triggers(
+                message_triggered, timeout_triggered, proactive_triggered, resume_triggered = self._drain_ready_turn_triggers(
                     queued_trigger
                 )
+                if resume_triggered:
+                    self._runtime._image_resume_queued = False
                 silent_reply_frequency = self._runtime._is_reply_frequency_silent()
+                if silent_reply_frequency:
+                    resume_triggered = False
 
                 if (
                     self._runtime._agent_state == self._runtime._STATE_WAIT
@@ -743,6 +755,7 @@ class MaisakaReasoningEngine:
                     else []
                 )
                 if cached_messages:
+                    resume_triggered = False  # Fresh messages never borrow old task authority.
                     self._runtime._agent_state = self._runtime._STATE_RUNNING
                     self._runtime._update_stage_status(
                         "消息整理",
@@ -755,16 +768,25 @@ class MaisakaReasoningEngine:
                     await self._ingest_messages(cached_messages)
                     anchor_message = cached_messages[-1]
                 else:
-                    anchor_message = (
-                        self._runtime._proactive_anchor_message
-                        if proactive_triggered
-                        else self._get_timeout_anchor_message()
-                    )
+                    if resume_triggered:
+                        anchor_message = self._runtime._image_resume_candidate()
+                        if (anchor_message is None or not claim_image_resume(
+                                self._runtime.session_id, clarification_user_id(anchor_message),
+                                str(anchor_message.message_id))):
+                            continue
+                        self._runtime._agent_state = self._runtime._STATE_RUNNING
+                        logger.info(f"{self._runtime.log_prefix} image_resume_claimed original_msg_id={anchor_message.message_id}")
+                    else:
+                        anchor_message = (
+                            self._runtime._proactive_anchor_message
+                            if proactive_triggered
+                            else self._get_timeout_anchor_message()
+                        )
                     if anchor_message is None:
                         logger.warning(f"{self._runtime.log_prefix} wait 超时后没有可复用的锚点消息，跳过本轮")
                         continue
                     logger.info(f"{self._runtime.log_prefix} 等待超时后开始新一轮思考")
-                    if self._runtime._pending_wait_tool_call_id:
+                    if self._runtime._pending_wait_tool_call_id and not resume_triggered:
                         self._runtime._chat_history.append(
                             self._build_wait_completed_message(has_new_messages=False)
                         )
@@ -777,13 +799,23 @@ class MaisakaReasoningEngine:
                     )
                     continue
 
-                self._runtime._active_reply_request_ids = collect_active_reply_request_ids(cached_messages)
+                self._runtime._active_reply_request_ids = (
+                    {str(anchor_message.message_id)} if resume_triggered else collect_active_reply_request_ids(cached_messages)
+                )
+                direct_anchor = next(
+                    (message for message in reversed(cached_messages)
+                     if getattr(message, "is_at", False) or getattr(message, "is_mentioned", False)),
+                    None,
+                )
+                direct_retry_count = 0
+                if direct_anchor and is_active_direct_reply_target(self._runtime, direct_anchor):
+                    anchor_message = direct_anchor
                 self._sync_image_tasks(cached_messages)
                 self._pending_image_failure_ids.clear()
                 self._image_gate_override_count = 0
                 self._runtime._active_web_search_queries.clear()
                 try:
-                    timing_gate_required = self._is_independent_timing_gate_enabled()
+                    timing_gate_required = self._is_independent_timing_gate_enabled() and not resume_triggered
                     if not timing_gate_required:
                         self._runtime._consume_force_next_timing_continue_reason()
                     round_index = 0
@@ -799,9 +831,19 @@ class MaisakaReasoningEngine:
                                 self._image_gate_override_count = 0
                                 self._runtime._active_web_search_queries.clear()
                                 cached_messages = pending_round_messages
+                                resume_triggered = False
                                 self._runtime._active_reply_request_ids.update(collect_active_reply_request_ids(pending_round_messages))
                                 self._sync_image_tasks(pending_round_messages)
-                                anchor_message = pending_round_messages[-1]
+                                new_direct = next(
+                                    (message for message in reversed(pending_round_messages)
+                                     if getattr(message, "is_at", False) or getattr(message, "is_mentioned", False)),
+                                    None,
+                                )
+                                direct_anchor = new_direct or direct_anchor
+                                anchor_message = (
+                                    direct_anchor if direct_anchor and is_active_direct_reply_target(self._runtime, direct_anchor)
+                                    else pending_round_messages[-1]
+                                )
                                 self._runtime._active_reply_request_ids.update(
                                     collect_active_reply_request_ids(pending_round_messages)
                                 )
@@ -911,6 +953,11 @@ class MaisakaReasoningEngine:
                                 source_messages=cached_messages or [anchor_message],
                                 deferred_tools_reminder=deferred_tools_reminder,
                             )
+                            if direct_retry_count and is_active_direct_reply_target(self._runtime, anchor_message):
+                                injected_user_messages.append(
+                                    f"[未完成的直接@请求] msg_id={anchor_message.message_id} 尚未产生可见回复。"
+                                    "如需回答请调用 reply；不得仅声称已回复或调用 finish。"
+                                )
                             if not resolve_enable_visual_planner():
                                 log_pending_image_recognition_before_text_planner(
                                     self._runtime._chat_history,
@@ -987,6 +1034,9 @@ class MaisakaReasoningEngine:
                                     response.content or "",
                                     anchor_message,
                                 )
+                                if (direct_anchor is not None
+                                        and str(direct_anchor.message_id) in self._pending_image_failure_ids):
+                                    direct_anchor = None
                                 cycle_detail.time_records["tool_calls"] = time.time() - tool_started_at
                                 if should_pause:
                                     if (
@@ -997,6 +1047,16 @@ class MaisakaReasoningEngine:
                                             time.time() - planner_started_at
                                         )
                                     if pause_tool_name == "finish":
+                                        if (direct_retry_count < 1
+                                                and round_index + 1 < self._runtime._max_internal_rounds
+                                                and is_active_direct_reply_target(self._runtime, anchor_message)
+                                                and not image_request_claimed(self._runtime.session_id, str(anchor_message.message_id))
+                                                and not _IMAGE_REQUEST_PATTERN.search(getattr(anchor_message, "processed_plain_text", "") or "")
+                                                and not self._runtime._has_pending_messages()):
+                                            direct_retry_count += 1
+                                            cycle_end_reason = "direct_reply_retry"
+                                            cycle_end_detail = "直接@请求未产生可见回复，限重试一次。"
+                                            continue
                                         cycle_end_reason = "finish"
                                         cycle_end_detail = "Planner 调用 finish，结束本轮思考并等待新消息。"
                                     elif pause_tool_name:
@@ -1077,7 +1137,18 @@ class MaisakaReasoningEngine:
                             self._image_gate_override_count = 0
                             self._runtime._active_web_search_queries.clear()
                             cached_messages = interrupted_messages
-                            anchor_message = interrupted_messages[-1]
+                            resume_triggered = False
+                            new_direct = next(
+                                (message for message in reversed(interrupted_messages)
+                                 if getattr(message, "is_at", False) or getattr(message, "is_mentioned", False)),
+                                None,
+                            )
+                            direct_anchor = new_direct or direct_anchor
+                            anchor_message = (
+                                new_direct or (direct_anchor if direct_anchor
+                                               and is_active_direct_reply_target(self._runtime, direct_anchor)
+                                               else interrupted_messages[-1])
+                            )
                             self._runtime._active_reply_request_ids.update(collect_active_reply_request_ids(interrupted_messages))
                             self._sync_image_tasks(interrupted_messages)
                             logger.info(
@@ -1194,16 +1265,27 @@ class MaisakaReasoningEngine:
                             )
                         task = load_image_task(self._runtime.session_id, clarification_user_id(anchor_message))
                         if (task and task.get("status") in {"planning", "searching"}
+                                and task.get("original_msg_id") == str(anchor_message.message_id)
                                 and str(anchor_message.message_id) in self._runtime._active_reply_request_ids):
                             unresolved_search_msg_id = unresolved_search_msg_id or str(anchor_message.message_id)
                         if unresolved_search_msg_id and unresolved_search_msg_id not in self._runtime._active_reply_request_ids:
-                            unresolved_search_msg_id = str(anchor_message.message_id)
+                            unresolved_search_msg_id = None
                         await self._notify_pending_image_failures(
                             unresolved_search_msg_id=unresolved_search_msg_id
                         )
+                        if direct_anchor is not None:
+                            await self._notify_unanswered_direct_reply(direct_anchor)
+                        if resume_triggered:
+                            uid = clarification_user_id(anchor_message)
+                            task = load_image_task(self._runtime.session_id, uid)
+                            if (task and task.get("original_msg_id") == str(anchor_message.message_id)
+                                    and task.get("status") in {"planning", "searching"} and not task.get("job_id")):
+                                update_image_task(self._runtime.session_id, uid, "failed")
+                                logger.warning(f"{self._runtime.log_prefix} image_resume_exhausted original_msg_id={anchor_message.message_id}")
                 finally:
                     self._pending_image_failure_ids.clear()
                     clear_active_reply_request_ids(self._runtime)
+                    self._runtime._schedule_image_resume()
                     self._image_gate_override_count = 0
                     self._runtime._active_web_search_queries.clear()
                     if self._runtime._agent_state == self._runtime._STATE_RUNNING:
@@ -1263,13 +1345,14 @@ class MaisakaReasoningEngine:
 
     def _drain_ready_turn_triggers(
         self,
-        queued_trigger: Literal["message", "timeout", "proactive"],
-    ) -> tuple[bool, bool, bool]:
+        queued_trigger: Literal["message", "timeout", "proactive", "image_resume"],
+    ) -> tuple[bool, bool, bool, bool]:
         """合并当前已就绪的消息触发信号。"""
 
         message_triggered = queued_trigger == "message"
         timeout_triggered = queued_trigger == "timeout"
         proactive_triggered = queued_trigger == "proactive"
+        resume_triggered = queued_trigger == "image_resume"
 
         while True:
             try:
@@ -1283,11 +1366,14 @@ class MaisakaReasoningEngine:
             if next_trigger == "timeout":
                 timeout_triggered = True
                 continue
+            if next_trigger == "image_resume":
+                resume_triggered = True
+                continue
             if next_trigger == "proactive":
                 proactive_triggered = True
                 continue
 
-        return message_triggered, timeout_triggered, proactive_triggered
+        return message_triggered, timeout_triggered, proactive_triggered, resume_triggered
 
     def _get_timeout_anchor_message(self) -> Optional[SessionMessage]:
         """在 wait 超时后复用最近一条真实用户消息作为锚点。"""
@@ -2397,6 +2483,41 @@ class MaisakaReasoningEngine:
                     f"target_msg_id={msg_id}; no retry"
                 )
 
+    async def _notify_unanswered_direct_reply(self, target: SessionMessage) -> None:
+        """直接@请求在 Planner 结束后仍无可见结果时，最多发送一次失败提示。"""
+        msg_id = str(getattr(target, "message_id", "") or "")
+        if (not is_active_direct_reply_target(self._runtime, target)
+                or self._runtime._has_pending_messages()
+                or self._runtime.chat_stream.platform != "onebot.v11"
+                or image_request_claimed(self._runtime.session_id, msg_id)
+                or _IMAGE_REQUEST_PATTERN.search(getattr(target, "processed_plain_text", "") or "")):
+            return
+        guard = evaluate_runtime_target(
+            self._runtime, target,
+            float(global_config.chat.reply_target_max_age_seconds), time.time(),
+        )
+        if not guard.allowed or self._runtime._has_pending_messages():
+            return
+        notice = "这次没有成功生成回复，请再发一次消息。"
+        try:
+            sent = await send_service._send_to_target_with_message(
+                message_sequence=MessageSequence([TextComponent(notice)]),
+                stream_id=self._runtime.session_id,
+                processed_plain_text=notice,
+                set_reply=True,
+                reply_message=target,
+                typing=False,
+                sync_to_maisaka_history=True,
+                maisaka_source_kind="direct_reply_failure_notice",
+            )
+            if sent is not None:
+                self._runtime._answered_msg_ids.add(msg_id)
+                logger.warning(f"{self._runtime.log_prefix} direct_reply_failure_notice_sent msg_id={msg_id}")
+        except send_service.DeliveryUncertainError:
+            logger.warning(f"{self._runtime.log_prefix} direct_reply_failure_notice_uncertain msg_id={msg_id}; no retry")
+        except Exception:
+            logger.exception(f"{self._runtime.log_prefix} direct_reply_failure_notice_failed msg_id={msg_id}; no retry")
+
     async def _handle_tool_calls(
         self,
         tool_calls: list[ToolCall],
@@ -2450,10 +2571,13 @@ class MaisakaReasoningEngine:
                 category = str(invocation.arguments.get("category") or "general").casefold()
                 search_key = f"{category}:{query}"
                 image_request = bool(
-                    pending_clarification_for_message(self._runtime, anchor_message)
+                    (pending_clarification_for_message(self._runtime, anchor_message)
+                     and (getattr(anchor_message, "is_at", False) or getattr(anchor_message, "is_mentioned", False)))
                     or _IMAGE_REQUEST_PATTERN.search(anchor_message.processed_plain_text or "")
                     or _unsubmitted_image_request_after_search(self._runtime, anchor_message, time.time())
-                    or (task and task.get("status") in {"planning", "searching"} and str(anchor_message.message_id) in self._runtime._active_reply_request_ids)
+                    or (task and task.get("original_msg_id") == str(anchor_message.message_id)
+                        and task.get("status") in {"planning", "searching"}
+                        and str(anchor_message.message_id) in self._runtime._active_reply_request_ids)
                 )
                 rejection = (
                     "相同关键词已搜索过，已有结果保存在工具历史中。"
@@ -2668,7 +2792,7 @@ class MaisakaReasoningEngine:
                         ):
                             update_image_task(self._runtime.session_id, clarification_user_id(target), "awaiting_clarification")
                             logger.info(f"{self._runtime.log_prefix} image_clarification_waiting user_id={clarification_user_id(target)}")
-                    except OSError as exc:
+                    except (OSError, RuntimeError) as exc:
                         logger.warning(f"{self._runtime.log_prefix} image_clarification_save_failed: {exc}")
                 answered_target = str(invocation.arguments.get("msg_id") or "").strip()
                 if answered_target:

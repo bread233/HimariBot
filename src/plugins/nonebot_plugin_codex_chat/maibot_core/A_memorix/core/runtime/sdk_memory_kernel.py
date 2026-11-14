@@ -415,6 +415,11 @@ class SDKMemoryKernel:
         if not callable(setter):
             return
         try:
+            register = getattr(retriever, "set_embedding_failure_callback", None)
+            if callable(register) and self._embedding_fallback_enabled():
+                register(lambda reason: self._set_embedding_degraded(
+                    active=True, reason=str(reason)[:500], checked_at=time.time()
+                ))
             setter(self._is_embedding_degraded())
         except Exception as exc:
             logger.warning(f"设置 retriever sparse-only 运行时状态失败: {exc}")
@@ -955,6 +960,9 @@ class SDKMemoryKernel:
         report = await self._refresh_runtime_self_check(sample_text=sample_text)
         checked_at = float(report.get("checked_at") or time.time())
         ok = bool(report.get("ok", False))
+        if ok and self._vector_persist_blocked_until_rebuild:
+            self._set_embedding_degraded(active=True, reason="vector_rebuild_required", checked_at=checked_at)
+            return {"success": False, "recovered": False, "report": report, "detail": "vector_rebuild_required"}
         if ok:
             self._set_embedding_degraded(active=False, checked_at=checked_at)
             backfill_result: Dict[str, Any] = {}
@@ -1041,9 +1049,13 @@ class SDKMemoryKernel:
             if not dimension_detection_task.done():
                 dimension_detection_task.cancel()
             raise
+        dimension_verified = bool(getattr(self.embedding_manager, "_dimension_detected", False))
+        if not dimension_verified and stored_dimension is not None:
+            logger.warning(f"embedding API 探测失败，沿用已有向量库维度 {stored_dimension}，避免误判需要重建")
+            detected_dimension = stored_dimension
         self.embedding_dimension = detected_dimension
 
-        if stored_dimension is not None and stored_dimension != detected_dimension:
+        if dimension_verified and stored_dimension is not None and stored_dimension != detected_dimension:
             message = self._vector_mismatch_error(
                 stored_dimension=stored_dimension,
                 detected_dimension=detected_dimension,
@@ -1078,6 +1090,10 @@ class SDKMemoryKernel:
             graph_store=self.graph_store,
             vector_store=self.vector_store,
             embedding_manager=self.embedding_manager,
+            embedding_degraded_provider=self._is_embedding_degraded,
+            embedding_failure_callback=(
+                lambda reason: self._set_embedding_degraded(active=True, reason=reason[:500])
+            ) if self._embedding_fallback_enabled() else None,
         )
 
         runtime_config = self._build_runtime_config()
@@ -1102,7 +1118,11 @@ class SDKMemoryKernel:
             import_write_blocked_provider=self.import_task_manager.is_write_blocked,
         )
 
-        report = await self._refresh_runtime_self_check(sample_text="A_Memorix runtime self check")
+        if dimension_verified:
+            report = await self._refresh_runtime_self_check(sample_text="A_Memorix runtime self check")
+        else:
+            report = {"ok": False, "message": "embedding API 初始化探测失败", "checked_at": time.time()}
+            self._runtime_facade._runtime_self_check_report = dict(report)
         if not bool(report.get("ok", False)):
             message = str(report.get("message", "runtime self-check failed") or "runtime self-check failed")
             checked_at = float(report.get("checked_at") or time.time())
@@ -2221,15 +2241,15 @@ class SDKMemoryKernel:
                 sample_text=str(kwargs.get("sample_text", "") or "A_Memorix runtime self check")
             )
             checked_at = float(report.get("checked_at") or time.time())
-            if bool(report.get("ok", False)):
+            if bool(report.get("ok", False)) and not self._vector_persist_blocked_until_rebuild:
                 self._set_embedding_degraded(active=False, checked_at=checked_at)
             elif self._embedding_fallback_enabled():
                 self._set_embedding_degraded(
                     active=True,
-                    reason=str(report.get("message", "runtime self-check failed") or "runtime self-check failed"),
+                    reason="vector_rebuild_required" if self._vector_persist_blocked_until_rebuild else str(report.get("message", "runtime self-check failed") or "runtime self-check failed"),
                     checked_at=checked_at,
                 )
-            return {"success": bool(report.get("ok", False)), "report": report}
+            return {"success": bool(report.get("ok", False)) and not self._vector_persist_blocked_until_rebuild, "report": report}
 
         if act == "set_auto_save":
             enabled = bool(kwargs.get("enabled", False))

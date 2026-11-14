@@ -34,6 +34,31 @@ def load_image_task(session_id: str, uid: str) -> dict[str, Any] | None:
         return None
 
 
+def _resume_claim_path(session_id: str, uid: str, original_msg_id: str) -> Path:
+    key = hashlib.sha256(json.dumps([session_id, uid, original_msg_id], ensure_ascii=False).encode("utf-8")).hexdigest()
+    return _ROOT / "resume_claims" / key
+
+
+def image_resume_claimed(session_id: str, uid: str, original_msg_id: str) -> bool:
+    return _resume_claim_path(session_id, uid, original_msg_id).exists()
+
+
+def claim_image_resume(session_id: str, uid: str, original_msg_id: str) -> bool:
+    """One durable, at-most-once Planner recovery; never replay an already submitted job."""
+    task = load_image_task(session_id, uid)
+    if (not task or task.get("original_msg_id") != original_msg_id
+            or task.get("status") not in {"planning", "searching"} or task.get("job_id")
+            or task.get("reference_required") or time.time() - float(task.get("created_at", 0)) > 600):
+        return False
+    path = _resume_claim_path(session_id, uid, original_msg_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.mkdir()
+        return True
+    except FileExistsError:
+        return False
+
+
 def _save(data: dict[str, Any]) -> None:
     _ROOT.mkdir(parents=True, exist_ok=True)
     tmp = None
@@ -54,6 +79,9 @@ def start_image_task(session_id: str, message: Any, *, new_request: bool = False
     if not session_id or not uid or not msg_id:
         return None
     previous = load_image_task(session_id, uid)
+    if (previous and new_request and previous.get("status") not in _TERMINAL
+            and previous.get("original_msg_id") != msg_id):
+        raise RuntimeError("上一张图尚未结束；请等待完成，或先明确取消旧任务。")
     if previous and previous.get("status") not in _TERMINAL and not new_request:
         return previous
     if previous and previous.get("original_msg_id") == msg_id:

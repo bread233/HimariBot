@@ -16,7 +16,7 @@ from src.common.data_models.message_component_data_model import ImageComponent, 
 from src.common.logger import get_logger
 from src.plugins.nonebot_plugin_codex_chat.image_reference import download_reference_image
 from src.plugins.nonebot_plugin_codex_chat.maibot_core.maisaka.image_task_state import (
-    image_task_cancelled, update_image_task, user_id as image_task_user_id,
+    image_task_cancelled, load_image_task, update_image_task, user_id as image_task_user_id,
 )
 from src.services import send_service
 
@@ -219,8 +219,8 @@ async def _generate_and_send(
             ]
             # Mark transport entry before sending; cancellation cannot recall an in-flight send.
             transitioned = update_image_task(session_id, uid, "sending", expected_job_id=job_id)
-            if transitioned is None and image_task_cancelled(session_id, uid, job_id):
-                logger.info(f"generate_image job={job_id} cancelled_at_send_boundary")
+            if transitioned is None:
+                logger.warning(f"generate_image job={job_id} stale_or_cancelled_at_send_boundary")
                 return
             # 先持久化发送占位，防止重启或重复 Planner 调用再次发送。
             await asyncio.to_thread(
@@ -268,6 +268,10 @@ async def _generate_and_send(
         try:
             # 发送阶段可能已经成功但回执/元数据失败，不再补发失败消息。
             if (job_dir / "send_started.json").exists():
+                return
+            current_task = load_image_task(session_id, uid)
+            if (not current_task or current_task.get("job_id") != job_id
+                    or image_task_cancelled(session_id, uid, job_id)):
                 return
             notice = ("这次画图被图像生成服务的安全审核拦截了。" if "moderation_blocked" in str(exc)
                       else "这次画图没成功，稍后再试试吧。")
@@ -318,6 +322,9 @@ def get_image_job_status(session_id: str, source_id: str) -> dict[str, str] | No
             status = json.loads((job_dir / "metadata.json").read_text(encoding="utf-8")).get("status")
             if status in {"sent", "send_failed"}:
                 return {"job_id": job_id, "status": status}
+        if (job_dir / "send_started.json").is_file():
+            active = any(t.get_name() == f"generate_image_{job_id}" and not t.done() for t in _TASKS)
+            return {"job_id": job_id, "status": "pending" if active else "delivery_uncertain"}
         if (job_dir / "error.json").is_file():
             return {"job_id": job_id, "status": "failed"}
     except (OSError, ValueError, KeyError, TypeError):

@@ -87,7 +87,7 @@ async def _orchestrator_vlm_fallback(
     binary_data: bytes,
     mime: str,
 ) -> str | None:
-    """Codex 视觉识别失败后降级到编排器 VLM 重新识图。"""
+    """优先尝试生产环境配置的 VLM API；失败时由调用方切换到 Codex。"""
     import base64
     from .llm_models.utils_model import LLMOrchestrator
     from .common.logger import get_logger
@@ -99,7 +99,7 @@ async def _orchestrator_vlm_fallback(
     image_format = mime.split("/")[-1] if "/" in mime else "png"
 
     logger.info(
-        "maibot_vlm_fallback_to_orchestrator mime=%s format=%s",
+        "maibot_primary_vlm_attempt mime=%s format=%s",
         mime, image_format,
     )
 
@@ -292,131 +292,68 @@ async def _process_inbound_emojis(components: list[Any] | None) -> None:
 
 
 async def _describe_inbound_images(components: list[Any] | None) -> None:
-    """对入站 components 中前 N 张未识图 ImageComponent 同步调 Codex 视觉识别。
-
-    - 直接改 ``ImageComponent.content``（不是 frozen dataclass，普通实例属性可写）；
-    - 失败时保留原 content，绝不抛异常；不阻塞整条消息；
-    - 重复 component / 重复 binary_data 不再二次识别（``_should_describe_image`` 守门）；
-    - 每张图最多只识别 1 张，超出的图片计入 ``skipped`` 计数。
-    """
-
+    """优先使用配置的 VLM，失败后用 Codex Vision 补全入站图片描述。"""
     if not components:
         return
 
+    import asyncio
     from .codex_vision_adapter import describe_image
+    from .vision_failover_state import primary_vlm_available, mark_primary_vlm_failed
     from src.common.data_models.message_component_data_model import ImageComponent
     from .common.logger import get_logger
 
     logger = get_logger("bridge")
-
-    images_total = 0
-    ok_count = 0
-    fail_count = 0
-    skip_count = 0
-
+    images_total = ok_count = fail_count = skip_count = 0
     for index, comp in enumerate(components):
-        if not isinstance(comp, ImageComponent):
-            continue
-        binary_data = getattr(comp, "binary_data", None)
-        if not binary_data:
+        if not isinstance(comp, ImageComponent) or not getattr(comp, "binary_data", None):
             continue
         images_total += 1
-
         if ok_count + fail_count >= MAX_INLINE_VISION_IMAGES:
             skip_count += 1
             continue
-
         if not _should_describe_image(comp):
             continue
 
-        binary_len = len(binary_data)
+        binary_data = comp.binary_data
         mime = _guess_image_mime(binary_data) or "unknown"
-        try:
-            result = await describe_image(
-                image_bytes=binary_data,
-                mime_type=None,
-                prompt=_load_bridge_inline_vision_prompt(),
-                context={"source": "bridge_inline_vision", "index": str(index)},
-            )
-        except Exception as exc:
-            logger.warning(
-                "maibot_bridge_image_vision_failed error=describe_exception:%s "
-                "source=codex_cli_image mime=%s index=%s bytes=%s",
-                type(exc).__name__,
-                mime,
-                index,
-                binary_len,
-            )
-            fallback_desc = await _orchestrator_vlm_fallback(binary_data, mime)
-            if fallback_desc is not None:
-                comp.content = f"[图片：{fallback_desc}]"
-                ok_count += 1
-                await _save_inline_image_description_to_db(comp.binary_hash, fallback_desc)
-            else:
-                comp.content = "[图片:视觉识别失败，内容未知]"
-                fail_count += 1
-            continue
+        description = None
+        if primary_vlm_available():
+            try:
+                description = await asyncio.wait_for(
+                    _orchestrator_vlm_fallback(binary_data, mime), timeout=15.0
+                )
+            except Exception as exc:
+                logger.warning("maibot_bridge_primary_vlm_failed error=%s", type(exc).__name__)
+            if not description:
+                mark_primary_vlm_failed()
 
-        if not result.ok:
-            logger.warning(
-                "maibot_bridge_image_vision_failed error=%s source=%s "
-                "mime=%s index=%s bytes=%s",
-                result.error,
-                result.source,
-                mime,
-                index,
-                binary_len,
-            )
-            fallback_desc = await _orchestrator_vlm_fallback(binary_data, mime)
-            if fallback_desc is not None:
-                comp.content = f"[图片：{fallback_desc}]"
-                ok_count += 1
-                await _save_inline_image_description_to_db(comp.binary_hash, fallback_desc)
-            else:
-                comp.content = "[图片:视觉识别失败，内容未知]"
-                fail_count += 1
-            continue
+        if not description:
+            try:
+                result = await describe_image(
+                    image_bytes=binary_data,
+                    mime_type=None,
+                    prompt=_load_bridge_inline_vision_prompt(),
+                    context={"source": "bridge_inline_vision", "index": str(index)},
+                )
+                if result.ok:
+                    description = (result.text or "").strip()
+                else:
+                    logger.warning("maibot_bridge_codex_vision_failed error=%s", result.error)
+            except Exception as exc:
+                logger.warning("maibot_bridge_codex_vision_failed error=%s", type(exc).__name__)
 
-        text = (result.text or "").strip()
-        if not text:
-            logger.warning(
-                "maibot_bridge_image_vision_failed error=empty_text source=%s "
-                "mime=%s index=%s bytes=%s",
-                result.source,
-                mime,
-                index,
-                binary_len,
-            )
-            fallback_desc = await _orchestrator_vlm_fallback(binary_data, mime)
-            if fallback_desc is not None:
-                comp.content = f"[图片：{fallback_desc}]"
-                ok_count += 1
-                await _save_inline_image_description_to_db(comp.binary_hash, fallback_desc)
-            else:
-                comp.content = "[图片:视觉识别失败，内容未知]"
-                fail_count += 1
-            continue
-
-        comp.content = f"[图片：{text}]"
-        ok_count += 1
-        await _save_inline_image_description_to_db(comp.binary_hash, text)
-        logger.info(
-            "maibot_bridge_image_vision_success source=%s chars=%s "
-            "mime=%s index=%s bytes=%s",
-            result.source,
-            len(text),
-            mime,
-            index,
-            binary_len,
-        )
+        if description:
+            comp.content = f"[图片：{description}]"
+            ok_count += 1
+            await _save_inline_image_description_to_db(comp.binary_hash, description)
+        else:
+            comp.content = "[图片:视觉识别失败，内容未知]"
+            fail_count += 1
 
     if images_total:
         logger.info(
             "maibot_bridge_image_vision_done images=%s ok=%s failed=%s skipped=%s",
-            images_total,
-            ok_count,
-            fail_count,
-            skip_count,
+            images_total, ok_count, fail_count, skip_count,
         )
 
 

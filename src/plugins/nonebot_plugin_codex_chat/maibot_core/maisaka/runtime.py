@@ -56,7 +56,9 @@ from .display.prompt_cli_renderer import PromptCLIVisualizer
 from .display.stage_status_board import remove_stage_status, update_stage_status
 from .history_utils import drop_leading_orphan_tool_results
 from .monitor_events import emit_message_sent, emit_session_start
-from .reasoning_engine import MaisakaReasoningEngine
+from .reasoning_engine import MaisakaReasoningEngine, _IMAGE_REQUEST_PATTERN, _IMAGE_CANCEL_PATTERN
+from .image_task_state import image_resume_claimed, load_image_task, update_image_task, user_id as image_task_user_id
+from .reply_target_guard import evaluate_reply_target
 from .reply_effect import ReplyEffectTracker
 from .reply_effect.image_utils import extract_visual_attachments_from_sequence
 from .reply_effect.quote_utils import extract_quote_target_ids, message_id_from_context_message
@@ -108,6 +110,7 @@ class MaisakaHeartFlowChatting:
         self._cycle_counter = 0
         self._internal_loop_task: Optional[asyncio.Task] = None
         self._message_turn_scheduled = False
+        self._image_resume_queued = False
         self._deferred_message_turn_task: Optional[asyncio.Task[None]] = None
         self._message_debounce_seconds = 1.0
         self._message_debounce_required = False
@@ -234,6 +237,7 @@ class MaisakaHeartFlowChatting:
         self._running = True
         self._ensure_background_tasks_running()
         self._schedule_message_turn()
+        self._schedule_image_resume()
         self._update_stage_status("空闲", "等待消息触发")
         logger.info(f"{self.log_prefix} Himari 运行时已启动")
 
@@ -314,6 +318,7 @@ class MaisakaHeartFlowChatting:
         self._running = False
         self._message_turn_scheduled = False
         self._message_debounce_required = False
+        self._image_resume_queued = False
         self._cancel_deferred_message_turn_task()
         self._cancel_wait_timeout_task()
         while not self._internal_turn_queue.empty():
@@ -341,6 +346,7 @@ class MaisakaHeartFlowChatting:
         """调整当前会话的回复频率倍率。"""
         self._talk_frequency_adjust = max(0.0, float(frequency))
         self._schedule_message_turn()
+        self._schedule_image_resume()
 
     def append_sent_message_to_chat_history(
         self,
@@ -1295,6 +1301,66 @@ class MaisakaHeartFlowChatting:
 
     def _has_pending_messages(self) -> bool:
         return self._last_processed_index < len(self.message_cache)
+
+    def _image_resume_candidate(self) -> Optional[SessionMessage]:
+        """Only a recent, verified original request can authorize autonomous recovery."""
+        if self.chat_stream.platform != "onebot.v11" or self._has_pending_messages():
+            return None
+        for message in reversed(self.message_cache):
+            uid = image_task_user_id(message)
+            msg_id = str(getattr(message, "message_id", "") or "")
+            task = load_image_task(self.session_id, uid)
+            if (not task or task.get("original_msg_id") != msg_id
+                    or task.get("status") not in {"planning", "searching"}
+                    or task.get("job_id") or task.get("reference_required")
+                    or not (getattr(message, "is_at", False) or getattr(message, "is_mentioned", False))
+                    or msg_id in self._answered_msg_ids or image_resume_claimed(self.session_id, uid, msg_id)):
+                continue
+            text = " ".join(str(getattr(p, "text", "") or "") for p in getattr(message.raw_message, "components", ())).strip()
+            if (not _IMAGE_REQUEST_PATTERN.search(text) or _IMAGE_CANCEL_PATTERN.search(text)
+                    or text[:2000] != task.get("original_request")):
+                continue
+            try:
+                if time.time() - float(task["created_at"]) > 600:
+                    continue
+            except (KeyError, TypeError, ValueError):
+                continue
+            guard = evaluate_reply_target(
+                message, current_session_id=self.session_id, now_epoch=time.time(),
+                max_age_seconds=600, candidate_messages=self.message_cache,
+            )
+            if guard.allowed:
+                return message
+        return None
+
+    def _reconcile_image_jobs(self) -> None:
+        """On startup/idle, classify orphaned jobs without ever resubmitting or resending."""
+        from src.plugins.nonebot_plugin_codex_chat.image_generation import get_image_job_status
+        seen = set()
+        for message in reversed(self.message_cache):
+            uid = image_task_user_id(message)
+            if not uid or uid in seen:
+                continue
+            seen.add(uid)
+            task = load_image_task(self.session_id, uid)
+            if not task or task.get("status") not in {"generating", "sending"} or not task.get("submitted_msg_id"):
+                continue
+            job = get_image_job_status(self.session_id, str(task["submitted_msg_id"]))
+            if not job or job.get("job_id") != task.get("job_id"):
+                continue
+            status = job.get("status")
+            if status == "interrupted":
+                status = "delivery_uncertain" if task["status"] == "sending" else "failed"
+            if status in {"sent", "send_failed", "failed", "delivery_uncertain"}:
+                update_image_task(self.session_id, uid, status, expected_job_id=task["job_id"])
+
+    def _schedule_image_resume(self) -> None:
+        if self._running:
+            self._reconcile_image_jobs()
+        if (self._running and not self._is_reply_frequency_silent() and not self._image_resume_queued
+                and self._agent_state != self._STATE_WAIT and self._image_resume_candidate()):
+            self._image_resume_queued = True
+            self._internal_turn_queue.put_nowait("image_resume")
 
     def _schedule_message_turn(self) -> None:
         """为当前待处理消息安排一次内部 turn。"""

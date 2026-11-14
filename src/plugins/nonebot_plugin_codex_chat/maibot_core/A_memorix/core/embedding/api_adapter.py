@@ -250,6 +250,11 @@ class EmbeddingAPIAdapter:
         return (self._dimension_cache_key(), int(requested_dimension), str(text or ""))
 
     async def _detect_dimension(self) -> int:
+        if not self._resolve_candidate_model_names():
+            self._dimension = None
+            self._dimension_detected = False
+            logger.warning("embedding 未配置模型，暂用默认维度；这不代表真实维度检测成功")
+            return self.default_dimension
         if self._dimension_detected and self._dimension is not None:
             return self._dimension
 
@@ -265,7 +270,9 @@ class EmbeddingAPIAdapter:
         try:
             target_dim = self.default_dimension
             logger.debug(f"尝试请求指定维度: {target_dim}")
-            test_embedding = await self._get_embedding_direct("test", dimensions=target_dim)
+            test_embedding = await asyncio.wait_for(
+                self._get_embedding_direct("test", dimensions=target_dim), timeout=15.0
+            )
             if test_embedding and isinstance(test_embedding, list):
                 detected_dim = len(test_embedding)
                 if detected_dim == target_dim:
@@ -282,7 +289,9 @@ class EmbeddingAPIAdapter:
             logger.debug(f"带维度参数探测失败: {exc}，尝试不带维度参数探测")
 
         try:
-            test_embedding = await self._get_embedding_direct("test", include_dimension=False)
+            test_embedding = await asyncio.wait_for(
+                self._get_embedding_direct("test", include_dimension=False), timeout=15.0
+            )
             if test_embedding and isinstance(test_embedding, list):
                 detected_dim = len(test_embedding)
                 self._dimension = detected_dim
@@ -294,9 +303,9 @@ class EmbeddingAPIAdapter:
         except Exception as exc:
             logger.error(f"嵌入维度检测异常: {exc}，使用 configured_dimension: {self.default_dimension}")
 
-        self._dimension = self.default_dimension
-        self._dimension_detected = True
-        self._GLOBAL_DIMENSION_CACHE[cache_key] = int(self.default_dimension)
+        self._dimension = None
+        self._dimension_detected = False
+        logger.warning("embedding API 不可用，使用临时默认维度；未确认真实向量维度")
         return self.default_dimension
 
     async def encode(
@@ -460,7 +469,7 @@ class EmbeddingAPIAdapter:
 
     @property
     def is_model_loaded(self) -> bool:
-        return True
+        return bool(self._resolve_candidate_model_names())
 
     def __repr__(self) -> str:
         return (
