@@ -8,7 +8,7 @@ from .utils import extract_og_url, fetch_og_image, get_og_info
 
 __plugin_meta__ = PluginMetadata(
     name="og",
-    description="检测链接并发送网站简介及预览图（YouTube 除外）",
+    description="仅解析白名单网页链接并发送简介及预览图",
     usage="无",
     extra={
         "Author": "mute. <mute231010@gmail.com>",

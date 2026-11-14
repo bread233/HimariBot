@@ -9,13 +9,35 @@ from typing import Any, Dict, Optional
 from pyquery import PyQuery as pq
 
 def extract_og_url(msg: Any) -> Optional[str]:
-    url = re.search(r'(https?://\S+)', str(msg))
-    if not url:
-        return None
-    target_url = url.group()
-    if re.search(r"(?:^|://)(?:www\.|m\.)?(?:youtube\.com|youtu\.be)(?:/|$)", target_url, re.IGNORECASE):
-        return None
-    return target_url
+    # OneBot 媒体段含内部下载 URL，不能作为用户分享的网页链接。
+    if isinstance(msg, str):
+        text = msg
+    else:
+        text = " ".join(
+            str(segment.data.get("text", ""))
+            for segment in msg
+            if getattr(segment, "type", None) == "text"
+        )
+    # 仅白名单网站触发 OG；媒体平台交由专用解析插件处理。
+    allowed_hosts = {
+        "store.steampowered.com", "steamcommunity.com", "github.com",
+        "gist.github.com", "reuters.com", "bbc.com", "nhk.or.jp",
+        "www3.nhk.or.jp", "nikkei.com", "news.google.com", "medium.com",
+        "note.com", "wordpress.com", "blogspot.com", "dev.to",
+        "qiita.com", "zenn.dev",
+    }
+    for match in re.finditer(r'https?://\S+', text, re.IGNORECASE):
+        target_url = match.group()
+        try:
+            parsed = urlsplit(target_url)
+            host = (parsed.hostname or "").lower().rstrip(".")
+        except ValueError:
+            continue
+        if (parsed.username is None and parsed.password is None
+                and (host in allowed_hosts or host.removeprefix("www.") in allowed_hosts
+                     or host.endswith((".wordpress.com", ".blogspot.com")))):
+            return target_url
+    return None
 
 
 async def validate_public_url(url: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
