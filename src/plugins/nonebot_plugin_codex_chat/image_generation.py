@@ -164,6 +164,39 @@ async def _prepare_reference(container: str, url: str, job_id: str, reference_im
     return container_path
 
 
+async def _resolve_image_path(output: str, container: str) -> str:
+    """Only recover a PNG from the completed Codex thread's own directory."""
+    try:
+        return _extract_image_path(output)
+    except ValueError as error:
+        if str(error) != "Codex 未返回可验证的 PNG 路径":
+            raise
+        events = []
+        for line in output.splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+        threads = [event.get("thread_id") for event in events if event.get("type") == "thread.started"]
+        if len(threads) != 1 or not isinstance(threads[0], str) or not re.fullmatch(r"[a-f0-9-]{36}", threads[0]):
+            raise error
+        if not any(event.get("type") == "turn.completed" for event in events):
+            raise error
+        directory = f"/root/.codex/generated_images/{threads[0]}"
+        code, found, _ = await _run(
+            "docker", "exec", container, "find", directory, "-maxdepth", "1",
+            "-type", "f", "-name", "*.png", "-print", timeout=15,
+        )
+        paths = found.splitlines()
+        if code or len(paths) != 1 or not re.fullmatch(
+            re.escape(directory) + r"/[\w.-]+\.png", paths[0]
+        ):
+            raise error
+        return paths[0]
+
+
 async def _generate_and_send(
     job_id: str, prompt: str, caption: str, session_id: str, target_message: object, quote: bool,
     reference_image_url: str = "", reference_image_bytes: bytes | None = None,
@@ -204,7 +237,7 @@ async def _generate_and_send(
             )
             if code:
                 raise RuntimeError(f"Codex exited {code}; stderr_chars={len(stderr)}")
-            image_path = _extract_image_path(output)
+            image_path = await _resolve_image_path(output, container)
             local_path = job_dir / "original.png"
             code, _, stderr = await _run(
                 "docker", "cp", f"{container}:{image_path}", str(local_path), timeout=45,
