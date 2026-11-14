@@ -12,6 +12,7 @@ from typing import Any
 
 _ROOT = Path("/app/data/nonebot_chat_agent/generated_images/image_tasks")
 _TERMINAL = {"sent", "cancelled"}
+_REPLACEABLE = _TERMINAL | {"failed", "send_failed"}
 _ACTIVE = {"planning", "searching", "awaiting_clarification", "generating", "sending", "failed", "send_failed", "delivery_uncertain"}
 
 
@@ -79,7 +80,7 @@ def start_image_task(session_id: str, message: Any, *, new_request: bool = False
     if not session_id or not uid or not msg_id:
         return None
     previous = load_image_task(session_id, uid)
-    if (previous and new_request and previous.get("status") not in _TERMINAL
+    if (previous and new_request and previous.get("status") not in _REPLACEABLE
             and previous.get("original_msg_id") != msg_id):
         raise RuntimeError("上一张图尚未结束；请等待完成，或先明确取消旧任务。")
     if previous and previous.get("status") not in _TERMINAL and not new_request:

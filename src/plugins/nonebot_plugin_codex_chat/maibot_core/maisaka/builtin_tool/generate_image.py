@@ -148,13 +148,18 @@ async def handle_tool(
     if not guard.allowed:
         return tool_ctx.build_failure_result(invocation.tool_name, f"生图请求目标已失效：{guard.reason}")
     current_task = load_image_task(tool_ctx.runtime.session_id, clarification_user_id(target))
-    if (current_task and new_image_request and current_task.get("status") not in {"sent", "cancelled"}
+    if (current_task and new_image_request
+            and current_task.get("status") not in {"sent", "cancelled", "failed", "send_failed"}
             and current_task.get("original_msg_id") != message_id):
         return tool_ctx.build_failure_result(
             invocation.tool_name, "上一张图尚未结束；请等待完成，或先明确取消旧任务。"
         )
     if (current_task and not new_image_request and current_task.get("status") not in {"sent", "cancelled"}
-            and current_task.get("original_msg_id") != original_msg_id):
+            and current_task.get("original_msg_id") != original_msg_id
+            and not ((clarification := load_image_clarification(tool_ctx.runtime.session_id, clarification_user_id(target)))
+                     and clarification.get("original_msg_id") == current_task.get("original_msg_id")
+                     and current_task.get("status") in {"planning", "searching", "awaiting_clarification"}
+                     and not current_task.get("job_id"))):
         return tool_ctx.build_failure_result(invocation.tool_name, "已有另一条未完成绘图任务；新请求需设置 new_image_request。")
     if (current_task and current_task.get("original_msg_id") == message_id
             and current_task.get("status") == "cancelled"):
