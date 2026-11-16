@@ -13,7 +13,7 @@ from typing import Any
 _ROOT = Path("/app/data/nonebot_chat_agent/generated_images/image_tasks")
 _TERMINAL = {"sent", "cancelled"}
 _REPLACEABLE = _TERMINAL | {"failed", "send_failed"}
-_ACTIVE = {"planning", "searching", "awaiting_clarification", "generating", "sending", "failed", "send_failed", "delivery_uncertain"}
+_ACTIVE = {"planning", "searching", "awaiting_clarification", "queued", "generating", "sending", "failed", "send_failed", "delivery_uncertain"}
 
 
 def user_id(message: Any) -> str:
@@ -60,6 +60,34 @@ def claim_image_resume(session_id: str, uid: str, original_msg_id: str) -> bool:
         return False
 
 
+def _job_path(job_id: str) -> Path:
+    if not re.fullmatch(r"[0-9a-f]{32}", job_id):
+        raise ValueError("Invalid image job ID")
+    return _ROOT / "jobs" / f"{job_id}.json"
+
+
+def load_image_job(job_id: str) -> dict[str, Any] | None:
+    try:
+        return json.loads(_job_path(job_id).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _save_job(data: dict[str, Any]) -> None:
+    path = _job_path(str(data["job_id"]))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=".job-", delete=False) as file:
+            tmp = file.name
+            json.dump(data, file, ensure_ascii=False)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    finally:
+        if tmp and os.path.exists(tmp):
+            os.unlink(tmp)
+
+
 def _save(data: dict[str, Any]) -> None:
     _ROOT.mkdir(parents=True, exist_ok=True)
     tmp = None
@@ -80,11 +108,6 @@ def start_image_task(session_id: str, message: Any, *, new_request: bool = False
     if not session_id or not uid or not msg_id:
         return None
     previous = load_image_task(session_id, uid)
-    if (previous and new_request and previous.get("status") not in _REPLACEABLE
-            and not (previous.get("status") in {"planning", "searching", "awaiting_clarification"}
-                     and not previous.get("job_id"))
-            and previous.get("original_msg_id") != msg_id):
-        raise RuntimeError("上一张图尚未结束；请等待完成，或先明确取消旧任务。")
     if previous and previous.get("status") not in _TERMINAL and not new_request:
         return previous
     if previous and previous.get("original_msg_id") == msg_id:
@@ -108,9 +131,14 @@ def start_image_task(session_id: str, message: Any, *, new_request: bool = False
 def update_image_task(session_id: str, uid: str, status: str | None = None, *,
                       job_id: str | None = None, submitted_msg_id: str | None = None,
                       expected_job_id: str | None = None,
+                      expected_original_msg_id: str | None = None,
                       query: str | None = None, evidence: str | None = None) -> dict[str, Any] | None:
-    data = load_image_task(session_id, uid)
+    data = (load_image_job(expected_job_id) if expected_job_id else load_image_task(session_id, uid))
     if not data or data.get("status") in _TERMINAL:
+        return None
+    if data.get("session_id") != session_id or data.get("user_id") != uid:
+        return None
+    if expected_original_msg_id is not None and data.get("original_msg_id") != expected_original_msg_id:
         return None
     if expected_job_id is not None and data.get("job_id") != expected_job_id:
         return None
@@ -130,7 +158,11 @@ def update_image_task(session_id: str, uid: str, status: str | None = None, *,
     if evidence is not None:
         data["search_evidence"] = evidence[:1800]
     data["updated_at"] = time.time()
-    _save(data)
+    if data.get("job_id"):
+        _save_job(data)
+    latest = load_image_task(session_id, uid)
+    if not expected_job_id or (latest and latest.get("job_id") == data.get("job_id")):
+        _save(data)
     return data
 
 
@@ -146,10 +178,12 @@ def cancel_image_task(session_id: str, uid: str) -> bool:
     if marker is not None:
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.touch(exist_ok=True)
-    return update_image_task(session_id, uid, "cancelled") is not None
+    return update_image_task(session_id, uid, "cancelled", expected_job_id=str(data.get("job_id"))) is not None if data.get("job_id") else update_image_task(session_id, uid, "cancelled") is not None
 
 
 def image_task_cancelled(session_id: str, uid: str, job_id: str) -> bool:
-    data = load_image_task(session_id, uid)
+    data = load_image_job(job_id) or load_image_task(session_id, uid)
     marker = _cancel_path(job_id)
-    return bool((marker and marker.is_file()) or (data and data.get("job_id") == job_id and data.get("status") == "cancelled"))
+    return bool((marker and marker.is_file()) or (data and data.get("session_id") == session_id
+                 and data.get("user_id") == uid and data.get("job_id") == job_id
+                 and data.get("status") == "cancelled"))
