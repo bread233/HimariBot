@@ -83,8 +83,8 @@ def _extract_image_path(output: str) -> str:
             if event.get("type") == "turn.completed":
                 completed = True
             item = event.get("item")
-            if isinstance(item, dict) and item.get("type") in {"agent_message", "tool_output"}:
-                texts.append(str(item.get("text") or item.get("output") or ""))
+            if isinstance(item, dict) and item.get("type") in {"agent_message", "tool_output", "error"}:
+                texts.append(str(item.get("text") or item.get("output") or item.get("message") or ""))
             if isinstance(item, dict) and item.get("type") in {"image_generation", "image_gen.generation"}:
                 image_id = str(item.get("id") or "")
                 if item.get("status") == "completed" and re.fullmatch(r"exec-[a-f0-9-]{36}", image_id):
@@ -193,6 +193,16 @@ async def _resolve_image_path(output: str, container: str) -> str:
         if code or len(paths) != 1 or not re.fullmatch(
             re.escape(directory) + r"/[\w.-]+\.png", paths[0]
         ):
+            # Codex CLI stdout may omit tool errors retained in its session JSONL.
+            session_glob = f"*{threads[0]}.jsonl"
+            check_code, matches, _ = await _run(
+                "docker", "exec", container, "find", "/root/.codex/sessions",
+                "-type", "f", "-name", session_glob, "-exec",
+                "grep", "-l", "-m", "1", "moderation_blocked", "{}", "+", timeout=15,
+            )
+            if (check_code == 0 and len(matches.splitlines()) == 1
+                    and re.fullmatch(r"/root/\.codex/sessions/[\w./-]*" + re.escape(threads[0]) + r"\.jsonl", matches.strip())):
+                raise ValueError("moderation_blocked: 图像生成被安全审核拦截")
             raise error
         return paths[0]
 
