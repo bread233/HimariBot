@@ -16,7 +16,7 @@ from src.common.data_models.message_component_data_model import ImageComponent, 
 from src.common.logger import get_logger
 from src.plugins.nonebot_plugin_codex_chat.image_reference import download_reference_image
 from src.plugins.nonebot_plugin_codex_chat.maibot_core.maisaka.image_task_state import (
-    image_task_cancelled, load_image_task, update_image_task, user_id as image_task_user_id,
+    image_task_cancelled, load_image_job, update_image_task, user_id as image_task_user_id,
 )
 from src.services import send_service
 
@@ -24,6 +24,7 @@ logger = get_logger("maisaka_image_generation")
 _TASKS: set[asyncio.Task] = set()
 _LIMIT = asyncio.Semaphore(1)
 _MAX_PENDING = 8
+_QUEUE_TAIL: asyncio.Task | None = None
 _ROOT = Path("/app/data/nonebot_chat_agent/generated_images")
 _IMAGE_PATH = re.compile(r"(?<![\w])(/(?:[\w.\-]+/)+[\w.\-]+\.png)\b", re.IGNORECASE)
 _HIMARI_NAME = re.compile(r"上原绯玛丽|上原緋まり|上原ひまり|绯玛丽|肥玛丽|himari|hmr", re.IGNORECASE)
@@ -220,6 +221,7 @@ async def _generate_and_send(
             if image_task_cancelled(session_id, uid, job_id):
                 logger.info(f"generate_image job={job_id} cancelled_before_generation")
                 return
+            update_image_task(session_id, uid, "generating", expected_job_id=job_id)
             await asyncio.to_thread(job_dir.mkdir, parents=True, exist_ok=False)
             # 下次任务顺便清理强制退出遗留的旧参考图；当前任务最多运行约 5 分钟。
             code, _, stderr = await _run("docker", "exec", container, "find", "/tmp", "-maxdepth", "1",
@@ -296,6 +298,7 @@ async def _generate_and_send(
                 "job_id": job_id, "prompt": prompt, "caption": caption,
                 "reference_used": bool(reference_path),
                 "source_message_id": str(getattr(target_message, "message_id", "")),
+                "session_id": session_id, "user_id": uid,
                 "sent_message_id": str(getattr(sent, "message_id", "")) if sent else "",
                 "status": "sent" if sent else "send_failed", "created_at": time.time(),
             }
@@ -324,7 +327,7 @@ async def _generate_and_send(
             # 发送阶段可能已经成功但回执/元数据失败，不再补发失败消息。
             if (job_dir / "send_started.json").exists():
                 return
-            current_task = load_image_task(session_id, uid)
+            current_task = load_image_job(job_id)
             if (not current_task or current_task.get("job_id") != job_id
                     or image_task_cancelled(session_id, uid, job_id)):
                 return
@@ -346,6 +349,26 @@ async def _generate_and_send(
     finally:
         if reference_path:
             await _cleanup_reference_shielded(container, reference_path, job_id, "job_finished")
+
+
+def load_sent_image_reference(session_id: str, uid: str, sent_message_id: str) -> bytes | None:
+    """Retrieve only a successfully sent image belonging to this conversation and user."""
+    if not session_id or not uid or not sent_message_id:
+        return None
+    for metadata_path in _ROOT.glob("[0-9a-f]" * 32 + "/metadata.json"):
+        try:
+            meta = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if (meta.get("session_id") != session_id or meta.get("user_id") != uid
+                    or meta.get("sent_message_id") != sent_message_id or meta.get("status") != "sent"):
+                continue
+            image_path = metadata_path.parent / "original.png"
+            if image_path.is_file() and 45 <= image_path.stat().st_size <= 8 * 1024 * 1024:
+                data = image_path.read_bytes()
+                if data.startswith(b"\x89PNG\r\n\x1a\n"):
+                    return data
+        except (OSError, ValueError, TypeError):
+            continue
+    return None
 
 
 def image_request_claimed(session_id: str, source_id: str) -> bool:
@@ -377,6 +400,9 @@ def get_image_job_status(session_id: str, source_id: str) -> dict[str, str] | No
             status = json.loads((job_dir / "metadata.json").read_text(encoding="utf-8")).get("status")
             if status in {"sent", "send_failed"}:
                 return {"job_id": job_id, "status": status}
+        task_state = load_image_job(job_id)
+        if task_state and task_state.get("status") == "cancelled":
+            return {"job_id": job_id, "status": "cancelled"}
         if (job_dir / "send_started.json").is_file():
             active = any(t.get_name() == f"generate_image_{job_id}" and not t.done() for t in _TASKS)
             return {"job_id": job_id, "status": "pending" if active else "delivery_uncertain"}
@@ -386,6 +412,24 @@ def get_image_job_status(session_id: str, source_id: str) -> dict[str, str] | No
         return {"job_id": "", "status": "unknown"}
     active = any(t.get_name() == f"generate_image_{job_id}" and not t.done() for t in _TASKS)
     return {"job_id": job_id, "status": "pending" if active else "interrupted"}
+
+
+async def _run_queued_image(previous: asyncio.Task | None, job_id: str, prompt: str,
+                            caption: str, session_id: str, target_message: object, quote: bool,
+                            reference_image_url: str, reference_image_bytes: bytes | None) -> None:
+    if previous is not None:
+        try:
+            await asyncio.shield(previous)
+        except Exception:
+            # Earlier job failure must not prevent subsequent queued jobs.
+            pass
+        except asyncio.CancelledError:
+            if not previous.done():
+                raise
+            # A fully cancelled predecessor has released its slot.
+            pass
+    await _generate_and_send(job_id, prompt, caption, session_id, target_message,
+                             quote, reference_image_url, reference_image_bytes)
 
 
 def submit_image_job(prompt: str, caption: str, session_id: str, target_message: object, quote: bool, reference_image_url: str = "", reference_image_bytes: bytes | None = None) -> tuple[str, bool]:
@@ -415,6 +459,7 @@ def submit_image_job(prompt: str, caption: str, session_id: str, target_message:
         except (OSError, ValueError, KeyError):
             # 创建目录后进程崩溃：仍拒绝二次生成，避免重复扣额度和重复发图。
             return key, False
+    global _QUEUE_TAIL
     job_id = uuid.uuid4().hex
     try:
         (claim / "job.json").write_text(
@@ -428,10 +473,23 @@ def submit_image_job(prompt: str, caption: str, session_id: str, target_message:
             (claim / "job.json").unlink()
             claim.rmdir()
             raise RuntimeError("生图队列已满，请稍后再试")
+        # Persist the job binding before scheduling its coroutine. No await occurs
+        # between registration and create_task, so the worker cannot overtake it.
+        registered = update_image_task(
+            session_id, image_task_user_id(target_message), "queued",
+            job_id=job_id, submitted_msg_id=source_id,
+            expected_original_msg_id=source_id,
+        )
+        if registered is None:
+            (claim / "job.json").unlink()
+            claim.rmdir()
+            raise RuntimeError("绘图请求状态已变化，请重新发送新的绘图请求")
         task = asyncio.create_task(
-            _generate_and_send(job_id, prompt, caption, session_id, target_message, quote, reference_image_url, reference_image_bytes),
+            _run_queued_image(_QUEUE_TAIL, job_id, prompt, caption, session_id,
+                              target_message, quote, reference_image_url, reference_image_bytes),
             name=f"generate_image_{job_id}",
         )
+        _QUEUE_TAIL = task
         _TASKS.add(task)
         task.add_done_callback(_TASKS.discard)
         logger.info(f"generate_image submitted job={job_id} source={source_id} key={key[:12]}")
