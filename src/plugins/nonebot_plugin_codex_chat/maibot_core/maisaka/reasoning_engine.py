@@ -384,8 +384,8 @@ class MaisakaReasoningEngine:
                 "[持久绘图任务] 本用户仍有未完成的绘图任务；搜索、Planner 轮次结束或新消息不能视为完成。"
                 f"原始请求：{task['original_request']}；原始消息 ID：{task['original_msg_id']}；状态：{task['status']}。"
                 "请判断本轮消息是旧任务补充、取消、新的独立任务还是无关聊天；无关聊天正常回复，不要擅自重启旧图。"
-                "请根据常识、上下文与用户意图自主判断：描述足够或角色身份明确就 generate_image；"
-                "只有角色身份确实不明且影响画面时才搜索，仍有多个候选才 reply(image_clarification=true) 询问作品。"
+                "指定已有作品角色且没有有效参考图时，优先一次 web_search(category=general) 核实视觉特征；已有搜索证据或搜索失败时直接 generate_image；普通题材无需搜索；"
+                "若身份仍有多个合理候选，可在两次检索上限内再搜索一次；仍无法区分才 reply(image_clarification=true) 询问作品。"
                 + (f" 已执行搜索的结果（未经验证）：{task.get('search_evidence', '')}" if task.get("search_evidence") else "")
             )
         if pending:
