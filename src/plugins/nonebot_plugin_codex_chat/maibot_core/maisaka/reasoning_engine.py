@@ -127,6 +127,10 @@ def _unsubmitted_image_request_after_search(runtime: Any, anchor_message: Sessio
     if getattr(getattr(runtime, "chat_stream", None), "platform", "") != "onebot.v11":
         return None
     anchor_id = str(getattr(anchor_message, "message_id", "") or "")
+    thread = image_thread_for_message(runtime.session_id, anchor_id)
+    if (thread and thread['status'] in {'planning', 'searching'} and not thread['job_id']
+            and anchor_id in getattr(runtime, '_active_reply_request_ids', set())):
+        return anchor_id
     task = load_image_task(runtime.session_id, clarification_user_id(anchor_message))
     if (not task or task.get("original_msg_id") != anchor_id
             or task.get("status") not in {"planning", "searching"} or task.get("job_id")):
@@ -406,7 +410,9 @@ class MaisakaReasoningEngine:
             profile_messages = []
         injected_messages.extend(profile_messages)
         routed_thread = image_thread_for_message(self._runtime.session_id, str(anchor_message.message_id))
-        if routed_thread and routed_thread["status"] == "awaiting_clarification" and routed_thread["deadline"] > time.time():
+        if routed_thread and (routed_thread["status"] in {"planning", "searching"} or
+                              (routed_thread["status"] == "awaiting_clarification" and
+                               routed_thread["deadline"] and routed_thread["deadline"] > time.time())):
             injected_messages.append(
                 f"[精确绘图 Thread] thread_id={routed_thread['id']}；原始请求 msg_id={routed_thread['root']}。"
                 "只允许继续本 Thread，禁止合并同一用户的其他绘图请求。"
@@ -448,7 +454,7 @@ class MaisakaReasoningEngine:
                 "普通动物、物品或场景直接使用用户原始描述，不要再搜索或索要角色参考图；仅指定作品角色缺必要信息时才澄清。"
             )
         if getattr(self._runtime, "_active_web_search_queries", None) and (
-            pending or pending_image_id or _IMAGE_REQUEST_PATTERN.search(anchor_message.processed_plain_text or "")
+            pending or pending_image_id or routed_thread or _IMAGE_REQUEST_PATTERN.search(anchor_message.processed_plain_text or "")
         ):
             search_queries = {
                 key.split(":", 1)[-1] for key in self._runtime._active_web_search_queries

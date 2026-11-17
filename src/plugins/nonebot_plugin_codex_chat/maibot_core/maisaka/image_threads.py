@@ -99,12 +99,14 @@ def accept_quoted_reply(session, owner, quote_ids, msg_id, text, *, now=None):
         db.execute("BEGIN IMMEDIATE")
         matches = db.execute("""SELECT DISTINCT t.* FROM threads t
             JOIN messages m ON m.thread_id=t.id WHERE m.session=? AND m.role='bot'
-            AND m.msg_id IN (SELECT value FROM json_each(?)) AND t.owner=?
-            AND t.status='awaiting_clarification' AND t.deadline>?""",
-            (session, json.dumps(list(quote_ids)), owner, now)).fetchall()
+            AND m.msg_id IN (SELECT value FROM json_each(?)) AND t.owner=?""",
+            (session, json.dumps(list(quote_ids)), owner)).fetchall()
+        # Never silently route a multi-thread quote to the only still-waiting thread.
         if len(matches) != 1:
             return None
         t = matches[0]
+        if t["status"] != "awaiting_clarification" or t["deadline"] is None or t["deadline"] <= now:
+            return None
         old = db.execute("SELECT thread_id FROM messages WHERE session=? AND msg_id=?",
                          (session, msg_id)).fetchone()
         if old:
@@ -116,7 +118,8 @@ def accept_quoted_reply(session, owner, quote_ids, msg_id, text, *, now=None):
             supplements.append(text[:2000])
             db.execute("UPDATE thread_context SET supplements=? WHERE thread_id=?",
                        (json.dumps(supplements, ensure_ascii=False), t["id"]))
-        db.execute("UPDATE threads SET deadline=?, version=version+1 WHERE id=?", (now + 300, t["id"]))
+        # A valid clarification answer resumes planning; it is no longer waiting on the user.
+        db.execute("UPDATE threads SET status='planning', deadline=NULL, version=version+1 WHERE id=?", (t["id"],))
         return _dict(db.execute("SELECT * FROM threads WHERE id=?", (t["id"],)).fetchone())
 
 
