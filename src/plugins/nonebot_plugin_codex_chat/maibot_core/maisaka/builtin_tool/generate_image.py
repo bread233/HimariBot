@@ -15,6 +15,7 @@ from src.plugins.nonebot_plugin_codex_chat.image_generation import get_image_job
 from ..reply_target_guard import evaluate_runtime_target
 from ..image_clarification import load_image_clarification, _user_id as clarification_user_id
 from ..image_task_state import load_image_task, start_image_task, update_image_task
+from ..image_threads import thread_for_message, TERMINAL as IMAGE_THREAD_TERMINAL
 from .context import BuiltinToolRuntimeContext
 
 
@@ -143,8 +144,15 @@ async def handle_tool(
     if tool_ctx.runtime.chat_stream.platform != "onebot.v11":
         return validation_failure("当前仅支持 QQ 生图。")
     original_msg_id = message_id
+    image_thread = thread_for_message(tool_ctx.runtime.session_id, message_id)
+    if image_thread and (image_thread["status"] in IMAGE_THREAD_TERMINAL or image_thread["job_id"]):
+        return validation_failure("绘图 Thread 已结束或已提交，不能重复生成。")
+    if image_thread and image_thread["owner"] != clarification_user_id(target):
+        return validation_failure("绘图 Thread 所属用户不匹配。")
     active_ids = getattr(tool_ctx.runtime, "_active_reply_request_ids", set())
     if message_id not in active_ids:
+        if image_thread:
+            return validation_failure("请使用本轮属于该 Thread 的用户回复 msg_id，不能提交历史消息。")
         task = load_image_task(tool_ctx.runtime.session_id, clarification_user_id(target))
         candidates = []
         for msg in getattr(tool_ctx.runtime, "message_cache", ()):
@@ -171,7 +179,7 @@ async def handle_tool(
     if not guard.allowed:
         return validation_failure(f"生图请求目标已失效：{guard.reason}")
     current_task = load_image_task(tool_ctx.runtime.session_id, clarification_user_id(target))
-    if (current_task and not new_image_request and current_task.get("status") not in {"sent", "cancelled"}
+    if (not image_thread and current_task and not new_image_request and current_task.get("status") not in {"sent", "cancelled"}
             and current_task.get("original_msg_id") != original_msg_id
             and not ((clarification := load_image_clarification(tool_ctx.runtime.session_id, clarification_user_id(target)))
                      and clarification.get("original_msg_id") == current_task.get("original_msg_id")
@@ -185,11 +193,11 @@ async def handle_tool(
             "请使用本轮 msg_id 并设置 new_image_request=true；"
             "若是旧任务补充，请先确认仍处于待澄清状态。不要原样重试。",
         )
-    if (current_task and current_task.get("original_msg_id") == message_id
+    if (not image_thread and current_task and current_task.get("original_msg_id") == message_id
             and current_task.get("status") == "cancelled"):
         return validation_failure("绘图任务已取消，不能重新提交原请求。")
     clarification = load_image_clarification(tool_ctx.runtime.session_id, clarification_user_id(target))
-    if (clarification and not new_image_request and clarification.get("reference_required")
+    if (not image_thread and clarification and not new_image_request and clarification.get("reference_required")
             and str(clarification.get("original_msg_id")) != message_id
             and not reference_msg_id and not reference_url):
         rejected.add(validation_key)
@@ -218,7 +226,8 @@ async def handle_tool(
             rejected.add(failure_key)
             return tool_ctx.build_failure_result(invocation.tool_name, str(exc))
     try:
-        start_image_task(tool_ctx.runtime.session_id, target, new_request=new_image_request)
+        if not image_thread:
+            start_image_task(tool_ctx.runtime.session_id, target, new_request=new_image_request)
         job_id, created = submit_image_job(
             prompt, caption[:500], tool_ctx.runtime.session_id, target, True, reference_url,
             reference_image_bytes=reference_bytes,

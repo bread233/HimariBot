@@ -10,6 +10,7 @@ import asyncio
 import difflib
 import json
 import re
+import sqlite3
 import time
 import traceback
 import uuid
@@ -71,6 +72,16 @@ from .planner_message_utils import build_planner_user_prefix_from_session_messag
 from .visual_mode_utils import resolve_enable_visual_planner
 from src.plugins.nonebot_plugin_codex_chat.image_generation import get_image_job_status, image_request_claimed
 from .image_task_state import cancel_image_task, claim_image_resume, load_image_task, start_image_task, update_image_task
+from .image_threads import (
+    attach_message as attach_image_thread_message,
+    create_thread as create_image_thread,
+    accept_quoted_reply as accept_image_thread_reply,
+    record_question as record_image_thread_question,
+    thread_context as image_thread_context,
+    reply_target_ids as image_reply_target_ids,
+    thread_for_message as image_thread_for_message,
+    transition as transition_image_thread,
+)
 from .image_clarification import (
     clear_image_clarification,
     pending_clarification_for_message,
@@ -94,6 +105,7 @@ HISTORY_DEFERRED_TOOL_RESULT_NAMES = {"wait"}
 TOOL_RESULT_MEDIA_SOURCE_KIND = "tool_result_media"
 TOOL_RESULT_MEDIA_TYPES = {"image", "audio", "resource_link", "resource", "binary"}
 _IMAGE_REQUEST_PATTERN = re.compile(r"(?:画(?:一[个张幅只条]|个|张|幅|只|条|一下)|(?:帮我|给我|请你)画|绘制|生图|生成.{0,8}(?:图|图片|插画)|重画|改图)")
+_IMAGE_NEW_REQUEST_PATTERN = re.compile(r"(?:^|[，,。！？!?\s])(?:帮我|请|给我)?(?:画一[个张幅只条]|画张|绘制(?:一|个|张)|生成(?:一|张).{0,12}(?:图|图片)|生图[:：])")
 _IMAGE_CANCEL_PATTERN = re.compile(r"(?:不(?:用|要|想)画|别画|取消(?:绘图|画图|生图)|算了.{0,5}(?:不画|别画))")
 
 
@@ -196,6 +208,24 @@ class MaisakaReasoningEngine:
             if msg_id not in self._runtime._active_reply_request_ids:
                 continue
             uid = clarification_user_id(message)
+            # Index explicit QQ replies without altering the existing Planner behavior.
+            try:
+                content = getattr(message, "processed_plain_text", "") or ""
+                if _IMAGE_NEW_REQUEST_PATTERN.search(content):
+                    create_image_thread(self._runtime.session_id, uid, msg_id)
+                quoted = [accept_image_thread_reply(self._runtime.session_id, uid,
+                                                    image_reply_target_ids(message), msg_id, content)] if (
+                    image_reply_target_ids(message) and not _IMAGE_NEW_REQUEST_PATTERN.search(content)) else []
+
+
+                matched = {item["id"]: item for item in quoted if item}
+                if len(matched) == 1:
+                    thread = next(iter(matched.values()))
+                    logger.debug(f"{self._runtime.log_prefix} image_thread_reply_routed thread={thread['id']}")
+                elif not matched and not image_reply_target_ids(message) and _IMAGE_REQUEST_PATTERN.search(content):
+                    create_image_thread(self._runtime.session_id, uid, msg_id)
+            except (OSError, ValueError, sqlite3.Error) as exc:
+                logger.warning(f"{self._runtime.log_prefix} image_thread_route_failed msg_id={msg_id} error={exc}")
             task = load_image_task(self._runtime.session_id, uid)
             if task and task.get("status") in {"generating", "sending"} and task.get("submitted_msg_id"):
                 job = get_image_job_status(self._runtime.session_id, str(task["submitted_msg_id"]))
@@ -375,9 +405,19 @@ class MaisakaReasoningEngine:
             logger.debug(f"{self._runtime.log_prefix} 人物画像自动注入失败，已跳过: {exc}")
             profile_messages = []
         injected_messages.extend(profile_messages)
+        routed_thread = image_thread_for_message(self._runtime.session_id, str(anchor_message.message_id))
+        if routed_thread and routed_thread["status"] == "awaiting_clarification" and routed_thread["deadline"] > time.time():
+            injected_messages.append(
+                f"[精确绘图 Thread] thread_id={routed_thread['id']}；原始请求 msg_id={routed_thread['root']}。"
+                "只允许继续本 Thread，禁止合并同一用户的其他绘图请求。"
+                f" 原始描述、补充与追问：{image_thread_context(routed_thread['id'])!r}。"
+                "用户回复有效时使用本轮 msg_id 继续；不能使用其他 Thread 的澄清记录。"
+            )
         pending = pending_clarification_for_message(self._runtime, anchor_message)
+        if routed_thread or image_reply_target_ids(anchor_message):
+            pending = None  # Avoid mixing another thread's legacy user slot.
         task = load_image_task(self._runtime.session_id, clarification_user_id(anchor_message))
-        if (task and not pending and task.get("status") in {"planning", "searching", "awaiting_clarification", "failed", "send_failed"}
+        if (task and not routed_thread and not pending and task.get("status") in {"planning", "searching", "awaiting_clarification", "failed", "send_failed"}
                 and (task.get("original_msg_id") == str(anchor_message.message_id)
                      or re.search(r"(?:继续|接着|重新)(?:画|绘制|生图)", anchor_message.processed_plain_text or ""))):
             injected_messages.append(
@@ -2811,13 +2851,39 @@ class MaisakaReasoningEngine:
                     target = self._runtime.find_source_message_by_id(str(invocation.arguments.get("msg_id") or ""))
                     question = str((result.structured_content or {}).get("reply_text") or "")
                     try:
-                        if target is not None and invocation.arguments.get("image_clarification_new_request") is True:
+                        if (target is not None and invocation.arguments.get("image_clarification_new_request") is True
+                                and not image_thread_for_message(self._runtime.session_id, str(target.message_id))):
                             start_image_task(self._runtime.session_id, target, new_request=True)
-                        if target is not None and save_image_clarification(
+                        if target is not None and (thread := image_thread_for_message(
+                                self._runtime.session_id, str(target.message_id))):
+                            sent_ids = (result.metadata or {}).get("sent_message_ids") or []
+                            if sent_ids:
+                                record_image_thread_question(thread["id"], self._runtime.session_id,
+                                    clarification_user_id(target), sent_ids,
+                                    target.processed_plain_text or "", question)
+                        if target is not None and not image_thread_for_message(
+                                self._runtime.session_id, str(target.message_id)) and save_image_clarification(
                             self._runtime.session_id, target, question,
                             new_request=invocation.arguments.get("image_clarification_new_request") is True,
                         ):
                             update_image_task(self._runtime.session_id, clarification_user_id(target), "awaiting_clarification")
+                            # Persist the real bot question IDs for deterministic QQ reply routing.
+                            try:
+                                uid = clarification_user_id(target)
+                                thread = image_thread_for_message(self._runtime.session_id, str(target.message_id))
+                                if thread is None and (invocation.arguments.get("image_clarification_new_request") is True
+                                                       or _IMAGE_REQUEST_PATTERN.search(target.processed_plain_text or "")):
+                                    thread = create_image_thread(self._runtime.session_id, uid, str(target.message_id))
+                                sent_ids = (result.metadata or {}).get("sent_message_ids") or []
+                                if thread and sent_ids:
+                                    record_image_thread_question(thread["id"], self._runtime.session_id,
+                                                                 uid, sent_ids, target.processed_plain_text or "", question)
+
+
+
+
+                            except (OSError, ValueError, sqlite3.Error) as exc:
+                                logger.warning(f"{self._runtime.log_prefix} image_thread_question_index_failed error={exc}")
                             logger.info(f"{self._runtime.log_prefix} image_clarification_waiting user_id={clarification_user_id(target)}")
                     except (OSError, RuntimeError) as exc:
                         logger.warning(f"{self._runtime.log_prefix} image_clarification_save_failed: {exc}")
