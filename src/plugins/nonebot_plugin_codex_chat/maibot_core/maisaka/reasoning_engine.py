@@ -384,6 +384,8 @@ class MaisakaReasoningEngine:
                 "[持久绘图任务] 本用户仍有未完成的绘图任务；搜索、Planner 轮次结束或新消息不能视为完成。"
                 f"原始请求：{task['original_request']}；原始消息 ID：{task['original_msg_id']}；状态：{task['status']}。"
                 "请判断本轮消息是旧任务补充、取消、新的独立任务还是无关聊天；无关聊天正常回复，不要擅自重启旧图。"
+                "状态 failed/send_failed 的旧任务不等于待澄清任务；用户重新明确要求绘图时应以本轮 msg_id 作为独立新请求并设置 new_image_request=true。"
+                "参考图校验失败时不要原样重试，应说明参考消息缺少可验证的原始图片并请用户重新附图或明确引用。"
                 "指定已有作品角色且没有有效参考图时，优先一次 web_search(category=general) 核实视觉特征；已有搜索证据或搜索失败时直接 generate_image；普通题材无需搜索；"
                 "每个绘图请求最多搜索一次；搜索后直接提交 generate_image，身份仍有多个合理候选才 reply(image_clarification=true) 询问作品。"
                 + (f" 已执行搜索的结果（未经验证）：{task.get('search_evidence', '')}" if task.get("search_evidence") else "")
@@ -818,6 +820,7 @@ class MaisakaReasoningEngine:
                 if direct_anchor and is_active_direct_reply_target(self._runtime, direct_anchor):
                     anchor_message = direct_anchor
                 self._sync_image_tasks(cached_messages)
+                self._runtime._image_validation_failures = set()
                 self._pending_image_failure_ids.clear()
                 self._image_gate_override_count = 0
                 self._runtime._active_web_search_queries.clear()
@@ -835,6 +838,7 @@ class MaisakaReasoningEngine:
                             if pending_round_messages:
                                 await self._ingest_messages(pending_round_messages)
                                 self._pending_image_failure_ids.clear()  # 新请求取代旧轮次的待反馈失败
+                                self._runtime._image_validation_failures = set()
                                 self._image_gate_override_count = 0
                                 self._runtime._active_web_search_queries.clear()
                                 cached_messages = pending_round_messages
