@@ -51,7 +51,11 @@ async def _resolve_reference_image_bytes(runtime: object, target: object, refere
         data = load_sent_image_reference(session_id, clarification_user_id(target), reference_msg_id)
         if data is not None:
             return data
-        raise ValueError("参考消息必须恰好包含一张原始图片。")
+        raise ValueError(
+            f"参考消息必须恰好包含一张原始图片；消息 {reference_msg_id} 中可验证的数量为 {len(images)}。"
+            "请核对 reference_msg_id：新消息直接附图时使用本轮 msg_id；"
+            "引用旧图时使用明确引用的图片消息 ID。不要用同一错误参数重试。"
+        )
     image = images[0]
     if not image.binary_data:
         try:
@@ -79,7 +83,7 @@ def get_tool_spec() -> ToolSpec:
             "单独发送图片、仅说“这是参考图”或补充旧任务资料，不代表要求立即生图；不得把后续图片自动关联到已提交任务。"
             "修改旧图时，若用户在新消息中明确提出修改要求，必须使用该新消息的 msg_id 提交新任务，不能复用旧请求 msg_id；可参考引用消息理解需求。"
             "QQ 参考图使用 reference_msg_id（当前消息或明确引用的同会话消息）；修改上一张机器人生成图时必须引用该机器人图片消息并把其 ID 作为 reference_msg_id；验证后作为本次新任务的参考图传入 Codex。"
-            "参考图校验失败时必须解释原因或请用户重新提供图片，不得移除参考图参数改为纯文字生图。"
+            "参考图校验失败时必须解释原因或请用户重新提供图片，不得移除参考图参数改为纯文字生图；同一消息和 reference_msg_id 校验失败后不得原样重复调用。"
             "reference_image_url 仅接受已核实的公开 HTTPS 图片直链；未实际传入参考图不得声称已使用。"
             "指定作品角色先核实身份，优先 web_search 的 images 模式找可信官方角色立绘；身份已确认后不要反复搜索。必须将搜索中可靠核实的发型、发色、瞳色、服饰等视觉特征明确写入 prompt；未核实的特征不得猜测或称为官方设定。没有可信参考图或可核实的外貌资料时，不得假装已核实；可请用户提供参考图。若同一用户普通发言经 Planner 判断是旧绘图澄清的补充，合并原请求并使用当前消息有效 msg_id 提交，new_image_request=false；独立新绘图设 true。"
             "后台自动引用请求消息发图；同一 msg_id 只能提交一次，成功提交后不得额外 reply 或重复提交。"
@@ -114,19 +118,30 @@ async def handle_tool(
     reference_url = str(args.get("reference_image_url") or "").strip()
     reference_msg_id = str(args.get("reference_msg_id") or "").strip()
     new_image_request = args.get("new_image_request") is True
+    failure_key = (message_id, reference_msg_id, reference_url, new_image_request)
+    rejected = getattr(tool_ctx.runtime, "_image_validation_failures", None)
+    if rejected is None:
+        rejected = set()
+        tool_ctx.runtime._image_validation_failures = rejected
+    validation_key = (failure_key, prompt, caption)
+    if failure_key in rejected or validation_key in rejected:
+        return tool_ctx.build_failure_result(invocation.tool_name, "本轮相同生图参数已校验失败，请纠正参考图或任务类型，不要重复调用。")
+    def validation_failure(reason: str) -> ToolExecutionResult:
+        rejected.add(validation_key)
+        return tool_ctx.build_failure_result(invocation.tool_name, reason)
     if "reference_msg_id" in args and not reference_msg_id:
-        return tool_ctx.build_failure_result(invocation.tool_name, "参考图消息 ID 不能为空。")
+        return validation_failure("参考图消息 ID 不能为空。")
     if reference_msg_id and (len(reference_msg_id) > 128 or reference_url):
-        return tool_ctx.build_failure_result(invocation.tool_name, "参考图消息 ID 过长，或同时指定了两种参考图来源。")
+        return validation_failure("参考图消息 ID 过长，或同时指定了两种参考图来源。")
     if len(reference_url) > 2048:
-        return tool_ctx.build_failure_result(invocation.tool_name, "参考图 URL 过长。")
+        return validation_failure("参考图 URL 过长。")
     if not prompt or len(prompt) > 6000:
-        return tool_ctx.build_failure_result(invocation.tool_name, "生图提示词不能为空或超过 6000 字符。")
+        return validation_failure("生图提示词不能为空或超过 6000 字符。")
     target = tool_ctx.runtime.find_source_message_by_id(message_id)
     if target is None:
-        return tool_ctx.build_failure_result(invocation.tool_name, "找不到生图请求的原始消息。")
+        return validation_failure("找不到生图请求的原始消息。")
     if tool_ctx.runtime.chat_stream.platform != "onebot.v11":
-        return tool_ctx.build_failure_result(invocation.tool_name, "当前仅支持 QQ 生图。")
+        return validation_failure("当前仅支持 QQ 生图。")
     original_msg_id = message_id
     active_ids = getattr(tool_ctx.runtime, "_active_reply_request_ids", set())
     if message_id not in active_ids:
@@ -147,14 +162,14 @@ async def handle_tool(
                 or task.get("status") not in {"planning", "searching", "awaiting_clarification"}
                 or task.get("job_id") or (task.get("reference_required") and not (reference_msg_id or reference_url))
                 or len(candidates) != 1):
-            return tool_ctx.build_failure_result(invocation.tool_name, "生图请求不属于当前有效消息批次。")
+            return validation_failure("生图请求不属于当前有效消息批次。")
         target = candidates[0]
         message_id = str(target.message_id)
     guard = evaluate_runtime_target(
         tool_ctx.runtime, target, float(global_config.chat.reply_target_max_age_seconds), time.time(),
     )
     if not guard.allowed:
-        return tool_ctx.build_failure_result(invocation.tool_name, f"生图请求目标已失效：{guard.reason}")
+        return validation_failure(f"生图请求目标已失效：{guard.reason}")
     current_task = load_image_task(tool_ctx.runtime.session_id, clarification_user_id(target))
     if (current_task and not new_image_request and current_task.get("status") not in {"sent", "cancelled"}
             and current_task.get("original_msg_id") != original_msg_id
@@ -162,14 +177,22 @@ async def handle_tool(
                      and clarification.get("original_msg_id") == current_task.get("original_msg_id")
                      and current_task.get("status") in {"planning", "searching", "awaiting_clarification"}
                      and not current_task.get("job_id"))):
-        return tool_ctx.build_failure_result(invocation.tool_name, "已有另一条未完成绘图任务；新请求需设置 new_image_request。")
+        rejected.add(validation_key)
+        status = str(current_task.get("status") or "unknown")
+        return tool_ctx.build_failure_result(
+            invocation.tool_name,
+            f"已有另一条绘图任务（状态：{status}）；若本轮是独立的新绘图请求，"
+            "请使用本轮 msg_id 并设置 new_image_request=true；"
+            "若是旧任务补充，请先确认仍处于待澄清状态。不要原样重试。",
+        )
     if (current_task and current_task.get("original_msg_id") == message_id
             and current_task.get("status") == "cancelled"):
-        return tool_ctx.build_failure_result(invocation.tool_name, "绘图任务已取消，不能重新提交原请求。")
+        return validation_failure("绘图任务已取消，不能重新提交原请求。")
     clarification = load_image_clarification(tool_ctx.runtime.session_id, clarification_user_id(target))
     if (clarification and not new_image_request and clarification.get("reference_required")
             and str(clarification.get("original_msg_id")) != message_id
             and not reference_msg_id and not reference_url):
+        rejected.add(validation_key)
         return tool_ctx.build_failure_result(
             invocation.tool_name,
             "之前的绘图请求包含参考图。请用户在新消息里重新附图或明确引用原图，并传入 reference_msg_id；不得忽略参考图直接生图。",
@@ -183,6 +206,7 @@ async def handle_tool(
                 if source is not None and str(getattr(source, "session_id", "")) == tool_ctx.runtime.session_id:
                     sources.append(source)
         if any(isinstance(part, ImageComponent) for source in sources for part in source.raw_message.components):
+            rejected.add(validation_key)
             return tool_ctx.build_failure_result(
                 invocation.tool_name, "请求包含图片参考，请指定 reference_msg_id 或 reference_image_url，避免误作纯文字生图。",
             )
@@ -191,6 +215,7 @@ async def handle_tool(
         try:
             reference_bytes = await _resolve_reference_image_bytes(tool_ctx.runtime, target, reference_msg_id)
         except ValueError as exc:
+            rejected.add(failure_key)
             return tool_ctx.build_failure_result(invocation.tool_name, str(exc))
     try:
         start_image_task(tool_ctx.runtime.session_id, target, new_request=new_image_request)

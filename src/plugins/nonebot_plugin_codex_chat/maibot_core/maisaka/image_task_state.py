@@ -108,10 +108,10 @@ def start_image_task(session_id: str, message: Any, *, new_request: bool = False
     if not session_id or not uid or not msg_id:
         return None
     previous = load_image_task(session_id, uid)
-    if previous and previous.get("status") not in _TERMINAL and not new_request:
-        return previous
     if previous and previous.get("original_msg_id") == msg_id:
-        return previous
+        return previous  # Never resubmit an existing message, including a failed one.
+    if previous and not new_request and previous.get("status") not in _TERMINAL:
+        return previous  # Failed jobs require an explicit new request; active jobs remain independent.
     content = " ".join(
         str(getattr(part, "text", "") or "")
         for part in (getattr(getattr(message, "raw_message", None), "components", ()) or ())
