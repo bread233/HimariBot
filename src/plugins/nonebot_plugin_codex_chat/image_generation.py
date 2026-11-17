@@ -18,6 +18,11 @@ from src.plugins.nonebot_plugin_codex_chat.image_reference import download_refer
 from src.plugins.nonebot_plugin_codex_chat.maibot_core.maisaka.image_task_state import (
     image_task_cancelled, load_image_job, update_image_task, user_id as image_task_user_id,
 )
+from src.plugins.nonebot_plugin_codex_chat.maibot_core.maisaka.image_threads import (
+    advance_job as advance_image_thread_job, bind_job as bind_image_thread_job,
+    thread_for_message as image_thread_for_message,
+    thread_for_job as image_thread_for_job, job_can_run as image_thread_job_can_run,
+)
 from src.services import send_service
 
 logger = get_logger("maisaka_image_generation")
@@ -218,10 +223,12 @@ async def _generate_and_send(
     uid = image_task_user_id(target_message)
     try:
         async with _LIMIT:
-            if image_task_cancelled(session_id, uid, job_id):
+            if (image_task_cancelled(session_id, uid, job_id)
+                    or (image_thread_for_job(job_id) is not None and not image_thread_job_can_run(job_id))):
                 logger.info(f"generate_image job={job_id} cancelled_before_generation")
                 return
             update_image_task(session_id, uid, "generating", expected_job_id=job_id)
+            advance_image_thread_job(job_id, "generating")
             await asyncio.to_thread(job_dir.mkdir, parents=True, exist_ok=False)
             # 下次任务顺便清理强制退出遗留的旧参考图；当前任务最多运行约 5 分钟。
             code, _, stderr = await _run("docker", "exec", container, "find", "/tmp", "-maxdepth", "1",
@@ -268,14 +275,17 @@ async def _generate_and_send(
             width, height = struct.unpack(">II", image_bytes[16:24])
             if not 1 <= width <= 8192 or not 1 <= height <= 8192:
                 raise ValueError("PNG 尺寸不合法")
-            if image_task_cancelled(session_id, uid, job_id):
+            if (image_task_cancelled(session_id, uid, job_id)
+                    or (image_thread_for_job(job_id) is not None and not image_thread_job_can_run(job_id))):
                 logger.info(f"generate_image job={job_id} cancelled_before_send")
                 return
             components = ([TextComponent(caption)] if caption else []) + [
                 ImageComponent(binary_hash=hashlib.sha256(image_bytes).hexdigest(), binary_data=image_bytes)
             ]
             # Mark transport entry before sending; cancellation cannot recall an in-flight send.
-            transitioned = update_image_task(session_id, uid, "sending", expected_job_id=job_id)
+            bound_thread = image_thread_for_job(job_id)
+            transitioned = (advance_image_thread_job(job_id, "sending") if bound_thread else
+                            update_image_task(session_id, uid, "sending", expected_job_id=job_id))
             if transitioned is None:
                 logger.warning(f"generate_image job={job_id} stale_or_cancelled_at_send_boundary")
                 return
@@ -303,11 +313,13 @@ async def _generate_and_send(
                 "status": "sent" if sent else "send_failed", "created_at": time.time(),
             }
             update_image_task(session_id, uid, "sent" if sent else "send_failed", expected_job_id=job_id)
+            advance_image_thread_job(job_id, "sent" if sent else "send_failed")
             await asyncio.to_thread(
                 (job_dir / "metadata.json").write_text,
                 json.dumps(metadata, ensure_ascii=False, indent=2), "utf-8",
             )
     except Exception as exc:
+        advance_image_thread_job(job_id, "delivery_uncertain" if (job_dir / "send_started.json").exists() else "failed")
         update_image_task(
             session_id, uid, "delivery_uncertain" if (job_dir / "send_started.json").exists() else "failed",
             expected_job_id=job_id,
@@ -475,11 +487,13 @@ def submit_image_job(prompt: str, caption: str, session_id: str, target_message:
             raise RuntimeError("生图队列已满，请稍后再试")
         # Persist the job binding before scheduling its coroutine. No await occurs
         # between registration and create_task, so the worker cannot overtake it.
-        registered = update_image_task(
-            session_id, image_task_user_id(target_message), "queued",
-            job_id=job_id, submitted_msg_id=source_id,
-            expected_original_msg_id=source_id,
-        )
+        thread = image_thread_for_message(session_id, source_id)
+        registered = (bind_image_thread_job(thread["id"], job_id) if thread else
+                      update_image_task(
+                          session_id, image_task_user_id(target_message), "queued",
+                          job_id=job_id, submitted_msg_id=source_id,
+                          expected_original_msg_id=source_id,
+                      ))
         if registered is None:
             (claim / "job.json").unlink()
             claim.rmdir()

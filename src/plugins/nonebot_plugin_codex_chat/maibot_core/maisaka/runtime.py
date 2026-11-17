@@ -58,6 +58,7 @@ from .history_utils import drop_leading_orphan_tool_results
 from .monitor_events import emit_message_sent, emit_session_start
 from .reasoning_engine import MaisakaReasoningEngine, _IMAGE_REQUEST_PATTERN, _IMAGE_CANCEL_PATTERN
 from .image_task_state import image_resume_claimed, load_image_task, update_image_task, user_id as image_task_user_id
+from .image_threads import expire_due_threads, claim_timeout_notice, complete_timeout_notice
 from .reply_target_guard import evaluate_reply_target
 from .reply_effect import ReplyEffectTracker
 from .reply_effect.image_utils import extract_visual_attachments_from_sequence
@@ -119,6 +120,7 @@ class MaisakaHeartFlowChatting:
         self._talk_frequency_adjust = 1.0
         self._recent_external_message_intervals: deque[tuple[float, float]] = deque()
         self._wait_timeout_task: Optional[asyncio.Task[None]] = None
+        self._image_thread_timeout_task: Optional[asyncio.Task[None]] = None
         self._max_internal_rounds = MAX_INTERNAL_ROUNDS
         self._agent_state: Literal["running", "wait", "stop"] = self._STATE_STOP
         self._pending_wait_tool_call_id: Optional[str] = None
@@ -235,11 +237,43 @@ class MaisakaHeartFlowChatting:
 
         await self._restore_recent_context_from_db()
         self._running = True
+        self._image_thread_timeout_task = asyncio.create_task(self._scan_image_thread_timeouts())
         self._ensure_background_tasks_running()
         self._schedule_message_turn()
         self._schedule_image_resume()
         self._update_stage_status("空闲", "等待消息触发")
         logger.info(f"{self.log_prefix} Himari 运行时已启动")
+
+    async def _scan_image_thread_timeouts(self) -> None:
+        """Restore overdue clarifications and deliver at most one notice attempt."""
+        from src.services import send_service
+
+        while self._running:
+            try:
+                await asyncio.to_thread(expire_due_threads)
+                while self._running:
+                    notice = await asyncio.to_thread(claim_timeout_notice, self.session_id)
+                    if notice is None:
+                        break
+                    sent = False
+                    try:
+                        sent = bool(await send_service._send_to_target_with_message(
+                            message_sequence=MessageSequence([TextComponent(
+                                f"绘图请求（消息 {notice['root']}）等待补充信息超过5分钟，已自动结束。"
+                                "如仍需绘图，请发送新的请求。")]),
+                            stream_id=self.session_id,
+                            processed_plain_text="绘图澄清超时",
+                            set_reply=False,
+                            typing=False,
+                            sync_to_maisaka_history=True,
+                        ))
+                    finally:
+                        await asyncio.to_thread(complete_timeout_notice, notice["thread_id"], sent)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("%s 绘图澄清超时扫描失败: %s", self.log_prefix, exc)
+            await asyncio.sleep(10)
 
     async def _restore_recent_context_from_db(self) -> None:
         """启动时从消息库恢复最近上下文，避免重启后丢失短期对话窗口。"""
@@ -321,6 +355,13 @@ class MaisakaHeartFlowChatting:
         self._image_resume_queued = False
         self._cancel_deferred_message_turn_task()
         self._cancel_wait_timeout_task()
+        if self._image_thread_timeout_task is not None:
+            self._image_thread_timeout_task.cancel()
+            try:
+                await self._image_thread_timeout_task
+            except asyncio.CancelledError:
+                pass
+            self._image_thread_timeout_task = None
         while not self._internal_turn_queue.empty():
             _ = self._internal_turn_queue.get_nowait()
 
