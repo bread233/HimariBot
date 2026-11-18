@@ -72,6 +72,7 @@ from .planner_message_utils import build_planner_user_prefix_from_session_messag
 from .visual_mode_utils import resolve_enable_visual_planner
 from src.plugins.nonebot_plugin_codex_chat.image_generation import get_image_job_status, image_request_claimed
 from .image_task_state import cancel_image_task, claim_image_resume, load_image_task, start_image_task, update_image_task
+from .image_authorization import validate_image_request_authorization
 from .image_threads import (
     attach_message as attach_image_thread_message,
     create_thread as create_image_thread,
@@ -210,6 +211,13 @@ class MaisakaReasoningEngine:
         for message in messages:
             msg_id = str(getattr(message, "message_id", "") or "")
             if msg_id not in self._runtime._active_reply_request_ids:
+                continue
+            if not validate_image_request_authorization(
+                self._runtime, message,
+                thread=(image_thread_for_message(self._runtime.session_id, msg_id)
+                        or next((t for quoted_id in image_reply_target_ids(message)
+                                 if (t := image_thread_for_message(self._runtime.session_id, quoted_id))), None)),
+            ):
                 continue
             uid = clarification_user_id(message)
             # Index explicit QQ replies without altering the existing Planner behavior.
@@ -604,7 +612,11 @@ class MaisakaReasoningEngine:
                 if message.source != TIMING_GATE_INVALID_TOOL_HINT_SOURCE
             ]
 
-        if selected_tool_call.func_name == "no_action" and self._image_gate_override_count < 1:
+        if (selected_tool_call.func_name == "no_action" and self._image_gate_override_count < 1
+                and validate_image_request_authorization(
+                    self._runtime, anchor_message,
+                    thread=image_thread_for_message(self._runtime.session_id, str(anchor_message.message_id)),
+                )):
             clarification = pending_clarification_for_message(self._runtime, anchor_message)
             if (clarification and (getattr(anchor_message, "is_at", False)
                                    or getattr(anchor_message, "is_mentioned", False))):
@@ -2486,6 +2498,11 @@ class MaisakaReasoningEngine:
                 target = self._runtime.find_source_message_by_id(msg_id)
                 if target is None:
                     continue
+                if not validate_image_request_authorization(
+                    self._runtime, target,
+                    thread=image_thread_for_message(self._runtime.session_id, msg_id),
+                ):
+                    continue
                 guard = evaluate_runtime_target(
                     self._runtime, target,
                     float(global_config.chat.reply_target_max_age_seconds), time.time(),
@@ -2842,7 +2859,12 @@ class MaisakaReasoningEngine:
                     if target is not None:
                         clear_image_clarification(self._runtime.session_id, clarification_user_id(target))
                 elif image_target_id in self._runtime._active_reply_request_ids:
-                    self._pending_image_failure_ids.add(image_target_id)
+                    failed_target = self._runtime.find_source_message_by_id(image_target_id)
+                    if validate_image_request_authorization(
+                        self._runtime, failed_target,
+                        thread=image_thread_for_message(self._runtime.session_id, image_target_id),
+                    ):
+                        self._pending_image_failure_ids.add(image_target_id)
 
             if not result.success and tool_call.func_name == "reply":
                 logger.warning(f"{self._runtime.log_prefix} 回复工具未生成可见消息，将继续下一轮循环")
