@@ -16,6 +16,7 @@ from ..reply_target_guard import evaluate_runtime_target
 from ..image_clarification import load_image_clarification, _user_id as clarification_user_id
 from ..image_task_state import load_image_task, start_image_task, update_image_task
 from ..image_threads import thread_for_message, TERMINAL as IMAGE_THREAD_TERMINAL
+from ..image_authorization import validate_image_request_authorization
 from .context import BuiltinToolRuntimeContext
 
 
@@ -145,6 +146,8 @@ async def handle_tool(
         return validation_failure("当前仅支持 QQ 生图。")
     original_msg_id = message_id
     image_thread = thread_for_message(tool_ctx.runtime.session_id, message_id)
+    if not validate_image_request_authorization(tool_ctx.runtime, target, thread=image_thread):
+        return validation_failure("绘图请求未明确发给当前机器人，拒绝提交任务。")
     if image_thread and (image_thread["status"] in IMAGE_THREAD_TERMINAL or image_thread["job_id"]):
         return validation_failure("绘图 Thread 已结束或已提交，不能重复生成。")
     if image_thread and image_thread["owner"] != clarification_user_id(target):
